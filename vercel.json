@@ -1,0 +1,13 @@
+{
+  "buildCommand": "cd prestashop-products-app && npm install && npm run build",
+  "outputDirectory": "prestashop-products-app/dist",
+  "framework": "vite",
+  "installCommand": "cd prestashop-products-app && npm install",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
+
