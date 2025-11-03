@@ -74,7 +74,7 @@ class PrestaShopService
         $categoryCache = [];
 
         foreach ($response['products'] as $product) {
-            $products[] = $this->mapProduct($product, $baseUrl, $categoryCache);
+            $products[] = $this->mapProduct($product, $baseUrl, $apiKey, $categoryCache);
         }
 
         return [
@@ -87,14 +87,14 @@ class PrestaShopService
     /**
      * Mapea un producto de PrestaShop
      */
-    protected function mapProduct(array $product, string $baseUrl, array &$categoryCache): array
+    protected function mapProduct(array $product, string $baseUrl, string $apiKey, array &$categoryCache): array
     {
         $name = $this->extractMultilanguageValue($product['name'] ?? '');
         $description = $this->extractMultilanguageValue($product['description_short'] ?? '');
 
         $category = '';
         if (!empty($product['id_category_default'])) {
-            $category = $this->getCategoryName($baseUrl, $product['id_category_default'], $categoryCache);
+            $category = $this->getCategoryName($baseUrl, $apiKey, $product['id_category_default'], $categoryCache);
         }
 
         $linkRewrite = $this->extractMultilanguageValue($product['link_rewrite'] ?? '');
@@ -159,7 +159,7 @@ class PrestaShopService
     /**
      * Obtiene el nombre de una categoría
      */
-    protected function getCategoryName(string $baseUrl, int $categoryId, array &$cache): string
+    protected function getCategoryName(string $baseUrl, string $apiKey, int $categoryId, array &$cache): string
     {
         if (empty($categoryId)) {
             return '';
@@ -170,7 +170,7 @@ class PrestaShopService
         }
 
         try {
-            $response = $this->makeRequest($baseUrl, session('api_key'), "categories/{$categoryId}", [
+            $response = $this->makeRequest($baseUrl, $apiKey, "categories/{$categoryId}", [
                 'language' => 1,
             ]);
 

@@ -10,7 +10,7 @@ Route::get('/auth/check', [AuthController::class, 'check']);
 Route::post('/auth/logout', [AuthController::class, 'logout']);
 
 // Rutas de productos (requieren autenticación)
-Route::middleware('auth.session')->group(function () {
+Route::middleware(['auth.session'])->group(function () {
     Route::get('/products/fetch', [ProductController::class, 'fetchProducts']);
     Route::get('/products/progress', [ProductController::class, 'getProgress']);
     Route::get('/products/all', [ProductController::class, 'getAllProducts']);
