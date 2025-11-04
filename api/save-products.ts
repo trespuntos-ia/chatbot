@@ -60,29 +60,74 @@ export default async function handler(
       updated_at: new Date().toISOString(),
     }));
 
-    // Insertar/actualizar productos usando upsert (basado en SKU)
-    const { data, error } = await supabase
+    // Verificar primero si la tabla existe
+    const { data: tableCheck, error: tableError } = await supabase
       .from('products')
-      .upsert(productsToInsert, {
-        onConflict: 'sku',
-        ignoreDuplicates: false,
-      })
-      .select();
+      .select('id')
+      .limit(1);
 
-    if (error) {
-      console.error('Supabase error:', error);
+    if (tableError && tableError.code === '42P01') {
       res.status(500).json({ 
-        error: 'Error saving products to database',
-        details: error.message 
+        error: 'Tabla no encontrada',
+        details: 'La tabla "products" no existe. Por favor ejecuta el script SQL en Supabase (supabase-schema.sql)',
+        code: 'TABLE_NOT_FOUND'
       });
       return;
     }
 
+    // Insertar/actualizar productos usando upsert (basado en SKU)
+    // Procesar en lotes para evitar límites de tamaño
+    const batchSize = 100;
+    let totalSaved = 0;
+    const errors: any[] = [];
+
+    for (let i = 0; i < productsToInsert.length; i += batchSize) {
+      const batch = productsToInsert.slice(i, i + batchSize);
+      
+      const { data, error } = await supabase
+        .from('products')
+        .upsert(batch, {
+          onConflict: 'sku',
+          ignoreDuplicates: false,
+        })
+        .select();
+
+      if (error) {
+        console.error('Supabase error (batch):', error);
+        errors.push({
+          batch: Math.floor(i / batchSize) + 1,
+          error: error.message,
+          code: error.code,
+          details: error.details
+        });
+      } else {
+        totalSaved += data?.length || 0;
+      }
+    }
+
+    if (errors.length > 0 && totalSaved === 0) {
+      res.status(500).json({ 
+        error: 'Error saving products to database',
+        details: errors[0].error,
+        code: errors[0].code,
+        hint: errors[0].code === '42501' ? 'Problema de permisos. Verifica las políticas RLS en Supabase.' : 
+              errors[0].code === '42P01' ? 'Tabla no encontrada. Ejecuta el script SQL.' : 
+              'Revisa los logs de Supabase para más detalles',
+        errors: errors
+      });
+      return;
+    }
+
+    const successMessage = errors.length > 0 
+      ? `Guardados ${totalSaved} de ${products.length} productos (${errors.length} errores)`
+      : `Successfully saved ${totalSaved} of ${products.length} products`;
+
     res.status(200).json({ 
       success: true,
-      message: `Successfully saved ${data?.length || products.length} products`,
-      saved: data?.length || products.length,
-      total: products.length
+      message: successMessage,
+      saved: totalSaved,
+      total: products.length,
+      errors: errors.length > 0 ? errors.length : undefined
     });
   } catch (error) {
     console.error('Save products error:', error);
