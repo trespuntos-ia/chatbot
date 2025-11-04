@@ -9,6 +9,8 @@ interface ProductTableProps {
 export function ProductTable({ products }: ProductTableProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
   const itemsPerPage = 25;
 
   const filteredProducts = products.filter(product =>
@@ -30,6 +32,45 @@ export function ProductTable({ products }: ProductTableProps) {
     exportToJSON(products);
   };
 
+  const handleSaveToDatabase = async () => {
+    if (products.length === 0) {
+      setSaveStatus({ type: 'error', message: 'No hay productos para guardar' });
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus({ type: null, message: '' });
+
+    try {
+      const response = await fetch('/api/save-products', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ products }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Error al guardar productos');
+      }
+
+      setSaveStatus({ 
+        type: 'success', 
+        message: `¡Éxito! Se guardaron ${data.saved} productos en la base de datos.` 
+      });
+    } catch (error) {
+      console.error('Error saving products:', error);
+      setSaveStatus({ 
+        type: 'error', 
+        message: error instanceof Error ? error.message : 'Error desconocido al guardar productos' 
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header con estadísticas y botones de exportación */}
@@ -44,7 +85,40 @@ export function ProductTable({ products }: ProductTableProps) {
               : 'Todos los productos'}
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={handleSaveToDatabase}
+            disabled={isSaving || products.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSaving ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Guardando...
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
+                Guardar en Base de Datos
+              </>
+            )}
+          </button>
           <button
             onClick={handleExportCSV}
             className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition font-medium text-sm"
@@ -87,6 +161,28 @@ export function ProductTable({ products }: ProductTableProps) {
           </button>
         </div>
       </div>
+
+      {/* Mensaje de estado de guardado */}
+      {saveStatus.type && (
+        <div className={`rounded-lg p-4 ${
+          saveStatus.type === 'success' 
+            ? 'bg-green-50 border border-green-200 text-green-800' 
+            : 'bg-red-50 border border-red-200 text-red-800'
+        }`}>
+          <div className="flex items-center gap-2">
+            {saveStatus.type === 'success' ? (
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+            )}
+            <span className="font-medium">{saveStatus.message}</span>
+          </div>
+        </div>
+      )}
 
       {/* Barra de búsqueda */}
       <div className="relative">
