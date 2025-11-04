@@ -208,7 +208,6 @@ export default async function handler(
       const functionName = toolCall.function.name;
       let functionArgs: any;
 
-      let functionArgs: any;
       try {
         functionArgs = JSON.parse(toolCall.function.arguments);
       } catch (e) {
