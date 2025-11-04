@@ -2,11 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import type { Document } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configurar worker para pdf.js usando el worker del paquete npm
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.js',
-  import.meta.url
-).toString();
+// Configurar worker para pdf.js usando unpkg CDN (más confiable)
+if (typeof window !== 'undefined') {
+  const version = pdfjsLib.version || '4.0.379';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+}
 
 const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
 
