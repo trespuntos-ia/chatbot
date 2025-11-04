@@ -280,13 +280,14 @@ async function searchProducts(supabase: any, params: any) {
   // Seleccionar solo campos necesarios (no todos los campos)
   let query = supabase
     .from('products')
-    .select('id, name, price, category, subcategory, sku, product_url', { count: 'exact' });
+    .select('id, name, price, category, subcategory, sku, description, product_url', { count: 'exact' });
 
-  // Búsqueda por texto (optimizada con índices)
+  // Búsqueda por texto (optimizada con índices - incluye description)
   if (params.query && typeof params.query === 'string') {
     const searchTerm = params.query.trim();
     if (searchTerm.length > 0) {
-      query = query.or(`name.ilike.%${searchTerm}%,sku.ilike.%${searchTerm}%`);
+      // Buscar en nombre, descripción y SKU (como antes)
+      query = query.or(`name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%,sku.ilike.%${searchTerm}%`);
     }
   }
 
