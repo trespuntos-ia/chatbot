@@ -101,7 +101,10 @@ export default async function handler(
       variables: activePrompts.prompt_variables || []
     });
 
-    // 3. Definir funciones disponibles para Function Calling
+    // 3. Limitar historial de conversación (últimos 10 mensajes para evitar tokens innecesarios)
+    const limitedHistory = conversationHistory.slice(-10);
+
+    // 4. Definir funciones disponibles para Function Calling
     const functions = [
       {
         name: 'search_products',
@@ -154,19 +157,19 @@ export default async function handler(
       }
     ];
 
-    // 4. Preparar mensajes para OpenAI
+    // 5. Preparar mensajes para OpenAI (con historial limitado)
     const messages: any[] = [
       { role: 'system', content: systemPrompt },
-      ...conversationHistory,
+      ...limitedHistory,
       { role: 'user', content: message }
     ];
 
-    // 5. Configuración de OpenAI
-    const model = config.model || 'gpt-4';
+    // 6. Configuración de OpenAI
+    const model = config.model || 'gpt-3.5-turbo'; // Por defecto más rápido
     const temperature = config.temperature !== undefined ? config.temperature : 0.7;
-    const maxTokens = config.max_tokens || 2000;
+    const maxTokens = config.max_tokens || 1500; // Reducido para respuestas más rápidas
 
-    // 6. Llamar a OpenAI
+    // 7. Llamar a OpenAI
     const completion = await openai.chat.completions.create({
       model,
       temperature,
@@ -181,7 +184,7 @@ export default async function handler(
 
     const responseMessage = completion.choices[0].message;
 
-    // 7. Si OpenAI llamó a una función
+    // 8. Si OpenAI llamó a una función
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
       const toolCall = responseMessage.tool_calls[0];
       const functionName = toolCall.function.name;
@@ -215,7 +218,7 @@ export default async function handler(
           return;
       }
 
-      // 8. Enviar resultados de vuelta a OpenAI
+      // 9. Enviar resultados de vuelta a OpenAI
       const secondCompletion = await openai.chat.completions.create({
         model,
         temperature,
@@ -250,7 +253,7 @@ export default async function handler(
         ]
       });
     } else {
-      // 9. Respuesta directa (sin función)
+      // 10. Respuesta directa (sin función)
       const response = responseMessage.content || '';
 
       res.status(200).json({
@@ -272,26 +275,32 @@ export default async function handler(
   }
 }
 
-// Función para buscar productos
+// Función para buscar productos (optimizada)
 async function searchProducts(supabase: any, params: any) {
-  let query = supabase.from('products').select('*', { count: 'exact' });
+  // Seleccionar solo campos necesarios (no todos los campos)
+  let query = supabase
+    .from('products')
+    .select('id, name, price, category, subcategory, sku, product_url', { count: 'exact' });
 
-  // Búsqueda por texto
+  // Búsqueda por texto (optimizada con índices)
   if (params.query && typeof params.query === 'string') {
-    query = query.or(`name.ilike.%${params.query}%,description.ilike.%${params.query}%,sku.ilike.%${params.query}%`);
+    const searchTerm = params.query.trim();
+    if (searchTerm.length > 0) {
+      query = query.or(`name.ilike.%${searchTerm}%,sku.ilike.%${searchTerm}%`);
+    }
   }
 
-  // Filtrar por categoría
+  // Filtrar por categoría (usa índice)
   if (params.category && typeof params.category === 'string') {
     query = query.ilike('category', `%${params.category}%`);
   }
 
-  // Filtrar por subcategoría
+  // Filtrar por subcategoría (usa índice)
   if (params.subcategory && typeof params.subcategory === 'string') {
     query = query.ilike('subcategory', `%${params.subcategory}%`);
   }
 
-  // Ordenar
+  // Ordenar (usa índices cuando es posible)
   if (params.sort_by === 'date_add') {
     query = query.order('date_add', { ascending: false });
   } else if (params.sort_by === 'created_at') {
@@ -300,8 +309,8 @@ async function searchProducts(supabase: any, params: any) {
     query = query.order('name', { ascending: true });
   }
 
-  // Límite
-  const limit = Math.min(params.limit || 20, 50);
+  // Límite reducido por defecto (más rápido)
+  const limit = Math.min(params.limit || 15, 30); // Reducido de 20 a 15, máx de 50 a 30
   query = query.limit(limit);
 
   // Offset
@@ -333,11 +342,12 @@ async function searchProducts(supabase: any, params: any) {
   };
 }
 
-// Función para obtener producto por SKU
+// Función para obtener producto por SKU (optimizada)
 async function getProductBySku(supabase: any, params: any) {
+  // Seleccionar solo campos necesarios
   const { data, error } = await supabase
     .from('products')
-    .select('*')
+    .select('id, name, price, category, subcategory, sku, description, product_url, image_url')
     .ilike('sku', `%${params.sku}%`)
     .limit(1)
     .single();

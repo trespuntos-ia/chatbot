@@ -10,6 +10,7 @@ export function Chat({ config }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStage, setLoadingStage] = useState<string>('');
   const [error, setError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -35,17 +36,26 @@ export function Chat({ config }: ChatProps) {
     setInputMessage('');
     setIsLoading(true);
     setError('');
+    setLoadingStage('Analizando tu pregunta...');
 
     try {
       // Preparar historial de conversación (sin system messages)
       const conversationHistory = messages.filter(m => m.role !== 'system');
 
       // Enviar mensaje
+      setLoadingStage('Consultando con OpenAI...');
       const response = await sendChatMessage(
         inputMessage.trim(),
         conversationHistory,
         config
       );
+
+      if (response.function_called) {
+        setLoadingStage('Consultando base de datos...');
+        // Pequeña pausa para mostrar el cambio de estado
+        await new Promise(resolve => setTimeout(resolve, 100));
+        setLoadingStage('Generando respuesta...');
+      }
 
       if (response.success && response.conversation_history) {
         // Actualizar mensajes con el historial completo
@@ -62,6 +72,7 @@ export function Chat({ config }: ChatProps) {
       }]);
     } finally {
       setIsLoading(false);
+      setLoadingStage('');
     }
   };
 
@@ -169,7 +180,9 @@ export function Chat({ config }: ChatProps) {
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   ></path>
                 </svg>
-                <span className="text-sm text-slate-600">Pensando...</span>
+                <span className="text-sm text-slate-600">
+                  {loadingStage || 'Pensando...'}
+                </span>
               </div>
             </div>
           </div>
