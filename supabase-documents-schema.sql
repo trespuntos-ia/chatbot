@@ -1,3 +1,12 @@
+-- Eliminar políticas existentes si las hay (para hacer el script idempotente)
+DROP POLICY IF EXISTS "Allow public read access" ON documents;
+DROP POLICY IF EXISTS "Allow public insert access" ON documents;
+DROP POLICY IF EXISTS "Allow public update access" ON documents;
+DROP POLICY IF EXISTS "Allow public delete access" ON documents;
+
+-- Desactivar RLS temporalmente si ya está activado
+ALTER TABLE IF EXISTS documents DISABLE ROW LEVEL SECURITY;
+
 -- Tabla para almacenar documentos subidos
 CREATE TABLE IF NOT EXISTS documents (
   id BIGSERIAL PRIMARY KEY,
@@ -12,16 +21,21 @@ CREATE TABLE IF NOT EXISTS documents (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
 );
 
+-- Eliminar índices si existen (para hacer el script idempotente)
+DROP INDEX IF EXISTS idx_documents_filename;
+DROP INDEX IF EXISTS idx_documents_extracted_text;
+DROP INDEX IF EXISTS idx_documents_file_type;
+
 -- Índice para búsquedas por nombre de archivo
-CREATE INDEX IF NOT EXISTS idx_documents_filename ON documents(filename);
+CREATE INDEX idx_documents_filename ON documents(filename);
 
 -- Índice para búsquedas de texto completo en el contenido extraído
-CREATE INDEX IF NOT EXISTS idx_documents_extracted_text ON documents USING gin(to_tsvector('spanish', COALESCE(extracted_text, '')));
+CREATE INDEX idx_documents_extracted_text ON documents USING gin(to_tsvector('spanish', COALESCE(extracted_text, '')));
 
 -- Índice para búsquedas por tipo de archivo
-CREATE INDEX IF NOT EXISTS idx_documents_file_type ON documents(file_type);
+CREATE INDEX idx_documents_file_type ON documents(file_type);
 
--- Función para actualizar updated_at automáticamente
+-- Función para actualizar updated_at automáticamente (idempotente)
 CREATE OR REPLACE FUNCTION update_documents_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -30,7 +44,8 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Trigger para actualizar updated_at
+-- Trigger para actualizar updated_at (idempotente - elimina si existe primero)
+DROP TRIGGER IF EXISTS update_documents_updated_at ON documents;
 CREATE TRIGGER update_documents_updated_at 
   BEFORE UPDATE ON documents 
   FOR EACH ROW 
