@@ -29,8 +29,16 @@ export default async function handler(
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
+      console.error('Supabase configuration missing:', {
+        hasUrl: !!supabaseUrl,
+        hasKey: !!supabaseKey,
+        urlLength: supabaseUrl?.length || 0,
+        keyLength: supabaseKey?.length || 0
+      });
       res.status(500).json({ 
-        error: 'Supabase configuration missing' 
+        error: 'Supabase configuration missing',
+        details: 'Please configure SUPABASE_URL and SUPABASE_ANON_KEY in Vercel environment variables',
+        hint: 'See VERCEL_ENV_SETUP.md for instructions'
       });
       return;
     }
@@ -64,10 +72,33 @@ export default async function handler(
     const { data, error, count } = await query;
 
     if (error) {
-      console.error('Supabase error:', error);
+      console.error('Supabase error:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
+      
+      // Detectar errores comunes
+      let errorMessage = 'Error fetching products';
+      let details = error.message;
+      
+      if (error.code === 'PGRST116') {
+        errorMessage = 'Table not found';
+        details = 'The products table does not exist. Please run the supabase-schema.sql script in Supabase.';
+      } else if (error.code === '42501') {
+        errorMessage = 'Permission denied';
+        details = 'RLS (Row Level Security) policies may be blocking access. Check your Supabase RLS policies.';
+      } else if (error.message?.includes('relation') && error.message?.includes('does not exist')) {
+        errorMessage = 'Table does not exist';
+        details = 'The products table has not been created. Please run supabase-schema.sql in Supabase SQL Editor.';
+      }
+      
       res.status(500).json({ 
-        error: 'Error fetching products',
-        details: error.message 
+        error: errorMessage,
+        details: details,
+        code: error.code,
+        hint: error.hint
       });
       return;
     }

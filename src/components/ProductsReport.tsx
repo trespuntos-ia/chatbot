@@ -58,7 +58,15 @@ export function ProductsReport() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Error al obtener productos');
+        // Mostrar mensaje de error más detallado
+        let errorMessage = data.error || 'Error al obtener productos';
+        if (data.details) {
+          errorMessage += `: ${data.details}`;
+        }
+        if (data.hint) {
+          errorMessage += ` (${data.hint})`;
+        }
+        throw new Error(errorMessage);
       }
 
       // Los productos ya vienen con image_url desde Supabase
