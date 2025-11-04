@@ -241,6 +241,13 @@ export default async function handler(
 
       const finalMessage = secondCompletion.choices[0].message.content;
 
+      // Preparar mensaje del asistente con productos si existen
+      const assistantMessage: any = {
+        role: 'assistant',
+        content: finalMessage,
+        function_calls: [toolCall]
+      };
+
       res.status(200).json({
         success: true,
         message: finalMessage,
@@ -249,7 +256,7 @@ export default async function handler(
         conversation_history: [
           ...conversationHistory,
           { role: 'user', content: message },
-          { role: 'assistant', content: finalMessage, function_calls: [toolCall] }
+          assistantMessage
         ]
       });
     } else {
@@ -277,10 +284,10 @@ export default async function handler(
 
 // Función para buscar productos (optimizada)
 async function searchProducts(supabase: any, params: any) {
-  // Seleccionar solo campos necesarios (no todos los campos)
+  // Seleccionar solo campos necesarios (incluyendo imagen)
   let query = supabase
     .from('products')
-    .select('id, name, price, category, subcategory, sku, description, product_url', { count: 'exact' });
+    .select('id, name, price, category, subcategory, sku, description, image_url, product_url, date_add', { count: 'exact' });
 
   // Búsqueda por texto (optimizada con índices - incluye description)
   if (params.query && typeof params.query === 'string') {
@@ -335,8 +342,14 @@ async function searchProducts(supabase: any, params: any) {
     });
   }
 
+  // Mapear image_url a image para compatibilidad con el frontend
+  const mappedProducts = sortedData.map((product: any) => ({
+    ...product,
+    image: product.image_url || product.image || ''
+  }));
+
   return {
-    products: sortedData,
+    products: mappedProducts,
     total: count || sortedData.length,
     limit,
     offset: params.offset || 0
@@ -348,7 +361,7 @@ async function getProductBySku(supabase: any, params: any) {
   // Seleccionar solo campos necesarios
   const { data, error } = await supabase
     .from('products')
-    .select('id, name, price, category, subcategory, sku, description, product_url, image_url')
+    .select('id, name, price, category, subcategory, sku, description, product_url, image_url, date_add')
     .ilike('sku', `%${params.sku}%`)
     .limit(1)
     .single();
@@ -360,8 +373,14 @@ async function getProductBySku(supabase: any, params: any) {
     throw new Error(`Supabase error: ${error.message}`);
   }
 
+  // Mapear image_url a image para compatibilidad
+  const mappedProduct = data ? {
+    ...data,
+    image: data.image_url || data.image || ''
+  } : null;
+
   return {
-    product: data,
+    product: mappedProduct,
     found: !!data
   };
 }

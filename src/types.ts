@@ -49,6 +49,7 @@ export interface ChatMessage {
   content: string;
   function_calls?: any[];
   function_result?: any;
+  products?: Product[]; // Productos encontrados en esta respuesta
 }
 
 export interface ChatConfig {

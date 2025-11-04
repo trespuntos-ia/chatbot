@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { sendChatMessage } from '../services/chatService';
-import type { ChatMessage, ChatConfig } from '../types';
+import { ProductCard } from './ProductCard';
+import type { ChatMessage, ChatConfig, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
@@ -58,6 +59,25 @@ export function Chat({ config }: ChatProps) {
       }
 
       if (response.success && response.conversation_history) {
+        // Extraer productos de la respuesta si existen
+        const lastMessage = response.conversation_history[response.conversation_history.length - 1];
+        let products: Product[] = [];
+
+        // Si hay function_result con productos
+        if (response.function_result) {
+          if (response.function_result.products && Array.isArray(response.function_result.products)) {
+            products = response.function_result.products;
+          } else if (response.function_result.product && response.function_result.found) {
+            // Producto único por SKU
+            products = [response.function_result.product];
+          }
+        }
+
+        // Añadir productos al último mensaje
+        if (lastMessage && products.length > 0) {
+          lastMessage.products = products;
+        }
+
         // Actualizar mensajes con el historial completo
         setMessages(response.conversation_history);
       } else {
@@ -132,26 +152,39 @@ export function Chat({ config }: ChatProps) {
           </div>
         ) : (
           messages.map((message, index) => (
-            <div
-              key={index}
-              className={`flex ${
-                message.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
+            <div key={index}>
+              {/* Mensaje de texto */}
               <div
-                className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                  message.role === 'user'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-900'
-                }`}
+                className={`flex ${
+                  message.role === 'user' ? 'justify-end' : 'justify-start'
+                } mb-2`}
               >
-                <div className="whitespace-pre-wrap">{message.content}</div>
-                {message.function_calls && (
-                  <div className="mt-2 text-xs opacity-75">
-                    🔍 Consultó la base de datos
-                  </div>
-                )}
+                <div
+                  className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                    message.role === 'user'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-900'
+                  }`}
+                >
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+                  {message.function_calls && (
+                    <div className="mt-2 text-xs opacity-75">
+                      🔍 Consultó la base de datos
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {/* Tarjetas de productos si existen */}
+              {message.role === 'assistant' && message.products && message.products.length > 0 && (
+                <div className="mb-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {message.products.map((product, productIndex) => (
+                      <ProductCard key={productIndex} product={product} />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ))
         )}

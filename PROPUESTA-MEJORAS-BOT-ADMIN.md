@@ -30,8 +30,14 @@ Cuando el bot encuentra un producto que el usuario está buscando, en lugar de s
 - **Precio** destacado
 - **Descripción corta** (primeras 2-3 líneas)
 - **Botón "Ver Producto"** que lleva al link de compra
+- **Botón "Añadir al Carrito"** - Añade directamente al carrito de PrestaShop
 - **Botón "Comprar Ahora"** (opcional, directo al checkout si es posible)
 - **SKU** (opcional, en texto pequeño)
+
+**Opciones de Interacción:**
+- **Opción A (Recomendada)**: Click en botón "Añadir al Carrito" → Añade al carrito
+- **Opción B (Avanzada)**: Click en toda la tarjeta → Añade al carrito (con confirmación)
+- **Opción C (Híbrida)**: Click en tarjeta → Ver detalles, Botón específico → Añadir al carrito
 
 **Casos de uso:**
 - Usuario pregunta: "¿Tienes aceite de oliva?"
@@ -52,6 +58,128 @@ Bot: "¡Sí! Encontré estos productos que pueden interesarte:"
 - Facilita la conversión (botones directos)
 - Hace el chat más profesional y moderno
 - Reduce fricción para llegar al producto
+- **Añadir al carrito directamente aumenta conversión significativamente**
+
+---
+
+### 1.1.1 Añadir al Carrito desde Tarjeta (NUEVA FUNCIONALIDAD)
+
+**Descripción:**
+Permitir añadir productos al carrito de PrestaShop directamente desde las tarjetas del chat, sin salir de la conversación.
+
+**¿Es buena funcionalidad?** 
+✅ **SÍ, muy buena** - Aumenta significativamente la conversión porque:
+- Reduce fricción (no tiene que buscar el producto manualmente)
+- Impulso de compra (el usuario está en "modo compra" cuando consulta)
+- Experiencia fluida (todo desde el chat)
+- Reduce abandono de carrito
+
+**⚠️ Consideraciones de UX:**
+- **NO hacer click en toda la tarjeta** = añadir al carrito (riesgo de añadir accidentalmente)
+- **SÍ hacer botón específico** "Añadir al Carrito" (más seguro)
+- Mostrar confirmación visual después de añadir ("✓ Añadido al carrito")
+- Opción de "Ver carrito" o continuar navegando
+
+**Requisitos Técnicos:**
+
+1. **API de PrestaShop para añadir al carrito:**
+   - PrestaShop tiene API REST pero añadir al carrito requiere:
+     - **Opción 1 (Recomendada)**: Usar el endpoint de PrestaShop vía AJAX
+       - Endpoint: `POST /index.php?controller=cart&action=add`
+       - Parámetros: `id_product`, `id_product_attribute`, `qty`, `token` (CSRF)
+     - **Opción 2**: Usar la API REST de PrestaShop (si está disponible en la versión)
+       - Requiere autenticación y manejo de sesiones
+     - **Opción 3**: Integración con JavaScript nativo de PrestaShop
+       - Si el chat está embebido en la web, puede usar el JavaScript de PrestaShop
+
+2. **Manejo de Sesión:**
+   - PrestaShop usa sesiones PHP/cookies para identificar el carrito
+   - Necesitamos mantener la sesión del usuario
+   - Si el chat está en iframe o widget, necesitamos compartir cookies
+
+3. **Frontend (Componente React/JS):**
+   ```typescript
+   // Función para añadir al carrito
+   async function addToCart(productId: number, quantity: number = 1) {
+     try {
+       // Opción 1: Usar endpoint de PrestaShop
+       const response = await fetch(
+         `${prestashopUrl}/index.php?controller=cart&action=add&ajax=1`,
+         {
+           method: 'POST',
+           headers: {
+             'Content-Type': 'application/x-www-form-urlencoded',
+           },
+           credentials: 'include', // Importante para cookies
+           body: new URLSearchParams({
+             id_product: productId.toString(),
+             qty: quantity.toString(),
+             token: csrfToken, // Necesario para seguridad
+           }),
+         }
+       );
+       
+       if (response.ok) {
+         // Mostrar confirmación
+         showNotification('✓ Producto añadido al carrito');
+         // Opcional: Actualizar contador de carrito si está visible
+       }
+     } catch (error) {
+       showError('Error al añadir al carrito');
+     }
+   }
+   ```
+
+4. **Backend (API Proxy - Opcional pero recomendado):**
+   - Crear endpoint en tu backend: `POST /api/cart/add`
+   - El backend hace la llamada a PrestaShop
+   - Maneja autenticación y tokens CSRF
+   - Retorna respuesta estructurada
+
+5. **Token CSRF:**
+   - PrestaShop requiere token CSRF para seguridad
+   - Necesitamos obtenerlo del frontend o generarlo
+   - Se puede obtener del HTML de la página o vía API
+
+6. **Variables/Atributos del Producto:**
+   - Si el producto tiene variantes (tallas, colores), necesitamos:
+     - `id_product_attribute` además de `id_product`
+     - Mostrar selector de variantes antes de añadir
+
+**Implementación Sugerida:**
+
+**Fase 1 - Básico:**
+- Botón "Añadir al Carrito" en cada tarjeta
+- Click → Añade producto (cantidad 1)
+- Muestra confirmación visual
+- Si hay error, muestra mensaje
+
+**Fase 2 - Avanzado:**
+- Selector de cantidad antes de añadir
+- Manejo de variantes (tallas, colores)
+- Actualización en tiempo real del contador del carrito
+- Botón "Ver Carrito" después de añadir
+
+**Fase 3 - Premium:**
+- Añadir múltiples productos a la vez
+- Sugerencias de productos relacionados después de añadir
+- "¿Añadir también...?" después de añadir un producto
+
+**Dificultad:** 🟡 **Media-Alta**
+- Requiere integración con PrestaShop (API o endpoints)
+- Manejo de sesiones/cookies
+- Tokens CSRF
+- Manejo de errores robusto
+
+**Valor:** 🔥🔥🔥🔥🔥 **Muy Alto**
+- Aumenta conversión significativamente
+- Diferenciador clave vs otros chatbots
+- Experiencia de usuario premium
+
+**Alternativa si es muy complejo:**
+- En lugar de añadir directamente, usar link especial:
+  - `https://tienda.com/producto?id_product=123&add=1`
+  - Esto añade al carrito y redirige (más simple pero menos fluido)
 
 ---
 
@@ -298,6 +426,7 @@ Panel de configuración para personalizar el comportamiento del bot:
 | # | Funcionalidad | Categoría | Dificultad | Prioridad | Estado | Notas |
 |---|---------------|-----------|------------|-----------|--------|-------|
 | 1 | **Tarjetas de productos en respuestas** | Chat - Presentación | 🟡 Media | 🔴 Alta | ❌ No implementado | Mostrar productos encontrados como tarjetas con imagen, info y link |
+| 1.1 | **Añadir al carrito desde tarjeta** | Chat - Conversión | 🟡 Media-Alta | 🔴 Alta | ❌ No implementado | Botón para añadir producto al carrito directamente desde el chat |
 | 2 | **Grid de múltiples productos** | Chat - Presentación | 🟡 Media | 🔴 Alta | ❌ No implementado | Grid responsive para mostrar varios productos |
 | 3 | **Comparación de productos** | Chat - Presentación | 🟠 Alta | 🟡 Media | ❌ No implementado | Mostrar productos lado a lado para comparar |
 | 4 | **Imágenes contextuales** | Chat - Presentación | 🟢 Baja | 🟡 Media | ❌ No implementado | Imágenes de categorías, diagramas, etc. |
@@ -428,6 +557,19 @@ Basándome en **impacto visual**, **valor comercial** y **facilidad de implement
 
 ---
 
+#### 1.1. **Añadir al Carrito desde Tarjeta (#1.1)** ⭐⭐⭐
+**Por qué:**
+- **Aumenta conversión exponencialmente**: El usuario compra sin salir del chat
+- **Diferenciador clave**: Muy pocos chatbots lo hacen
+- **Experiencia premium**: Todo fluido desde el chat
+- **Dificultad media-alta pero vale MUCHO la pena**: Requiere integración con PrestaShop
+
+**ROI**: 🔥🔥🔥🔥🔥 (Máximo - Aún más alto que tarjetas básicas)
+
+**Nota**: Esta funcionalidad convierte las tarjetas de visualización en una herramienta de conversión directa.
+
+---
+
 #### 2. **Feedback de Utilidad (#6)** ⭐⭐⭐
 **Por qué:**
 - **Muy fácil de implementar** (🟢 Baja dificultad)
@@ -528,12 +670,13 @@ Estas son útiles pero no críticas para el MVP:
 **Objetivo**: Producto vendible con funcionalidades diferenciadoras
 
 1. ✅ **Tarjetas de Productos (#1)** - El diferenciador principal
-2. ✅ **Botones de Acción Rápida (#5)** - Complementa tarjetas
-3. ✅ **Feedback de Utilidad (#6)** - Base de datos
-4. ✅ **Formato Enriquecido (#7)** - Quick win
-5. ✅ **Indicador "Escribiendo..." (#8)** - Quick win
+2. ✅ **Añadir al Carrito desde Tarjeta (#1.1)** - ⚡ CRÍTICO para conversión
+3. ✅ **Botones de Acción Rápida (#5)** - Complementa tarjetas
+4. ✅ **Feedback de Utilidad (#6)** - Base de datos
+5. ✅ **Formato Enriquecido (#7)** - Quick win
+6. ✅ **Indicador "Escribiendo..." (#8)** - Quick win
 
-**Resultado**: Chat funcional y visualmente atractivo con feedback básico
+**Resultado**: Chat funcional y visualmente atractivo con capacidad de añadir al carrito y feedback básico
 
 ---
 
@@ -563,8 +706,9 @@ Estas son útiles pero no críticas para el MVP:
 
 ### 🎯 Prioridad ABSOLUTA (Empezar YA):
 1. **Tarjetas de Productos** - Tu diferenciador principal
-2. **Feedback de Utilidad** - Base para todo lo demás
-3. **Botones de Acción Rápida** - Aumenta conversión
+2. **Añadir al Carrito desde Tarjeta** - ⚡ EL MÁS IMPORTANTE para conversión
+3. **Feedback de Utilidad** - Base para todo lo demás
+4. **Botones de Acción Rápida** - Aumenta conversión
 
 ### 📈 Segunda Prioridad (Después del MVP):
 4. **Panel de Preguntas Repetidas** - Valor comercial alto
