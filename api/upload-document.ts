@@ -69,52 +69,13 @@ export default async function handler(
     // Determinar tipo de archivo simple
     const extension = filename.split('.').pop()?.toLowerCase() || 'txt';
     
-    // Extraer texto del documento para búsqueda
-    let extractedText = '';
-    try {
-      if (extension === 'pdf' || mimeType?.includes('pdf')) {
-        console.log('Extracting text from PDF...', { size: fileBuffer.length });
-        // Usar timeout para evitar que se cuelgue
-        const pdfPromise = pdf(fileBuffer);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('PDF extraction timeout')), 20000) // 20 segundos máximo
-        );
-        
-        const pdfData = await Promise.race([pdfPromise, timeoutPromise]) as any;
-        extractedText = pdfData?.text || '';
-        console.log('PDF text extracted:', extractedText.length, 'characters');
-      } else if (extension === 'txt' || extension === 'md' || mimeType?.includes('text/plain') || mimeType?.includes('text/markdown')) {
-        extractedText = fileBuffer.toString('utf-8');
-        console.log('Text file extracted:', extractedText.length, 'characters');
-      }
-    } catch (extractError) {
-      console.error('Error extracting text:', extractError);
-      // Continuar sin texto extraído - no es crítico
-      extractedText = '';
-      // Si es un PDF muy grande o problemático, aún así lo guardamos
-    }
-    
-    console.log('Saving to Supabase:', {
+    console.log('Saving to Supabase first (text extraction will happen later):', {
       filename,
       extension,
-      size: fileBuffer.length,
-      extractedTextLength: extractedText.length
+      size: fileBuffer.length
     });
 
-    // Guardar en Supabase - solo campos esenciales
-    // Limitar el texto extraído a 50KB para evitar problemas con Supabase
-    const maxTextLength = 50 * 1024; // 50KB
-    const finalExtractedText = extractedText.length > maxTextLength 
-      ? extractedText.substring(0, maxTextLength) + '...[truncado]'
-      : extractedText;
-
-    console.log('Saving to Supabase:', {
-      filename,
-      extension,
-      size: fileBuffer.length,
-      extractedTextLength: finalExtractedText.length
-    });
-
+    // PASO 1: Guardar el archivo primero SIN extraer texto (para evitar timeouts)
     const { data, error } = await supabase
       .from('documents')
       .insert({
@@ -123,7 +84,7 @@ export default async function handler(
         file_type: extension,
         file_size: fileBuffer.length,
         file_content: fileBuffer,
-        extracted_text: finalExtractedText,
+        extracted_text: '', // Vacío por ahora, se actualizará después
         mime_type: mimeType || 'application/octet-stream'
       })
       .select()
@@ -142,6 +103,65 @@ export default async function handler(
 
     console.log('Document saved successfully:', data.id);
 
+    // PASO 2: Extraer texto en segundo plano (no bloquea la respuesta)
+    // Esto se hace después de responder al usuario para que no espere
+    (async () => {
+      try {
+        let extractedText = '';
+        
+        if (extension === 'pdf' || mimeType?.includes('pdf')) {
+          console.log('Starting background PDF text extraction for:', data.id);
+          try {
+            // Timeout más largo en background (15 segundos)
+            const pdfPromise = pdf(fileBuffer);
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('PDF extraction timeout')), 15000)
+            );
+            
+            const pdfData = await Promise.race([pdfPromise, timeoutPromise]) as any;
+            extractedText = pdfData?.text || '';
+            
+            // Limitar a 50KB
+            const maxTextLength = 50 * 1024;
+            if (extractedText.length > maxTextLength) {
+              extractedText = extractedText.substring(0, maxTextLength) + '...[truncado]';
+            }
+            
+            console.log('PDF text extracted in background:', extractedText.length, 'characters');
+          } catch (pdfError) {
+            console.warn('Background PDF extraction failed:', pdfError);
+            extractedText = '';
+          }
+        } else if (extension === 'txt' || extension === 'md' || mimeType?.includes('text/plain') || mimeType?.includes('text/markdown')) {
+          extractedText = fileBuffer.toString('utf-8');
+          // Limitar a 50KB
+          const maxTextLength = 50 * 1024;
+          if (extractedText.length > maxTextLength) {
+            extractedText = extractedText.substring(0, maxTextLength) + '...[truncado]';
+          }
+          console.log('Text file extracted in background:', extractedText.length, 'characters');
+        }
+
+        // Actualizar el documento con el texto extraído
+        if (extractedText) {
+          const { error: updateError } = await supabase
+            .from('documents')
+            .update({ extracted_text: extractedText })
+            .eq('id', data.id);
+          
+          if (updateError) {
+            console.error('Error updating document with extracted text:', updateError);
+          } else {
+            console.log('Document updated with extracted text:', data.id);
+          }
+        }
+      } catch (bgError) {
+        console.error('Background text extraction error:', bgError);
+        // No hacer nada, el archivo ya está guardado
+      }
+    })(); // Función auto-ejecutada asíncrona
+
+    // Responder inmediatamente sin esperar la extracción de texto
     res.status(200).json({
       success: true,
       document: {
@@ -149,7 +169,8 @@ export default async function handler(
         filename: data.original_filename,
         file_type: data.file_type,
         file_size: data.file_size
-      }
+      },
+      message: 'Archivo subido correctamente. El texto se extraerá en segundo plano.'
     });
   } catch (error) {
     console.error('Upload error:', error);
