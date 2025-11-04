@@ -48,17 +48,34 @@ export default async function handler(
     // Crear cliente de Supabase
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Obtener productos existentes para preservar valores cuando los nuevos están vacíos
+    const { data: existingProducts } = await supabase
+      .from('products')
+      .select('sku, category, description, image_url')
+      .in('sku', products.map((p: any) => p.sku).filter(Boolean));
+
+    const existingMap = new Map<string, any>();
+    (existingProducts || []).forEach((p: any) => {
+      existingMap.set(p.sku, p);
+    });
+
     // Preparar productos para insertar (actualizar si ya existen por SKU)
-    const productsToInsert = products.map((product: any) => ({
-      name: product.name || '',
-      price: product.price || '',
-      category: product.category || '',
-      description: product.description || '',
-      sku: product.sku || '',
-      image_url: product.image || '',
-      product_url: product.product_url || '',
-      updated_at: new Date().toISOString(),
-    }));
+    // Preservar valores existentes si los nuevos están vacíos
+    const productsToInsert = products.map((product: any) => {
+      const existing = existingMap.get(product.sku);
+      return {
+        name: product.name || '',
+        price: product.price || '',
+        // Preservar categoría existente si la nueva está vacía
+        category: product.category || existing?.category || '',
+        description: product.description || existing?.description || '',
+        sku: product.sku || '',
+        // Preservar imagen existente si la nueva está vacía
+        image_url: product.image || existing?.image_url || '',
+        product_url: product.product_url || '',
+        updated_at: new Date().toISOString(),
+      };
+    });
 
     // Verificar primero si la tabla existe
     const { data: tableCheck, error: tableError } = await supabase

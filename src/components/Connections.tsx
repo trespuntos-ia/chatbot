@@ -49,11 +49,25 @@ export function Connections() {
     setProducts([]);
 
     try {
+      // Primero obtener los SKUs existentes en Supabase
+      const skusResponse = await fetch('/api/get-existing-skus');
+      const skusData = await skusResponse.json();
+      const existingSkus = new Set(skusData.skus || []);
+
+      // Escanear todos los productos de PrestaShop
       const fetchedProducts = await fetchAllProducts(config, (current, total) => {
         setProgress({ current, total });
       });
 
-      setProducts(fetchedProducts);
+      // Filtrar solo productos nuevos (que no están en Supabase)
+      const newProducts = fetchedProducts.filter(product => {
+        // Si no tiene SKU, lo consideramos nuevo
+        if (!product.sku) return true;
+        // Si el SKU no existe en Supabase, es nuevo
+        return !existingSkus.has(product.sku);
+      });
+
+      setProducts(newProducts);
       setConnectionState('products-found');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido al escanear productos');
@@ -279,10 +293,27 @@ export function Connections() {
         </div>
       )}
 
-      {/* Tabla de productos encontrados */}
-      {connectionState === 'products-found' && products.length > 0 && (
-        <div>
-          <ProductTable products={products} />
+      {/* Información de productos encontrados */}
+      {connectionState === 'products-found' && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">
+                Productos Nuevos Encontrados
+              </h3>
+              <p className="text-sm text-slate-600 mt-1">
+                {products.length === 0 
+                  ? 'No se encontraron productos nuevos. Todos los productos ya están en la base de datos.'
+                  : `Se encontraron ${products.length} producto${products.length !== 1 ? 's' : ''} nuevo${products.length !== 1 ? 's' : ''} para guardar.`
+                }
+              </p>
+            </div>
+          </div>
+          {products.length > 0 && (
+            <div>
+              <ProductTable products={products} />
+            </div>
+          )}
         </div>
       )}
     </div>
