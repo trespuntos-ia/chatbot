@@ -89,13 +89,14 @@ async function getCategoryInfo(
 }
 
 /**
- * Obtiene la categoría del producto con subcategoría (categoría padre).
+ * Obtiene la categoría y subcategoría del producto.
+ * Retorna objeto con categoría principal y subcategoría separadas.
  */
 async function getProductCategories(
   product: any,
   categoryCache: Map<number, { name: string; parentId?: number; parentName?: string }>,
   config: ApiConfig
-): Promise<string> {
+): Promise<{ category: string; subcategory?: string }> {
   // Solo usar la categoría por defecto (como en la versión original)
   if (product.id_category_default) {
     const categoryInfo = await getCategoryInfo(
@@ -104,14 +105,21 @@ async function getProductCategories(
       config
     );
     
-    // Formatear: "Subcategoría > Categoría" o solo "Categoría"
+    // Si hay categoría padre, esa es la categoría principal y la actual es la subcategoría
     if (categoryInfo.parentName && categoryInfo.parentName !== categoryInfo.name) {
-      return `${categoryInfo.parentName} > ${categoryInfo.name}`;
+      return {
+        category: categoryInfo.parentName,
+        subcategory: categoryInfo.name
+      };
     }
-    return categoryInfo.name || '';
+    // Si no hay categoría padre, la actual es la categoría principal
+    return {
+      category: categoryInfo.name || '',
+      subcategory: undefined
+    };
   }
 
-  return '';
+  return { category: '' };
 }
 
 /**
@@ -127,8 +135,8 @@ async function mapProduct(
     ? sanitizeDescription(extractMultilanguageValue(product.description_short))
     : '';
 
-  // Obtener todas las categorías del producto
-  const category = await getProductCategories(product, categoryCache, config);
+  // Obtener categoría y subcategoría separadas
+  const { category, subcategory } = await getProductCategories(product, categoryCache, config);
 
   const linkRewrite = extractMultilanguageValue(product.link_rewrite);
   const imageId = product.id_default_image || '';
@@ -157,14 +165,23 @@ async function mapProduct(
     productUrl += '.html';
   }
 
+  // Obtener fecha de creación (date_add) de PrestaShop
+  let dateAdd: string | undefined;
+  if (product.date_add) {
+    // date_add viene en formato ISO de PrestaShop
+    dateAdd = product.date_add;
+  }
+
   return {
     name,
     price: priceValue,
     category,
+    subcategory,
     description,
     sku: product.reference || product.ean13 || '',
     image: imageUrl,
     product_url: productUrl,
+    date_add: dateAdd,
   };
 }
 
@@ -223,7 +240,7 @@ export async function fetchAllProducts(
     const query = {
       language: String(config.langCode || 1),
       limit: `${offset},${chunkSize}`,
-      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short]',
+      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,date_add]',
       sort: 'id_ASC',
     };
 

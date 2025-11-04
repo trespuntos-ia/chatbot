@@ -51,7 +51,7 @@ export default async function handler(
     // Obtener productos existentes para preservar valores cuando los nuevos están vacíos
     const { data: existingProducts } = await supabase
       .from('products')
-      .select('sku, category, description, image_url')
+      .select('sku, category, subcategory, description, image_url, date_add')
       .in('sku', products.map((p: any) => p.sku).filter(Boolean));
 
     const existingMap = new Map<string, any>();
@@ -63,16 +63,32 @@ export default async function handler(
     // Preservar valores existentes si los nuevos están vacíos
     const productsToInsert = products.map((product: any) => {
       const existing = existingMap.get(product.sku);
+      
+      // Procesar fecha de creación: usar la de PrestaShop si está disponible, 
+      // sino preservar la existente si el producto ya existe
+      let dateAddValue = null;
+      if (product.date_add) {
+        // Convertir la fecha de PrestaShop a formato ISO si es necesario
+        dateAddValue = product.date_add;
+      } else if (existing?.date_add) {
+        // Preservar fecha existente si el producto ya existe
+        dateAddValue = existing.date_add;
+      }
+      
       return {
         name: product.name || '',
         price: product.price || '',
         // Preservar categoría existente si la nueva está vacía
         category: product.category || existing?.category || '',
+        // Agregar subcategoría
+        subcategory: product.subcategory || existing?.subcategory || null,
         description: product.description || existing?.description || '',
         sku: product.sku || '',
         // Preservar imagen existente si la nueva está vacía
         image_url: product.image || existing?.image_url || '',
         product_url: product.product_url || '',
+        // Agregar fecha de creación de PrestaShop
+        date_add: dateAddValue,
         updated_at: new Date().toISOString(),
       };
     });
