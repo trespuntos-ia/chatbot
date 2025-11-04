@@ -34,7 +34,7 @@ Asegúrate de tener configuradas estas variables en Vercel:
 1. Ve a la pestaña **"Documentación"** en el Dashboard
 2. Haz clic en el área de subida de archivos
 3. Selecciona un archivo (PDF, DOC, DOCX, TXT, MD)
-4. El archivo debe ser menor a 10MB
+4. El archivo debe ser menor a 3MB (debido a que base64 aumenta el tamaño ~33%, el límite efectivo de Vercel es 4.5MB para el body total)
 5. El archivo se subirá y se extraerá el texto automáticamente
 
 ### Eliminar documentos

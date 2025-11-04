@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Document } from '../types';
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+// Vercel tiene un límite de 4.5MB para el body de las requests
+// Base64 aumenta el tamaño ~33%, más overhead del JSON
+// Usamos 3MB para el archivo original para estar seguros (~4MB en base64 + JSON)
+const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB (original), ~4MB en base64
 const ALLOWED_TYPES = ['.pdf', '.doc', '.docx', '.txt', '.md'];
 
 export function Documentation() {
@@ -48,9 +51,19 @@ export function Documentation() {
       return;
     }
 
-    // Validar tamaño
-    if (file.size > MAX_FILE_SIZE) {
-      setError(`El archivo es demasiado grande. Máximo: ${(MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB`);
+    // Validar tamaño ANTES de procesar
+    // Base64 aumenta el tamaño ~33%, más el overhead del JSON
+    // Calculamos el tamaño aproximado en base64
+    const estimatedBase64Size = file.size * 1.37; // 1.33 para base64 + 0.04 para overhead JSON
+    const maxBodySize = 4.2 * 1024 * 1024; // 4.2MB para dejar margen del límite de 4.5MB
+    
+    if (file.size > MAX_FILE_SIZE || estimatedBase64Size > maxBodySize) {
+      const actualSize = estimatedBase64Size > maxBodySize ? estimatedBase64Size : file.size;
+      const sizeType = estimatedBase64Size > maxBodySize ? 'tamaño estimado en base64' : 'tamaño';
+      setError(`El archivo es demasiado grande (${(actualSize / 1024 / 1024).toFixed(2)}MB ${sizeType}). Máximo permitido: ${(MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB (archivo original).`);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       return;
     }
 
@@ -64,26 +77,76 @@ export function Documentation() {
       reader.onload = async (e) => {
         try {
           const base64String = e.target?.result as string;
+          if (!base64String) {
+            throw new Error('No se pudo leer el archivo');
+          }
+
           // Extraer solo la parte base64 (sin el prefijo data:mime;base64,)
           const base64Data = base64String.includes(',') 
             ? base64String.split(',')[1] 
             : base64String;
+
+          // Validar que tenemos datos
+          if (!base64Data || base64Data.length === 0) {
+            throw new Error('El archivo está vacío después de la codificación');
+          }
+
+          console.log('Preparing upload:', {
+            filename: file.name,
+            mimeType: file.type,
+            originalSize: file.size,
+            base64Length: base64Data.length,
+            estimatedPayloadSize: (base64Data.length + file.name.length + (file.type?.length || 0) + 100) // +100 para overhead JSON
+          });
+
+          const requestBody = {
+            file: base64Data,
+            filename: file.name,
+            mimeType: file.type || 'application/octet-stream'
+          };
 
           const response = await fetch('/api/upload-document', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              file: base64Data,
-              filename: file.name,
-              mimeType: file.type
-            })
+            body: JSON.stringify(requestBody)
           });
 
-          const data = await response.json();
+          // Verificar si la respuesta es JSON válida
+          let data;
+          const responseText = await response.text();
+          
+          try {
+            if (!responseText) {
+              throw new Error('Respuesta vacía del servidor');
+            }
+            data = JSON.parse(responseText);
+          } catch (parseError) {
+            // Si no es JSON, puede ser un error 413 u otro error HTTP
+            console.error('Error parsing response:', parseError);
+            console.error('Response status:', response.status);
+            console.error('Response text:', responseText);
+            
+            if (response.status === 413) {
+              setError(`El archivo es demasiado grande. El límite máximo es ${(MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB (archivo original). Tu archivo tiene ${(file.size / 1024 / 1024).toFixed(2)}MB. Nota: Base64 aumenta el tamaño ~33%.`);
+            } else if (response.status === 400) {
+              setError(`Error en la petición: ${response.statusText}. El archivo puede ser demasiado grande o tener un formato incorrecto.`);
+            } else if (response.status === 504 || response.status === 503) {
+              setError('Timeout del servidor. El archivo puede ser demasiado grande para procesar. Intenta con un archivo más pequeño.');
+            } else if (response.status >= 500) {
+              setError(`Error del servidor (${response.status}). Por favor, intenta de nuevo más tarde. Si el problema persiste, el archivo puede ser demasiado grande.`);
+            } else {
+              setError(`Error al subir el archivo (${response.status}): ${response.statusText || responseText || 'Error desconocido'}`);
+            }
+            setIsUploading(false);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = '';
+            }
+            return;
+          }
 
-          if (data.success) {
+          if (response.ok && data.success) {
             setSuccess(`Archivo "${file.name}" subido correctamente`);
             // Recargar lista de documentos
             await loadDocuments();
@@ -95,8 +158,16 @@ export function Documentation() {
             setError(data.error || data.details || 'Error al subir el archivo');
           }
         } catch (err) {
-          setError('Error al procesar el archivo');
+          // Manejar errores de red u otros errores
           console.error('Error uploading file:', err);
+          if (err instanceof TypeError && err.message.includes('fetch')) {
+            setError('Error de conexión. Verifica tu conexión a internet.');
+          } else if (err instanceof Error && err.message.includes('Failed to fetch')) {
+            setError('Error de conexión o timeout. El archivo puede ser demasiado grande o la conexión es lenta.');
+          } else {
+            const errorMsg = err instanceof Error ? err.message : 'Error desconocido';
+            setError(`Error al procesar el archivo: ${errorMsg}. Verifica la consola para más detalles.`);
+          }
         } finally {
           setIsUploading(false);
         }
@@ -188,7 +259,7 @@ export function Documentation() {
           Documentación
         </h2>
         <p className="text-slate-600">
-          Sube documentos (PDF, Word, TXT) para que la IA pueda consultarlos al responder preguntas. Máximo 10MB por archivo.
+          Sube documentos (PDF, Word, TXT) para que la IA pueda consultarlos al responder preguntas. Máximo 3MB por archivo (debido a limitaciones de Vercel).
         </p>
       </div>
 
@@ -290,7 +361,7 @@ export function Documentation() {
                   Haz clic para seleccionar un archivo
                 </span>
                 <span className="text-sm text-slate-500">
-                  PDF, DOC, DOCX, TXT, MD (máx. 10MB)
+                  PDF, DOC, DOCX, TXT, MD (máx. 3MB)
                 </span>
               </>
             )}
