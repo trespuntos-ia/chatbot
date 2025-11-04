@@ -197,6 +197,7 @@ export function Dashboard() {
             </nav>
           </div>
         </div>
+        {/* Historial tab is after Documentación */}
 
         {/* Content */}
         <div className="mt-6">
