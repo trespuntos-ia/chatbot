@@ -40,16 +40,18 @@ function sanitizeDescription(content: string): string {
 
 /**
  * Obtiene el nombre de la categoría por su ID usando el proxy de Vercel.
+ * Retorna objeto con categoría y subcategoría (categoría padre).
  */
-async function getCategoryName(
+async function getCategoryInfo(
   categoryId: number,
-  cache: Map<number, string>,
+  cache: Map<number, { name: string; parentId?: number; parentName?: string }>,
   config: ApiConfig
-): Promise<string> {
-  if (!categoryId) return '';
+): Promise<{ name: string; parentName?: string }> {
+  if (!categoryId) return { name: '' };
 
   if (cache.has(categoryId)) {
-    return cache.get(categoryId)!;
+    const cached = cache.get(categoryId)!;
+    return { name: cached.name, parentName: cached.parentName };
   }
 
   try {
@@ -60,37 +62,53 @@ async function getCategoryName(
       method: 'GET',
     });
 
-    if (!response.ok) return '';
+    if (!response.ok) return { name: '' };
 
     const data = await response.json();
     if (data?.category) {
       const name = extractMultilanguageValue(data.category.name);
-      cache.set(categoryId, name);
-      return name;
+      const parentIdRaw = data.category.id_parent;
+      const parentId = parentIdRaw ? (typeof parentIdRaw === 'string' ? parseInt(parentIdRaw) : parentIdRaw) : undefined;
+      
+      let parentName: string | undefined;
+      if (parentId && parentId !== 0 && parentId !== 1) {
+        // Obtener nombre de la categoría padre
+        const parentInfo = await getCategoryInfo(parentId, cache, config);
+        parentName = parentInfo.name;
+      }
+
+      const info = { name, parentId, parentName };
+      cache.set(categoryId, info);
+      return { name, parentName };
     }
   } catch (error) {
     console.error('Error fetching category:', error);
   }
 
-  return '';
+  return { name: '' };
 }
 
 /**
- * Obtiene la categoría del producto (solo la categoría por defecto).
+ * Obtiene la categoría del producto con subcategoría (categoría padre).
  */
 async function getProductCategories(
   product: any,
-  categoryCache: Map<number, string>,
+  categoryCache: Map<number, { name: string; parentId?: number; parentName?: string }>,
   config: ApiConfig
 ): Promise<string> {
   // Solo usar la categoría por defecto (como en la versión original)
   if (product.id_category_default) {
-    const categoryName = await getCategoryName(
+    const categoryInfo = await getCategoryInfo(
       parseInt(product.id_category_default),
       categoryCache,
       config
     );
-    return categoryName || '';
+    
+    // Formatear: "Subcategoría > Categoría" o solo "Categoría"
+    if (categoryInfo.parentName && categoryInfo.parentName !== categoryInfo.name) {
+      return `${categoryInfo.parentName} > ${categoryInfo.name}`;
+    }
+    return categoryInfo.name || '';
   }
 
   return '';
@@ -101,7 +119,7 @@ async function getProductCategories(
  */
 async function mapProduct(
   product: any,
-  categoryCache: Map<number, string>,
+  categoryCache: Map<number, { name: string; parentId?: number; parentName?: string }>,
   config: ApiConfig
 ): Promise<Product> {
   const name = extractMultilanguageValue(product.name);
@@ -195,7 +213,7 @@ export async function fetchAllProducts(
   onProgress?: (current: number, total: number | null) => void
 ): Promise<Product[]> {
   const products: Product[] = [];
-  const categoryCache = new Map<number, string>();
+  const categoryCache = new Map<number, { name: string; parentId?: number; parentName?: string }>();
   let offset = 0;
   const chunkSize = 150;
   let iterations = 0;

@@ -52,21 +52,33 @@ export function Connections() {
     try {
       // Primero obtener los SKUs existentes en Supabase
       const skusResponse = await fetch('/api/get-existing-skus');
+      if (!skusResponse.ok) {
+        throw new Error('Error al obtener SKUs existentes de Supabase');
+      }
       const skusData = await skusResponse.json();
-      const existingSkus = new Set(skusData.skus || []);
+      const existingSkus = new Set((skusData.skus || []).filter((sku: string) => sku && sku.trim() !== ''));
+      
+      console.log(`SKUs existentes en Supabase: ${existingSkus.size}`);
 
       // Escanear todos los productos de PrestaShop
       const fetchedProducts = await fetchAllProducts(config, (current, total) => {
         setProgress({ current, total });
       });
 
+      console.log(`Productos escaneados de PrestaShop: ${fetchedProducts.length}`);
+
       // Filtrar solo productos nuevos (que no están en Supabase)
       const newProducts = fetchedProducts.filter(product => {
         // Si no tiene SKU, lo consideramos nuevo
-        if (!product.sku) return true;
+        if (!product.sku || product.sku.trim() === '') {
+          return true;
+        }
         // Si el SKU no existe en Supabase, es nuevo
-        return !existingSkus.has(product.sku);
+        const isNew = !existingSkus.has(product.sku.trim());
+        return isNew;
       });
+
+      console.log(`Productos nuevos (no en Supabase): ${newProducts.length}`);
 
       setProducts(newProducts);
       setConnectionState('products-found');
@@ -104,6 +116,9 @@ export function Connections() {
         type: 'success', 
         message: `¡Éxito! Se guardaron ${data.saved} productos en la base de datos.` 
       });
+      
+      // Limpiar la lista de productos después de guardar
+      setProducts([]);
     } catch (error) {
       console.error('Error saving products:', error);
       setSaveStatus({ 
@@ -144,8 +159,11 @@ export function Connections() {
 
       setSaveStatus({ 
         type: 'success', 
-        message: `Se eliminaron todos los productos de la base de datos.` 
+        message: `Se eliminaron ${data.deleted || 0} productos de la base de datos. ${data.verified ? 'Verificado correctamente.' : 'Verifica en Supabase.'}` 
       });
+      
+      // Limpiar la lista de productos después de eliminar
+      setProducts([]);
     } catch (error) {
       console.error('Error clearing products:', error);
       setSaveStatus({ 

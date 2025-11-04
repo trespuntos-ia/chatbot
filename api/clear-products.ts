@@ -37,25 +37,38 @@ export default async function handler(
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Eliminar todos los productos
+    // Primero obtener el conteo antes de eliminar
+    const { count: totalCount } = await supabase
+      .from('products')
+      .select('*', { count: 'exact', head: true });
+
+    // Eliminar todos los productos - usar gt('id', 0) que funciona mejor
     const { error, count } = await supabase
       .from('products')
       .delete()
-      .neq('id', 0); // Esto eliminará todos los productos
+      .gt('id', 0); // Esto eliminará todos los productos (id siempre > 0)
 
     if (error) {
-      console.error('Supabase error:', error);
+      console.error('Supabase error clearing products:', error);
       res.status(500).json({ 
         error: 'Error clearing products',
-        details: error.message 
+        details: error.message,
+        code: error.code
       });
       return;
     }
 
+    // Verificar que realmente se eliminaron
+    const { count: remainingCount } = await supabase
+      .from('products')
+      .select('*', { count: 'exact', head: true });
+
     res.status(200).json({ 
       success: true,
       message: 'Todos los productos han sido eliminados',
-      deleted: count || 0
+      deleted: count || totalCount || 0,
+      remaining: remainingCount || 0,
+      verified: (remainingCount || 0) === 0
     });
   } catch (error) {
     console.error('Clear products error:', error);
