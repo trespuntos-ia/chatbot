@@ -241,11 +241,22 @@ export default async function handler(
 
       const finalMessage = secondCompletion.choices[0].message.content;
 
-      // Preparar mensaje del asistente con productos si existen
+      // Determinar fuentes de información
+      const sources: string[] = [];
+      if (functionName === 'search_products' || functionName === 'get_product_by_sku') {
+        sources.push('products_db');
+      } else if (functionName === 'search_documents') {
+        sources.push('documents');
+      } else if (functionName === 'search_web_documentation') {
+        sources.push('web');
+      }
+
+      // Preparar mensaje del asistente con productos y fuentes
       const assistantMessage: any = {
         role: 'assistant',
         content: finalMessage,
-        function_calls: [toolCall]
+        function_calls: [toolCall],
+        sources: sources.length > 0 ? sources : ['general']
       };
 
       res.status(200).json({
@@ -263,13 +274,20 @@ export default async function handler(
       // 10. Respuesta directa (sin función)
       const response = responseMessage.content || '';
 
+      // Si no hay función, es información general
+      const assistantMessage: any = {
+        role: 'assistant',
+        content: response,
+        sources: ['general']
+      };
+
       res.status(200).json({
         success: true,
         message: response,
         conversation_history: [
           ...conversationHistory,
           { role: 'user', content: message },
-          { role: 'assistant', content: response }
+          assistantMessage
         ]
       });
     }

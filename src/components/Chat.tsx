@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts } from '../utils/messageParser';
+import { formatSources } from '../utils/sourceLabels';
 import type { ChatMessage, ChatConfig, Product } from '../types';
 
 interface ChatProps {
@@ -176,6 +177,14 @@ export function Chat({ config }: ChatProps) {
                                 🔍 Consultó la base de datos
                               </div>
                             )}
+                            {/* Fuentes de información */}
+                            {partIndex === 0 && message.sources && message.sources.length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-slate-200">
+                                <p className="text-xs text-slate-500">
+                                  Fuente: {formatSources(message.sources)}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -213,6 +222,14 @@ export function Chat({ config }: ChatProps) {
                     {message.function_calls && (
                       <div className="mt-2 text-xs opacity-75">
                         🔍 Consultó la base de datos
+                      </div>
+                    )}
+                    {/* Fuentes de información */}
+                    {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-slate-200">
+                        <p className="text-xs text-slate-500">
+                          Fuente: {formatSources(message.sources)}
+                        </p>
                       </div>
                     )}
                   </div>

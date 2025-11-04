@@ -44,12 +44,15 @@ export interface SystemPrompt {
 }
 
 // Tipos para Chat (Fase 2)
+export type MessageSource = 'products_db' | 'web' | 'documents' | 'general';
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   function_calls?: any[];
   function_result?: any;
   products?: Product[]; // Productos encontrados en esta respuesta
+  sources?: MessageSource[]; // Fuentes de información utilizadas
 }
 
 export interface ChatConfig {
