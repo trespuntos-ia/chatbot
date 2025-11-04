@@ -172,47 +172,50 @@ export function Chat({ config }: ChatProps) {
               // Dividir mensaje en partes (texto y productos)
               const parts = splitMessageWithProducts(message.content, message.products);
               
+              // Separar texto y productos
+              const textParts = parts.filter(p => p.type === 'text');
+              const productParts = parts.filter(p => p.type === 'product');
+              
               return (
                 <div key={index} className="space-y-4">
-                  {parts.map((part, partIndex) => {
-                    if (part.type === 'text') {
-                      // Parsear el texto con formato markdown
-                      const { html } = parseMessageContent(part.content as string, message.products);
-                      
-                      return (
-                        <div key={partIndex} className="flex justify-start">
-                          <div className="max-w-[90%] rounded-lg px-4 py-3 bg-slate-100 text-slate-900">
-                            <div 
-                              className="prose prose-sm max-w-none prose-headings:text-slate-900 prose-p:text-slate-700 prose-a:text-indigo-600"
-                              dangerouslySetInnerHTML={{ __html: html }}
-                            />
-                            {partIndex === 0 && message.function_calls && (
-                              <div className="mt-2 text-xs opacity-75">
-                                🔍 Consultó la base de datos
-                              </div>
-                            )}
-                            {/* Fuentes de información */}
-                            {partIndex === 0 && message.sources && message.sources.length > 0 && (
-                              <div className="mt-3 pt-3 border-t border-slate-200">
-                                <p className="text-xs text-slate-500">
-                                  Fuente: {formatSources(message.sources)}
-                                </p>
-                              </div>
-                            )}
-                          </div>
+                  {/* Primero: Todo el texto */}
+                  {textParts.map((part, partIndex) => {
+                    // Parsear el texto con formato markdown (sin imágenes si hay productos)
+                    const { html } = parseMessageContent(part.content as string, message.products);
+                    
+                    return (
+                      <div key={`text-${partIndex}`} className="flex justify-start">
+                        <div className="max-w-[90%] rounded-lg px-4 py-3 bg-slate-100 text-slate-900">
+                          <div 
+                            className="prose prose-sm max-w-none prose-headings:text-slate-900 prose-p:text-slate-700 prose-a:text-indigo-600"
+                            dangerouslySetInnerHTML={{ __html: html }}
+                          />
+                          {partIndex === 0 && message.function_calls && (
+                            <div className="mt-2 text-xs opacity-75">
+                              🔍 Consultó la base de datos
+                            </div>
+                          )}
+                          {/* Fuentes de información */}
+                          {partIndex === textParts.length - 1 && message.sources && message.sources.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-slate-200">
+                              <p className="text-xs text-slate-500">
+                                Fuente: {formatSources(message.sources)}
+                              </p>
+                            </div>
+                          )}
                         </div>
-                      );
-                    } else {
-                      // Mostrar tarjeta de producto
-                      return (
-                        <div key={partIndex} className="flex justify-start">
-                          <div className="w-full max-w-[400px]">
-                            <ProductCard product={part.content as Product} />
-                          </div>
-                        </div>
-                      );
-                    }
+                      </div>
+                    );
                   })}
+                  
+                  {/* Luego: Todas las tarjetas de productos en grid */}
+                  {productParts.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {productParts.map((part, productIndex) => (
+                        <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             }
