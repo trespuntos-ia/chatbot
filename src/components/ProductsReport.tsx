@@ -1,5 +1,17 @@
 import { useState, useEffect } from 'react';
-import type { Product } from '../types';
+
+interface ProductFromDB {
+  id: number;
+  name: string;
+  price: string;
+  category: string;
+  description: string;
+  sku: string;
+  image_url: string;
+  product_url: string;
+  created_at: string;
+  updated_at: string;
+}
 
 interface ProductStats {
   total: number;
@@ -10,7 +22,7 @@ interface ProductStats {
 }
 
 export function ProductsReport() {
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<ProductFromDB[]>([]);
   const [stats, setStats] = useState<ProductStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
@@ -48,6 +60,7 @@ export function ProductsReport() {
         throw new Error(data.error || 'Error al obtener productos');
       }
 
+      // Los productos ya vienen con image_url desde Supabase
       setProducts(data.products || []);
       setStats({
         total: data.total || 0,
@@ -278,6 +291,9 @@ export function ProductsReport() {
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Imagen
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
                       Nombre
                     </th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
@@ -296,7 +312,23 @@ export function ProductsReport() {
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {products.map((product, index) => (
-                    <tr key={index} className="hover:bg-slate-50 transition-colors">
+                    <tr key={product.id || index} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3">
+                        {product.image_url ? (
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-16 h-16 object-cover rounded-lg"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Crect width="64" height="64" fill="%23e2e8f0"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-size="12"%3ESin imagen%3C/text%3E%3C/svg%3E';
+                            }}
+                          />
+                        ) : (
+                          <div className="w-16 h-16 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">
+                            Sin imagen
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 font-medium text-slate-900">
                         {product.name}
                       </td>
