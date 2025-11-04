@@ -43,3 +43,30 @@ export interface SystemPrompt {
   variables?: PromptVariable[];
 }
 
+// Tipos para Chat (Fase 2)
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  function_calls?: any[];
+  function_result?: any;
+}
+
+export interface ChatConfig {
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  top_p?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+}
+
+export interface ChatResponse {
+  success: boolean;
+  message?: string;
+  function_called?: string;
+  function_result?: any;
+  conversation_history?: ChatMessage[];
+  error?: string;
+  details?: string;
+}
+

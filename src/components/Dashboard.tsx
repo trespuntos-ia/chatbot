@@ -2,11 +2,16 @@ import { useState } from 'react';
 import { ProductsReport } from './ProductsReport';
 import { Connections } from './Connections';
 import { PromptConfig } from './PromptConfig';
+import { Chat } from './Chat';
+import { ChatConfig } from './ChatConfig';
+import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
+import type { ChatConfig as ChatConfigType } from '../types';
 
-type Tab = 'products' | 'connections' | 'prompts';
+type Tab = 'products' | 'connections' | 'chat' | 'prompts';
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('products');
+  const [chatConfig, setChatConfig] = useState<ChatConfigType>(DEFAULT_CHAT_CONFIG);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -78,6 +83,32 @@ export function Dashboard() {
                 </div>
               </button>
               <button
+                onClick={() => setActiveTab('chat')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'chat'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                    />
+                  </svg>
+                  Chat
+                </div>
+              </button>
+              <button
                 onClick={() => setActiveTab('prompts')}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'prompts'
@@ -117,6 +148,14 @@ export function Dashboard() {
         <div className="mt-6">
           {activeTab === 'products' && <ProductsReport />}
           {activeTab === 'connections' && <Connections />}
+          {activeTab === 'chat' && (
+            <div className="space-y-6">
+              <ChatConfig config={chatConfig} onConfigChange={setChatConfig} />
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <Chat config={chatConfig} />
+              </div>
+            </div>
+          )}
           {activeTab === 'prompts' && <PromptConfig />}
         </div>
       </div>
