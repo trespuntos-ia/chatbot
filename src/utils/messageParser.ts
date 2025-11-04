@@ -109,7 +109,6 @@ export function splitMessageWithProducts(
   message: string,
   products: Product[]
 ): MessagePart[] {
-  const parts: MessagePart[] = [];
   const productMap = findProductsInMessage(message, products);
 
   // Primero verificar si hay una recomendación específica de un solo producto
