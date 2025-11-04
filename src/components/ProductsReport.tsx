@@ -346,9 +346,30 @@ export function ProductsReport() {
                         {product.price || '-'}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                          {product.category || '-'}
-                        </span>
+                        {product.category ? (
+                          <div className="flex flex-wrap gap-1">
+                            {product.category.split(',').map((cat: string, idx: number) => {
+                              const trimmedCat = cat.trim();
+                              if (!trimmedCat) return null;
+                              // Detectar si es subcategoría (generalmente más larga o contiene ">")
+                              const isSubcategory = trimmedCat.includes('>') || trimmedCat.length > 20;
+                              return (
+                                <span
+                                  key={idx}
+                                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                                    isSubcategory
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                      : 'bg-slate-100 text-slate-700'
+                                  }`}
+                                >
+                                  {trimmedCat}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-600 font-mono text-sm">
                         {product.sku || '-'}

@@ -45,12 +45,10 @@ export default async function handler(
       search 
     } = req.query;
 
-    // Query simple y segura
+    // Query básica - sin ordenar en Supabase para evitar errores
     let query = supabase
       .from('products')
-      .select('*', { count: 'exact' })
-      .order('id', { ascending: false })
-      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
+      .select('*', { count: 'exact' });
 
     // Filtrar por categoría si se proporciona
     if (category && typeof category === 'string') {
@@ -62,6 +60,7 @@ export default async function handler(
       query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
     }
 
+    // Ejecutar query sin ordenar
     const { data, error, count } = await query;
 
     if (error) {
@@ -73,10 +72,34 @@ export default async function handler(
       return;
     }
 
+    // Ordenar localmente si tenemos datos
+    let sortedData = data || [];
+    if (sortedData.length > 0) {
+      sortedData = sortedData.sort((a: any, b: any) => {
+        // Intentar ordenar por date_add si existe
+        if (a.date_add && b.date_add) {
+          return new Date(b.date_add).getTime() - new Date(a.date_add).getTime();
+        }
+        if (a.date_add) return -1;
+        if (b.date_add) return 1;
+        // Si no, por created_at
+        if (a.created_at && b.created_at) {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        }
+        // Por último, por id
+        return (b.id || 0) - (a.id || 0);
+      });
+    }
+
+    // Aplicar paginación
+    const start = parseInt(offset as string);
+    const end = start + parseInt(limit as string);
+    const paginatedData = sortedData.slice(start, end);
+
     res.status(200).json({ 
       success: true,
-      products: data || [],
-      total: count || 0,
+      products: paginatedData,
+      total: count || sortedData.length,
       limit: parseInt(limit as string),
       offset: parseInt(offset as string)
     });
