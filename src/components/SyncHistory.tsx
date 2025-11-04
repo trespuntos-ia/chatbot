@@ -32,16 +32,19 @@ export function SyncHistory() {
   const loadHistory = async () => {
     try {
       setError(null);
+      setLoading(true);
       const response = await fetch('/api/get-sync-history?limit=50');
-      const data = await response.json();
-
+      
       if (!response.ok) {
-        throw new Error(data.error || 'Error al cargar historial');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
       }
 
+      const data = await response.json();
       setHistory(data.history || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido');
+      console.error('Error loading sync history:', err);
+      setError(err instanceof Error ? err.message : 'Error desconocido al cargar el historial');
     } finally {
       setLoading(false);
     }
@@ -94,9 +97,16 @@ export function SyncHistory() {
 
   if (loading && history.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-        <p className="text-slate-600">Cargando historial...</p>
+      <div className="space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">
+            Historial de Actualizaciones
+          </h2>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Cargando historial...</p>
+        </div>
       </div>
     );
   }
@@ -141,7 +151,7 @@ export function SyncHistory() {
       {history.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
           <svg
-            className="mx-auto h-12 w-12 text-slate-400 mb-4"
+            className="mx-auto h-16 w-16 text-slate-300 mb-4"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -149,16 +159,29 @@ export function SyncHistory() {
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeWidth={2}
+              strokeWidth={1.5}
               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
             />
           </svg>
-          <p className="text-slate-600">
-            No hay historial de sincronizaciones todavía.
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">
+            No hay historial de sincronizaciones todavía
+          </h3>
+          <p className="text-slate-600 mb-4">
+            Aún no se ha ejecutado ninguna sincronización automática.
           </p>
-          <p className="text-sm text-slate-500 mt-2">
-            Las sincronizaciones automáticas se ejecutan cada noche a las 23:50
-          </p>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6 text-left max-w-md mx-auto">
+            <p className="text-sm text-blue-900 font-medium mb-2">📅 Próxima sincronización automática:</p>
+            <p className="text-sm text-blue-700">
+              Cada noche a las 23:50 UTC (00:50 hora peninsular española)
+            </p>
+            <p className="text-xs text-blue-600 mt-3">
+              💡 <strong>Tip:</strong> Puedes probar la sincronización manualmente desde el endpoint:
+              <br />
+              <code className="text-xs bg-blue-100 px-2 py-1 rounded mt-1 inline-block">
+                /api/sync-products-cron?manual=true&token=TU_CRON_SECRET
+              </code>
+            </p>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
