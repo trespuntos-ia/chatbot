@@ -6,12 +6,13 @@ export async function scrapeProductPage(productUrl: string): Promise<{
   features?: string[];
   specifications?: Record<string, string>;
   availableColors?: string[];
+  volumeDiscounts?: Array<{ packs: string; discount: string; savings: string }>;
   error?: string;
 }> {
   try {
-    // Timeout de 5 segundos para no ralentizar demasiado
+    // Timeout reducido a 2 segundos para evitar FUNCTION_INVOCATION_FAILED en Vercel
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
 
     const response = await fetch(productUrl, {
       method: 'GET',
@@ -39,6 +40,7 @@ export async function scrapeProductPage(productUrl: string): Promise<{
       features?: string[];
       specifications?: Record<string, string>;
       availableColors?: string[];
+      volumeDiscounts?: Array<{ packs: string; discount: string; savings: string }>;
     } = {};
 
     // Extraer descripción completa (buscar meta description o contenido principal)
@@ -119,6 +121,63 @@ export async function scrapeProductPage(productUrl: string): Promise<{
     }
     if (colors.length > 0) {
       result.availableColors = colors;
+    }
+
+    // Extraer descuentos por volumen (buscar tablas con información de descuentos)
+    const volumeDiscounts: Array<{ packs: string; discount: string; savings: string }> = [];
+    
+    // Buscar tablas que contengan palabras clave relacionadas con descuentos por volumen
+    const discountKeywords = ['descuento', 'volumen', 'packs', 'ahorro', 'descuentos por volumen'];
+    const discountPattern = new RegExp(discountKeywords.join('|'), 'i');
+    
+    // Buscar todas las tablas
+    const allTables = html.match(/<table[^>]*>(.*?)<\/table>/gis);
+    if (allTables) {
+      for (const table of allTables) {
+        if (discountPattern.test(table)) {
+          // Encontrar filas de la tabla
+          const rows = table.match(/<tr[^>]*>(.*?)<\/tr>/gis);
+          if (rows) {
+            // Saltar la primera fila (header)
+            for (let i = 1; i < rows.length; i++) {
+              const cells = rows[i].match(/<t[dh][^>]*>(.*?)<\/t[dh]>/gis);
+              if (cells && cells.length >= 3) {
+                const packs = cells[0].replace(/<[^>]+>/g, '').trim();
+                const discount = cells[1].replace(/<[^>]+>/g, '').trim();
+                const savings = cells[2].replace(/<[^>]+>/g, '').trim();
+                
+                // Solo agregar si tiene formato válido
+                if (packs && discount && savings && packs.match(/\d+/)) {
+                  volumeDiscounts.push({ packs, discount, savings });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // También buscar en divs o secciones que mencionen descuentos por volumen
+    const discountSectionMatch = html.match(/(?:descuentos?\s+por\s+volumen|descuentos?\s+por\s+unidades?|descuentos?\s+por\s+cantidad)[^<]*<table[^>]*>(.*?)<\/table>/is);
+    if (discountSectionMatch && !volumeDiscounts.length) {
+      const rows = discountSectionMatch[1].match(/<tr[^>]*>(.*?)<\/tr>/gis);
+      if (rows) {
+        for (let i = 1; i < rows.length; i++) {
+          const cells = rows[i].match(/<t[dh][^>]*>(.*?)<\/t[dh]>/gis);
+          if (cells && cells.length >= 3) {
+            const packs = cells[0].replace(/<[^>]+>/g, '').trim();
+            const discount = cells[1].replace(/<[^>]+>/g, '').trim();
+            const savings = cells[2].replace(/<[^>]+>/g, '').trim();
+            if (packs && discount && savings && packs.match(/\d+/)) {
+              volumeDiscounts.push({ packs, discount, savings });
+            }
+          }
+        }
+      }
+    }
+
+    if (volumeDiscounts.length > 0) {
+      result.volumeDiscounts = volumeDiscounts;
     }
 
     return result;

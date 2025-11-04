@@ -6,7 +6,9 @@ let pdfParse: any = null;
 async function getPdfParse() {
   if (!pdfParse) {
     try {
-      pdfParse = (await import('pdf-parse')).default;
+      const pdfParseModule = await import('pdf-parse');
+      // Manejar tanto ESM como CommonJS
+      pdfParse = pdfParseModule.default || pdfParseModule;
     } catch (error) {
       console.error('Error importing pdf-parse:', error);
       throw new Error('PDF parsing library not available');
