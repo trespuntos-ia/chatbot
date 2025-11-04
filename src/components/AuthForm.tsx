@@ -137,8 +137,8 @@ export function AuthForm({ onAuthenticate }: AuthFormProps) {
   };
 
   return (
-    <div className="w-full">
-      <div className="bg-white rounded-2xl shadow-xl ring-1 ring-slate-900/10 overflow-hidden">
+    <div className="w-full max-w-none">
+      <div className="bg-white rounded-2xl shadow-xl ring-1 ring-slate-900/10 overflow-hidden w-full">
           <div className="bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-500 px-6 py-8">
             <div className="flex items-center gap-3 mb-2">
               <div className="h-10 w-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -164,7 +164,7 @@ export function AuthForm({ onAuthenticate }: AuthFormProps) {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          <form onSubmit={handleSubmit} className="p-8 space-y-6">
             {/* Indicador de estado de conexión */}
             {connectionStatus !== 'idle' && (
               <div className={`px-4 py-3 rounded-lg text-sm flex items-center gap-2 ${
@@ -200,34 +200,37 @@ export function AuthForm({ onAuthenticate }: AuthFormProps) {
               </div>
             )}
 
-            <div>
-              <label htmlFor="apiKey" className="block text-sm font-semibold text-slate-700 mb-2">
-                API Key <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="apiKey"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-                placeholder="E5CUG6DLAD9EA46AIN7Z2LIX1W3IIJKZ"
-                required
-              />
-            </div>
+            {/* Layout de dos columnas para campos principales */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label htmlFor="apiKey" className="block text-sm font-semibold text-slate-700 mb-2">
+                  API Key <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="apiKey"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                  placeholder="E5CUG6DLAD9EA46AIN7Z2LIX1W3IIJKZ"
+                  required
+                />
+              </div>
 
-            <div>
-              <label htmlFor="prestashopUrl" className="block text-sm font-semibold text-slate-700 mb-2">
-                URL API PrestaShop <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="prestashopUrl"
-                type="url"
-                value={prestashopUrl}
-                onChange={(e) => setPrestashopUrl(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-                placeholder="https://tu-tienda.com/api/"
-                required
-              />
+              <div>
+                <label htmlFor="prestashopUrl" className="block text-sm font-semibold text-slate-700 mb-2">
+                  URL API PrestaShop <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="prestashopUrl"
+                  type="url"
+                  value={prestashopUrl}
+                  onChange={(e) => setPrestashopUrl(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                  placeholder="https://tu-tienda.com/api/"
+                  required
+                />
+              </div>
             </div>
 
             <div>

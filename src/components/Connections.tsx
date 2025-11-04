@@ -110,14 +110,12 @@ export function Connections() {
 
   if (!config) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
-        <div className="w-full">
-          <h2 className="text-2xl font-bold text-slate-900 mb-4">Configurar Conexión</h2>
-          <p className="text-slate-600 mb-6">
-            Configura tu conexión a PrestaShop para escanear productos
-          </p>
-          <AuthForm onAuthenticate={handleAuthenticate} />
-        </div>
+      <div className="w-full">
+        <h2 className="text-2xl font-bold text-slate-900 mb-4">Configurar Conexión</h2>
+        <p className="text-slate-600 mb-6">
+          Configura tu conexión a PrestaShop para escanear productos
+        </p>
+        <AuthForm onAuthenticate={handleAuthenticate} />
       </div>
     );
   }
