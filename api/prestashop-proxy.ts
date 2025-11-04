@@ -54,14 +54,19 @@ export default async function handler(
     // Hacer la solicitud a la API de PrestaShop
     console.log('Making request to PrestaShop:', url.substring(0, 100) + '...');
     
+    // Crear AbortController para timeout (compatible con Node.js 18)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 segundos
+    
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
         'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
       },
-      // Aumentar timeout para evitar errores
-      signal: AbortSignal.timeout(60000), // 60 segundos
+      signal: controller.signal,
+    }).finally(() => {
+      clearTimeout(timeoutId);
     });
 
     if (!response.ok) {
