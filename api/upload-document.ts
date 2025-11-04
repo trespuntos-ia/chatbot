@@ -73,9 +73,15 @@ export default async function handler(
     let extractedText = '';
     try {
       if (extension === 'pdf' || mimeType?.includes('pdf')) {
-        console.log('Extracting text from PDF...');
-        const pdfData = await pdf(fileBuffer);
-        extractedText = pdfData.text || '';
+        console.log('Extracting text from PDF...', { size: fileBuffer.length });
+        // Usar timeout para evitar que se cuelgue
+        const pdfPromise = pdf(fileBuffer);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('PDF extraction timeout')), 20000) // 20 segundos máximo
+        );
+        
+        const pdfData = await Promise.race([pdfPromise, timeoutPromise]) as any;
+        extractedText = pdfData?.text || '';
         console.log('PDF text extracted:', extractedText.length, 'characters');
       } else if (extension === 'txt' || extension === 'md' || mimeType?.includes('text/plain') || mimeType?.includes('text/markdown')) {
         extractedText = fileBuffer.toString('utf-8');
@@ -83,8 +89,9 @@ export default async function handler(
       }
     } catch (extractError) {
       console.error('Error extracting text:', extractError);
-      // Continuar sin texto extraído
+      // Continuar sin texto extraído - no es crítico
       extractedText = '';
+      // Si es un PDF muy grande o problemático, aún así lo guardamos
     }
     
     console.log('Saving to Supabase:', {
@@ -95,6 +102,19 @@ export default async function handler(
     });
 
     // Guardar en Supabase - solo campos esenciales
+    // Limitar el texto extraído a 50KB para evitar problemas con Supabase
+    const maxTextLength = 50 * 1024; // 50KB
+    const finalExtractedText = extractedText.length > maxTextLength 
+      ? extractedText.substring(0, maxTextLength) + '...[truncado]'
+      : extractedText;
+
+    console.log('Saving to Supabase:', {
+      filename,
+      extension,
+      size: fileBuffer.length,
+      extractedTextLength: finalExtractedText.length
+    });
+
     const { data, error } = await supabase
       .from('documents')
       .insert({
@@ -103,7 +123,7 @@ export default async function handler(
         file_type: extension,
         file_size: fileBuffer.length,
         file_content: fileBuffer,
-        extracted_text: extractedText,
+        extracted_text: finalExtractedText,
         mime_type: mimeType || 'application/octet-stream'
       })
       .select()
