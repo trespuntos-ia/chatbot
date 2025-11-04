@@ -109,7 +109,7 @@ export default async function handler(
     const functions = [
       {
         name: 'search_products',
-        description: 'Busca productos en la base de datos. Usa esta función cuando el usuario pregunte por productos, categorías, nombres, descripciones o cualquier búsqueda de productos.',
+        description: 'Busca productos en la base de datos. IMPORTANTE: Usa esta función SIEMPRE antes de afirmar que tienes un producto. Si el usuario pregunta por un producto específico, busca primero con esta función. Si hay múltiples resultados similares, presenta las opciones al usuario y pregunta cuál es el correcto. Si no hay coincidencia exacta, pregunta por más detalles.',
         parameters: {
           type: 'object',
           properties: {
@@ -144,7 +144,7 @@ export default async function handler(
       },
       {
         name: 'get_product_by_sku',
-        description: 'Obtiene un producto específico por su SKU. Usa esta función cuando el usuario mencione un SKU específico o código de producto.',
+        description: 'Obtiene un producto específico por su SKU. IMPORTANTE: Usa esta función cuando el usuario proporcione un SKU específico. Si no encuentras el producto con ese SKU exacto, informa al usuario que ese SKU no existe en lugar de afirmar que sí lo tienes.',
         parameters: {
           type: 'object',
           properties: {
@@ -229,10 +229,29 @@ export default async function handler(
 
       // Preparar contexto enriquecido con información de la web
       let enrichedContext = '';
+      
+      // Añadir instrucciones para validación cuando hay múltiples productos
+      if (functionResult.products && functionResult.products.length > 1) {
+        enrichedContext += '\n\n⚠️ IMPORTANTE: Has encontrado múltiples productos. NO asumas cuál es el correcto. Debes:\n';
+        enrichedContext += '1. Listar todos los productos encontrados con sus nombres completos\n';
+        enrichedContext += '2. Preguntar al usuario cuál de estos productos es el que busca\n';
+        enrichedContext += '3. NO afirmes que tienes un producto específico sin confirmar primero\n';
+      } else if (functionResult.products && functionResult.products.length === 1) {
+        const product = functionResult.products[0];
+        // Verificar si el nombre coincide exactamente con la búsqueda
+        if (functionArgs.query && typeof functionArgs.query === 'string') {
+          const searchTerm = functionArgs.query.toLowerCase().trim();
+          const productName = product.name.toLowerCase();
+          if (!productName.includes(searchTerm) && !searchTerm.includes(productName.split(' ')[0])) {
+            enrichedContext += '\n\n⚠️ IMPORTANTE: El producto encontrado no coincide exactamente con la búsqueda. Debes preguntar al usuario si este es el producto que busca antes de confirmar.\n';
+          }
+        }
+      }
+      
       if (functionResult.products && functionResult.products.length > 0) {
         const productsWithWebData = functionResult.products.filter((p: any) => p.webData);
         if (productsWithWebData.length > 0) {
-          enrichedContext = '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
+          enrichedContext += '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
           productsWithWebData.forEach((product: any, idx: number) => {
             enrichedContext += `\nProducto ${idx + 1}: ${product.name}\n`;
             if (product.webData?.description) {
@@ -257,7 +276,7 @@ export default async function handler(
         }
       } else if (functionResult.product && functionResult.product.webData) {
         const product = functionResult.product;
-        enrichedContext = '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
+        enrichedContext += '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
         if (product.webData.description) {
           enrichedContext += `- Descripción completa: ${product.webData.description}\n`;
         }
