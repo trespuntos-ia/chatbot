@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import pdf from 'pdf-parse';
 
 export default async function handler(
   req: VercelRequest,
@@ -69,109 +68,66 @@ export default async function handler(
     // Determinar tipo de archivo simple
     const extension = filename.split('.').pop()?.toLowerCase() || 'txt';
     
-    console.log('Saving to Supabase first (text extraction will happen later):', {
+    console.log('Saving to Supabase:', {
       filename,
       extension,
-      size: fileBuffer.length
+      size: fileBuffer.length,
+      bufferType: fileBuffer.constructor.name
     });
 
-    // PASO 1: Guardar el archivo primero SIN extraer texto (para evitar timeouts)
-    const { data, error } = await supabase
-      .from('documents')
-      .insert({
-        filename: `${Date.now()}_${filename}`,
-        original_filename: filename,
-        file_type: extension,
-        file_size: fileBuffer.length,
-        file_content: fileBuffer,
-        extracted_text: '', // Vacío por ahora, se actualizará después
-        mime_type: mimeType || 'application/octet-stream'
-      })
-      .select()
-      .single();
+    // Guardar el archivo SIN extraer texto (por ahora)
+    // TODO: Extraer texto en un endpoint separado o proceso asíncrono
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .insert({
+          filename: `${Date.now()}_${filename}`,
+          original_filename: filename,
+          file_type: extension,
+          file_size: fileBuffer.length,
+          file_content: fileBuffer,
+          extracted_text: '', // Vacío por ahora
+          mime_type: mimeType || 'application/octet-stream'
+        })
+        .select()
+        .single();
 
-    if (error) {
-      console.error('Supabase error:', error);
-      res.status(500).json({ 
-        error: 'Database error', 
-        details: error.message,
-        code: error.code,
-        hint: error.hint
+      if (error) {
+        console.error('Supabase insert error:', {
+          message: error.message,
+          code: error.code,
+          hint: error.hint,
+          details: error.details
+        });
+        res.status(500).json({ 
+          error: 'Database error', 
+          details: error.message,
+          code: error.code,
+          hint: error.hint
+        });
+        return;
+      }
+
+      console.log('Document saved successfully:', data.id);
+
+      res.status(200).json({
+        success: true,
+        document: {
+          id: data.id,
+          filename: data.original_filename,
+          file_type: data.file_type,
+          file_size: data.file_size
+        }
+      });
+    } catch (dbError) {
+      console.error('Unexpected error saving to Supabase:', dbError);
+      res.status(500).json({
+        error: 'Internal server error',
+        message: dbError instanceof Error ? dbError.message : 'Unknown error',
+        details: 'Error al guardar en la base de datos'
       });
       return;
     }
-
-    console.log('Document saved successfully:', data.id);
-
-    // PASO 2: Extraer texto en segundo plano (no bloquea la respuesta)
-    // Esto se hace después de responder al usuario para que no espere
-    (async () => {
-      try {
-        let extractedText = '';
-        
-        if (extension === 'pdf' || mimeType?.includes('pdf')) {
-          console.log('Starting background PDF text extraction for:', data.id);
-          try {
-            // Timeout más largo en background (15 segundos)
-            const pdfPromise = pdf(fileBuffer);
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('PDF extraction timeout')), 15000)
-            );
-            
-            const pdfData = await Promise.race([pdfPromise, timeoutPromise]) as any;
-            extractedText = pdfData?.text || '';
-            
-            // Limitar a 50KB
-            const maxTextLength = 50 * 1024;
-            if (extractedText.length > maxTextLength) {
-              extractedText = extractedText.substring(0, maxTextLength) + '...[truncado]';
-            }
-            
-            console.log('PDF text extracted in background:', extractedText.length, 'characters');
-          } catch (pdfError) {
-            console.warn('Background PDF extraction failed:', pdfError);
-            extractedText = '';
-          }
-        } else if (extension === 'txt' || extension === 'md' || mimeType?.includes('text/plain') || mimeType?.includes('text/markdown')) {
-          extractedText = fileBuffer.toString('utf-8');
-          // Limitar a 50KB
-          const maxTextLength = 50 * 1024;
-          if (extractedText.length > maxTextLength) {
-            extractedText = extractedText.substring(0, maxTextLength) + '...[truncado]';
-          }
-          console.log('Text file extracted in background:', extractedText.length, 'characters');
-        }
-
-        // Actualizar el documento con el texto extraído
-        if (extractedText) {
-          const { error: updateError } = await supabase
-            .from('documents')
-            .update({ extracted_text: extractedText })
-            .eq('id', data.id);
-          
-          if (updateError) {
-            console.error('Error updating document with extracted text:', updateError);
-          } else {
-            console.log('Document updated with extracted text:', data.id);
-          }
-        }
-      } catch (bgError) {
-        console.error('Background text extraction error:', bgError);
-        // No hacer nada, el archivo ya está guardado
-      }
-    })(); // Función auto-ejecutada asíncrona
-
-    // Responder inmediatamente sin esperar la extracción de texto
-    res.status(200).json({
-      success: true,
-      document: {
-        id: data.id,
-        filename: data.original_filename,
-        file_type: data.file_type,
-        file_size: data.file_size
-      },
-      message: 'Archivo subido correctamente. El texto se extraerá en segundo plano.'
-    });
   } catch (error) {
     console.error('Upload error:', error);
     res.status(500).json({
