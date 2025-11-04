@@ -42,31 +42,81 @@ export default async function handler(
       .from('products')
       .select('*', { count: 'exact', head: true });
 
-    // Eliminar todos los productos - usar gt('id', 0) que funciona mejor
-    const { error, count } = await supabase
+    console.log(`Total productos antes de eliminar: ${totalCount || 0}`);
+
+    // Intentar eliminar todos los productos de diferentes maneras
+    let deletedCount = 0;
+    let error: any = null;
+
+    // Método 1: Intentar eliminar sin condición (si RLS lo permite)
+    let result = await supabase
       .from('products')
       .delete()
-      .gt('id', 0); // Esto eliminará todos los productos (id siempre > 0)
+      .neq('id', -1); // Condición que siempre es verdadera
 
-    if (error) {
+    if (result.error) {
+      console.log('Método 1 falló, intentando método 2:', result.error);
+      
+      // Método 2: Obtener todos los IDs y eliminar por lotes
+      const { data: allProducts } = await supabase
+        .from('products')
+        .select('id')
+        .limit(10000);
+
+      if (allProducts && allProducts.length > 0) {
+        const ids = allProducts.map(p => p.id);
+        console.log(`Eliminando ${ids.length} productos por lotes...`);
+        
+        // Eliminar en lotes de 100
+        const batchSize = 100;
+        for (let i = 0; i < ids.length; i += batchSize) {
+          const batch = ids.slice(i, i + batchSize);
+          const batchResult = await supabase
+            .from('products')
+            .delete()
+            .in('id', batch);
+          
+          if (batchResult.error) {
+            console.error(`Error eliminando lote ${i}:`, batchResult.error);
+            error = batchResult.error;
+          } else {
+            deletedCount += batch.length;
+          }
+        }
+      } else {
+        error = result.error;
+      }
+    } else {
+      deletedCount = result.count || 0;
+    }
+
+    if (error && deletedCount === 0) {
       console.error('Supabase error clearing products:', error);
       res.status(500).json({ 
         error: 'Error clearing products',
         details: error.message,
-        code: error.code
+        code: error.code,
+        hint: 'RLS policies may be blocking DELETE. Check Supabase policies or use service role key.'
       });
       return;
     }
+
+    // Esperar un momento para que se complete la eliminación
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Verificar que realmente se eliminaron
     const { count: remainingCount } = await supabase
       .from('products')
       .select('*', { count: 'exact', head: true });
 
+    console.log(`Productos restantes después de eliminar: ${remainingCount || 0}`);
+
     res.status(200).json({ 
       success: true,
-      message: 'Todos los productos han sido eliminados',
-      deleted: count || totalCount || 0,
+      message: remainingCount === 0 
+        ? 'Todos los productos han sido eliminados correctamente'
+        : `Se eliminaron ${deletedCount} productos, pero quedan ${remainingCount} en la base de datos`,
+      deleted: deletedCount || totalCount || 0,
       remaining: remainingCount || 0,
       verified: (remainingCount || 0) === 0
     });
