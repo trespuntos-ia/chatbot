@@ -54,6 +54,13 @@ export function Documentation() {
           const base64String = e.target?.result as string;
           const base64Data = base64String.includes(',') ? base64String.split(',')[1] : base64String;
 
+          console.log('Sending request:', {
+            filename: file.name,
+            size: file.size,
+            base64Length: base64Data.length,
+            estimatedSize: (base64Data.length * 0.75 / 1024 / 1024).toFixed(2) + 'MB'
+          });
+
           const response = await fetch('/api/upload-document', {
             method: 'POST',
             headers: {
@@ -66,7 +73,19 @@ export function Documentation() {
             })
           });
 
-          const data = await response.json();
+          console.log('Response status:', response.status);
+          const responseText = await response.text();
+          console.log('Response text:', responseText.substring(0, 200));
+
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch (parseErr) {
+            console.error('Error parsing JSON:', parseErr);
+            setError(`Error del servidor (${response.status}): ${responseText.substring(0, 100)}`);
+            setIsUploading(false);
+            return;
+          }
 
           if (response.ok && data.success) {
             setSuccess(`Archivo "${file.name}" subido correctamente`);
@@ -75,10 +94,11 @@ export function Documentation() {
               fileInputRef.current.value = '';
             }
           } else {
-            setError(data.error || data.details || 'Error al subir el archivo');
+            setError(data.error || data.details || `Error al subir el archivo (${response.status})`);
           }
         } catch (err) {
-          setError(`Error: ${err instanceof Error ? err.message : 'Error desconocido'}`);
+          const errorMsg = err instanceof Error ? err.message : 'Error desconocido';
+          setError(`Error: ${errorMsg}`);
           console.error('Error uploading file:', err);
         } finally {
           setIsUploading(false);

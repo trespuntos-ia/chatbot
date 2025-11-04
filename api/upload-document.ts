@@ -21,10 +21,13 @@ export default async function handler(
   }
 
   try {
+    console.log('Upload request received');
+    
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
+      console.error('Supabase config missing');
       res.status(500).json({ error: 'Supabase configuration missing' });
       return;
     }
@@ -34,18 +37,43 @@ export default async function handler(
     // Obtener datos del body
     const { file, filename, mimeType } = req.body;
 
+    console.log('Request body:', {
+      hasFile: !!file,
+      filename: filename,
+      fileLength: typeof file === 'string' ? file.length : 'not string',
+      mimeType: mimeType
+    });
+
     if (!file || !filename) {
       res.status(400).json({ error: 'File and filename required' });
       return;
     }
 
     // Convertir base64 a buffer
-    const base64Data = file.includes(',') ? file.split(',')[1] : file;
-    const fileBuffer = Buffer.from(base64Data, 'base64');
+    let fileBuffer: Buffer;
+    try {
+      const base64Data = file.includes(',') ? file.split(',')[1] : file;
+      fileBuffer = Buffer.from(base64Data, 'base64');
+      console.log('File decoded:', {
+        originalSize: file.length,
+        decodedSize: fileBuffer.length,
+        sizeMB: (fileBuffer.length / 1024 / 1024).toFixed(2)
+      });
+    } catch (decodeErr) {
+      console.error('Error decoding base64:', decodeErr);
+      res.status(400).json({ error: 'Invalid base64 encoding' });
+      return;
+    }
 
     // Determinar tipo de archivo simple
     const extension = filename.split('.').pop()?.toLowerCase() || 'txt';
     
+    console.log('Saving to Supabase:', {
+      filename,
+      extension,
+      size: fileBuffer.length
+    });
+
     // Guardar en Supabase - solo campos esenciales
     const { data, error } = await supabase
       .from('documents')
@@ -63,9 +91,16 @@ export default async function handler(
 
     if (error) {
       console.error('Supabase error:', error);
-      res.status(500).json({ error: 'Database error', details: error.message });
+      res.status(500).json({ 
+        error: 'Database error', 
+        details: error.message,
+        code: error.code,
+        hint: error.hint
+      });
       return;
     }
+
+    console.log('Document saved successfully:', data.id);
 
     res.status(200).json({
       success: true,
