@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
-import { scrapeProductPage } from './utils/productScraper';
+// Scraping desactivado temporalmente para evitar FUNCTION_INVOCATION_FAILED
+// import { scrapeProductPage } from './utils/productScraper';
 
 // Función para procesar prompt con variables
 function processPrompt(prompt: any): string {
@@ -228,29 +229,27 @@ export default async function handler(
       switch (functionName) {
         case 'search_products':
           functionResult = await searchProducts(supabase, functionArgs);
-          // Enriquecer productos con información de la web (con manejo de errores)
-          if (functionResult.products && functionResult.products.length > 0) {
-            try {
-              await enrichProductsWithWebData(functionResult.products);
-            } catch (scrapingError) {
-              // Si falla el scraping, continuar sin esa información
-              console.error('Error enriching products with web data:', scrapingError);
-              // No lanzar el error, continuar con los productos sin web data
-            }
-          }
+          // Scraping desactivado temporalmente para evitar FUNCTION_INVOCATION_FAILED
+          // TODO: Reactivar cuando se optimice el scraping
+          // if (functionResult.products && functionResult.products.length > 0) {
+          //   try {
+          //     await enrichProductsWithWebData(functionResult.products);
+          //   } catch (scrapingError) {
+          //     console.error('Error enriching products with web data:', scrapingError);
+          //   }
+          // }
           break;
         case 'get_product_by_sku':
           functionResult = await getProductBySku(supabase, functionArgs);
-          // Enriquecer producto con información de la web (con manejo de errores)
-          if (functionResult.product && functionResult.found) {
-            try {
-              await enrichProductsWithWebData([functionResult.product]);
-            } catch (scrapingError) {
-              // Si falla el scraping, continuar sin esa información
-              console.error('Error enriching product with web data:', scrapingError);
-              // No lanzar el error, continuar con el producto sin web data
-            }
-          }
+          // Scraping desactivado temporalmente para evitar FUNCTION_INVOCATION_FAILED
+          // TODO: Reactivar cuando se optimice el scraping
+          // if (functionResult.product && functionResult.found) {
+          //   try {
+          //     await enrichProductsWithWebData([functionResult.product]);
+          //   } catch (scrapingError) {
+          //     console.error('Error enriching product with web data:', scrapingError);
+          //   }
+          // }
           break;
         default:
           res.status(500).json({
@@ -261,7 +260,7 @@ export default async function handler(
           return;
       }
 
-      // Preparar contexto enriquecido con información de la web
+      // Preparar contexto enriquecido con instrucciones de validación
       let enrichedContext = '';
       
       // Añadir instrucciones para validación cuando hay múltiples productos
@@ -282,6 +281,9 @@ export default async function handler(
         }
       }
       
+      // Scraping desactivado temporalmente - comentado para evitar FUNCTION_INVOCATION_FAILED
+      // TODO: Reactivar cuando se implemente scraping asíncrono o con mejor manejo de errores
+      /*
       if (functionResult.products && functionResult.products.length > 0) {
         const productsWithWebData = functionResult.products.filter((p: any) => p.webData);
         if (productsWithWebData.length > 0) {
@@ -330,6 +332,7 @@ export default async function handler(
           enrichedContext += `- Colores disponibles: ${product.webData.availableColors.join(', ')}\n`;
         }
       }
+      */
 
       // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
       const systemPromptWithContext = systemPrompt + enrichedContext;
@@ -381,10 +384,10 @@ export default async function handler(
       const sources: string[] = [];
       if (functionName === 'search_products' || functionName === 'get_product_by_sku') {
         sources.push('products_db');
-        // Si se obtuvo información de la web, añadirla como fuente
-        if (enrichedContext) {
-          sources.push('web');
-        }
+        // Scraping desactivado temporalmente
+        // if (enrichedContext) {
+        //   sources.push('web');
+        // }
       } else if (functionName === 'search_documents') {
         sources.push('documents');
       } else if (functionName === 'search_web_documentation') {
@@ -473,6 +476,9 @@ export default async function handler(
   }
 }
 
+// Scraping desactivado temporalmente para evitar FUNCTION_INVOCATION_FAILED
+// TODO: Reactivar cuando se implemente scraping asíncrono o con mejor manejo de errores
+/*
 // Función para enriquecer productos con información de la web
 async function enrichProductsWithWebData(products: any[]): Promise<void> {
   // Procesar solo los primeros 3 productos para no ralentizar demasiado
@@ -503,6 +509,7 @@ async function enrichProductsWithWebData(products: any[]): Promise<void> {
     }
   });
 }
+*/
 
 // Función para buscar productos (optimizada)
 async function searchProducts(supabase: any, params: any) {
