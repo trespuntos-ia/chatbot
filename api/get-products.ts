@@ -45,66 +45,66 @@ export default async function handler(
       search 
     } = req.query;
 
-    // Construir query base - ordenar por created_at por defecto (más seguro)
-    // Si la columna date_add existe, se puede cambiar después
+    // Construir query base - simplificada para evitar errores
     let query = supabase
       .from('products')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
+      .select('*', { count: 'exact' });
 
-    // Filtrar por categoría si se proporciona (buscar en el campo que puede contener múltiples categorías)
+    // Aplicar filtros
     if (category && typeof category === 'string') {
       query = query.ilike('category', `%${category}%`);
     }
 
-    // Buscar por nombre o SKU si se proporciona
     if (search && typeof search === 'string') {
       query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
     }
 
-    // Intentar ordenar por date_add si existe, sino usar created_at
-    let { data, error, count } = await query;
+    // Ordenar por id (siempre existe) - más seguro
+    query = query.order('id', { ascending: false });
 
-    // Si hay error al ordenar por created_at, intentar sin orden específico
-    if (error && error.code === 'PGRST116') {
-      // Error de columna no encontrada, intentar sin orden específico
-      query = supabase
-        .from('products')
-        .select('*', { count: 'exact' })
-        .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
-      
-      if (category && typeof category === 'string') {
-        query = query.ilike('category', `%${category}%`);
-      }
-      
-      if (search && typeof search === 'string') {
-        query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
-      }
-      
-      const result = await query;
-      data = result.data;
-      error = result.error;
-      count = result.count;
-    }
+    // Ejecutar query
+    let { data, error, count } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
+      console.error('Error details:', JSON.stringify(error, null, 2));
       res.status(500).json({ 
         error: 'Error fetching products',
         details: error.message,
-        code: error.code 
+        code: error.code,
+        hint: error.code === 'PGRST116' ? 'Columna no encontrada. Verifica que la tabla products existe y tiene las columnas correctas.' : undefined
       });
       return;
     }
 
-    // Si tenemos datos y algunos tienen date_add, ordenar localmente por date_add
-    if (data && data.length > 0 && data.some((p: any) => p.date_add)) {
+    // Si tenemos datos, ordenar localmente por date_add si existe, sino por created_at
+    if (data && data.length > 0) {
       data = data.sort((a: any, b: any) => {
-        if (!a.date_add) return 1;
-        if (!b.date_add) return -1;
-        return new Date(b.date_add).getTime() - new Date(a.date_add).getTime();
+        // Priorizar date_add si existe
+        if (a.date_add && b.date_add) {
+          return new Date(b.date_add).getTime() - new Date(a.date_add).getTime();
+        }
+        if (a.date_add) return -1;
+        if (b.date_add) return 1;
+        
+        // Si no hay date_add, usar created_at
+        if (a.created_at && b.created_at) {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        }
+        if (a.created_at) return -1;
+        if (b.created_at) return 1;
+        
+        // Por último, usar id
+        return (b.id || 0) - (a.id || 0);
       });
+
+      // Aplicar paginación manualmente
+      const start = parseInt(offset as string);
+      const end = start + parseInt(limit as string);
+      data = data.slice(start, end);
+      
+      // Actualizar count para reflejar el total real
+      count = count || data.length;
     }
 
     res.status(200).json({ 
