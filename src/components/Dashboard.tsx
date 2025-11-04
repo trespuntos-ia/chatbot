@@ -5,10 +5,11 @@ import { PromptConfig } from './PromptConfig';
 import { Chat } from './Chat';
 import { ChatConfig } from './ChatConfig';
 import { Documentation } from './Documentation';
+import { SyncHistory } from './SyncHistory';
 import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
 import type { ChatConfig as ChatConfigType } from '../types';
 
-type Tab = 'products' | 'connections' | 'chat' | 'prompts' | 'documentation';
+type Tab = 'products' | 'connections' | 'chat' | 'prompts' | 'documentation' | 'history';
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('products');
@@ -167,6 +168,32 @@ export function Dashboard() {
                   Documentación
                 </div>
               </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'history'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  Historial
+                </div>
+              </button>
             </nav>
           </div>
         </div>
@@ -185,6 +212,7 @@ export function Dashboard() {
           )}
           {activeTab === 'prompts' && <PromptConfig />}
           {activeTab === 'documentation' && <Documentation />}
+          {activeTab === 'history' && <SyncHistory />}
         </div>
       </div>
     </div>

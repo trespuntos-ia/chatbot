@@ -32,8 +32,37 @@ export function Connections() {
   }, []);
 
   const handleAuthenticate = async (apiConfig: ApiConfig) => {
-    // Guardar configuración
+    // Guardar configuración en localStorage (para uso inmediato)
     localStorage.setItem('prestashop-config', JSON.stringify(apiConfig));
+    
+    // También guardar en Supabase para el cron job
+    try {
+      const response = await fetch('/api/save-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'Default Connection',
+          prestashop_url: apiConfig.prestashopUrl,
+          api_key: apiConfig.apiKey,
+          base_url: apiConfig.baseUrl,
+          lang_code: apiConfig.langCode || 1,
+          lang_slug: apiConfig.langSlug || 'es',
+          is_active: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        console.warn('Warning: Could not save connection to database for cron job:', data.error);
+        // No bloqueamos el flujo si falla, solo guardamos en localStorage
+      }
+    } catch (err) {
+      console.warn('Warning: Could not save connection to database:', err);
+      // No bloqueamos el flujo si falla
+    }
+    
     setConfig(apiConfig);
     setError('');
   };
