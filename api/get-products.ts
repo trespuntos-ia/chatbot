@@ -45,66 +45,32 @@ export default async function handler(
       search 
     } = req.query;
 
-    // Construir query base - simplificada para evitar errores
+    // Query simple y segura
     let query = supabase
       .from('products')
-      .select('*', { count: 'exact' });
+      .select('*', { count: 'exact' })
+      .order('id', { ascending: false })
+      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
 
-    // Aplicar filtros
+    // Filtrar por categoría si se proporciona
     if (category && typeof category === 'string') {
       query = query.ilike('category', `%${category}%`);
     }
 
+    // Buscar por nombre o SKU si se proporciona
     if (search && typeof search === 'string') {
       query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
     }
 
-    // Ordenar por id (siempre existe) - más seguro
-    query = query.order('id', { ascending: false });
-
-    // Ejecutar query
-    let { data, error, count } = await query;
+    const { data, error, count } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
-      console.error('Error details:', JSON.stringify(error, null, 2));
       res.status(500).json({ 
         error: 'Error fetching products',
-        details: error.message,
-        code: error.code,
-        hint: error.code === 'PGRST116' ? 'Columna no encontrada. Verifica que la tabla products existe y tiene las columnas correctas.' : undefined
+        details: error.message 
       });
       return;
-    }
-
-    // Si tenemos datos, ordenar localmente por date_add si existe, sino por created_at
-    if (data && data.length > 0) {
-      data = data.sort((a: any, b: any) => {
-        // Priorizar date_add si existe
-        if (a.date_add && b.date_add) {
-          return new Date(b.date_add).getTime() - new Date(a.date_add).getTime();
-        }
-        if (a.date_add) return -1;
-        if (b.date_add) return 1;
-        
-        // Si no hay date_add, usar created_at
-        if (a.created_at && b.created_at) {
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        }
-        if (a.created_at) return -1;
-        if (b.created_at) return 1;
-        
-        // Por último, usar id
-        return (b.id || 0) - (a.id || 0);
-      });
-
-      // Aplicar paginación manualmente
-      const start = parseInt(offset as string);
-      const end = start + parseInt(limit as string);
-      data = data.slice(start, end);
-      
-      // Actualizar count para reflejar el total real
-      count = count || data.length;
     }
 
     res.status(200).json({ 
@@ -122,4 +88,3 @@ export default async function handler(
     });
   }
 }
-
