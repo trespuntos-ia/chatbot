@@ -11,7 +11,7 @@ export function Documentation() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [processingDocs, setProcessingDocs] = useState<Set<number>>(new Set());
+  const [processingDocs] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -190,7 +190,7 @@ export function Documentation() {
 
   // Esta función ya no es necesaria porque extraemos el texto en el cliente
   // Pero la mantenemos por si acaso algún documento antiguo necesita procesarse
-  const extractDocumentText = async (documentId: number) => {
+  const extractDocumentText = async (_documentId: number) => {
     setError('La extracción de texto ahora se hace en el cliente. Por favor, vuelve a subir el documento.');
   };
 
