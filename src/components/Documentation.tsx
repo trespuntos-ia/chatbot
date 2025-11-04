@@ -152,7 +152,20 @@ export function Documentation() {
       });
 
       console.log('Extract response status:', response.status);
-      const data = await response.json();
+      
+      // Leer respuesta como texto primero para manejar errores no-JSON
+      const responseText = await response.text();
+      console.log('Extract response text:', responseText.substring(0, 200));
+      
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        console.error('Error parsing JSON response:', parseErr);
+        setError(`Error del servidor (${response.status}): ${responseText.substring(0, 100)}`);
+        return;
+      }
+      
       console.log('Extract response data:', data);
 
       if (response.ok && data.success) {

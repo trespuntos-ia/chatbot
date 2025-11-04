@@ -6,6 +6,21 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
+  // Función helper para enviar errores JSON
+  const sendJsonError = (status: number, error: string, details?: string) => {
+    if (!res.headersSent) {
+      try {
+        res.status(status).json({
+          success: false,
+          error,
+          details: details || error
+        });
+      } catch (e) {
+        console.error('Error sending JSON response:', e);
+      }
+    }
+  };
+
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
@@ -17,7 +32,7 @@ export default async function handler(
   }
 
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+    sendJsonError(405, 'Method not allowed');
     return;
   }
 
@@ -26,7 +41,7 @@ export default async function handler(
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      res.status(500).json({ error: 'Supabase configuration missing' });
+      sendJsonError(500, 'Supabase configuration missing');
       return;
     }
 
@@ -34,7 +49,7 @@ export default async function handler(
     const { documentId } = req.body;
 
     if (!documentId) {
-      res.status(400).json({ error: 'Document ID required' });
+      sendJsonError(400, 'Document ID required');
       return;
     }
 
@@ -49,7 +64,7 @@ export default async function handler(
 
     if (fetchError || !document) {
       console.error('Error fetching document:', fetchError);
-      res.status(404).json({ error: 'Document not found' });
+      sendJsonError(404, 'Document not found', fetchError?.message);
       return;
     }
 
@@ -65,6 +80,13 @@ export default async function handler(
 
     // Extraer texto según el tipo de archivo
     let extractedText = '';
+    
+    // Verificar que file_content existe
+    if (!document.file_content) {
+      sendJsonError(400, 'Document has no file content');
+      return;
+    }
+
     const fileBuffer = Buffer.from(document.file_content);
 
     try {
@@ -72,27 +94,34 @@ export default async function handler(
       const mimeType = document.mime_type || '';
 
       if (extension === 'pdf' || mimeType.includes('pdf')) {
-        console.log('Extracting text from PDF...', { size: fileBuffer.length });
+        console.log('Extracting text from PDF...', { size: fileBuffer.length, documentId });
         
-        // Timeout de 15 segundos
-        const pdfPromise = pdf(fileBuffer);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('PDF extraction timeout')), 15000)
-        );
-        
-        const pdfData = await Promise.race([pdfPromise, timeoutPromise]) as any;
-        extractedText = pdfData?.text || '';
-        console.log('PDF text extracted:', extractedText.length, 'characters');
+        try {
+          // Timeout de 15 segundos
+          const pdfPromise = pdf(fileBuffer);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('PDF extraction timeout')), 15000)
+          );
+          
+          const pdfData = await Promise.race([pdfPromise, timeoutPromise]) as any;
+          extractedText = pdfData?.text || '';
+          console.log('PDF text extracted:', extractedText.length, 'characters');
+        } catch (pdfError) {
+          console.error('PDF extraction error:', pdfError);
+          sendJsonError(500, 'PDF extraction failed', pdfError instanceof Error ? pdfError.message : 'Unknown PDF error');
+          return;
+        }
       } else if (extension === 'txt' || extension === 'md' || mimeType.includes('text/plain') || mimeType.includes('text/markdown')) {
         extractedText = fileBuffer.toString('utf-8');
         console.log('Text file extracted:', extractedText.length, 'characters');
+      } else {
+        console.log('File type not supported for text extraction:', extension, mimeType);
+        sendJsonError(400, 'File type not supported for text extraction');
+        return;
       }
     } catch (extractError) {
       console.error('Error extracting text:', extractError);
-      res.status(500).json({
-        error: 'Text extraction failed',
-        message: extractError instanceof Error ? extractError.message : 'Unknown error'
-      });
+      sendJsonError(500, 'Text extraction failed', extractError instanceof Error ? extractError.message : 'Unknown error');
       return;
     }
 
@@ -110,10 +139,7 @@ export default async function handler(
 
     if (updateError) {
       console.error('Error updating document:', updateError);
-      res.status(500).json({
-        error: 'Failed to update document',
-        message: updateError.message
-      });
+      sendJsonError(500, 'Failed to update document', updateError.message);
       return;
     }
 
@@ -126,10 +152,7 @@ export default async function handler(
     });
   } catch (error) {
     console.error('Extract text error:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
+    sendJsonError(500, 'Internal server error', error instanceof Error ? error.message : 'Unknown error');
   }
 }
 
