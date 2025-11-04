@@ -2,8 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import type { Document } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configurar worker para pdf.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Configurar worker para pdf.js usando el worker del paquete npm
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.js',
+  import.meta.url
+).toString();
 
 const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
 
