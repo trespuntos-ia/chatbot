@@ -1,6 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import pdf from 'pdf-parse';
+
+// Importación dinámica de pdf-parse para evitar errores en build
+let pdfParse: any = null;
+async function getPdfParse() {
+  if (!pdfParse) {
+    try {
+      pdfParse = (await import('pdf-parse')).default;
+    } catch (error) {
+      console.error('Error importing pdf-parse:', error);
+      throw new Error('PDF parsing library not available');
+    }
+  }
+  return pdfParse;
+}
 
 export default async function handler(
   req: VercelRequest,
@@ -97,6 +110,9 @@ export default async function handler(
         console.log('Extracting text from PDF...', { size: fileBuffer.length, documentId });
         
         try {
+          // Importar pdf-parse dinámicamente
+          const pdf = await getPdfParse();
+          
           // Timeout de 15 segundos
           const pdfPromise = pdf(fileBuffer);
           const timeoutPromise = new Promise((_, reject) => 
@@ -152,7 +168,28 @@ export default async function handler(
     });
   } catch (error) {
     console.error('Extract text error:', error);
-    sendJsonError(500, 'Internal server error', error instanceof Error ? error.message : 'Unknown error');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('Error stack:', errorStack);
+    
+    // Intentar enviar error JSON
+    try {
+      sendJsonError(500, 'Internal server error', errorMessage);
+    } catch (sendError) {
+      console.error('Failed to send error response:', sendError);
+      // Último recurso: intentar enviar respuesta directamente
+      if (!res.headersSent) {
+        try {
+          res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: errorMessage
+          });
+        } catch (finalError) {
+          console.error('Final error sending response:', finalError);
+        }
+      }
+    }
   }
 }
 
