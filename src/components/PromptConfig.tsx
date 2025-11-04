@@ -6,10 +6,9 @@ import {
   deletePrompt,
   activatePrompt,
   processPrompt,
-  extractVariablesFromPrompt,
-  type SystemPrompt,
-  type PromptVariable
+  extractVariablesFromPrompt
 } from '../services/promptService';
+import type { SystemPrompt, PromptVariable } from '../types';
 
 export function PromptConfig() {
   const [prompts, setPrompts] = useState<SystemPrompt[]>([]);
@@ -39,8 +38,8 @@ export function PromptConfig() {
       const existingVars = selectedPrompt.variables || [];
       
       // Combinar variables extraídas con las existentes
-      const allVars = extractedVars.map(varName => {
-        const existing = existingVars.find(v => v.variable_name === varName);
+      const allVars = extractedVars.map((varName: string) => {
+        const existing = existingVars.find((v: PromptVariable) => v.variable_name === varName);
         return existing || {
           variable_name: varName,
           variable_value: '',
@@ -208,6 +207,7 @@ export function PromptConfig() {
       id: 'temp',
       name: promptName || 'Preview',
       prompt: promptText,
+      is_active: false,
       variables: variables
     };
     return processPrompt(tempPrompt);
