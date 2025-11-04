@@ -8,7 +8,7 @@ export default async function handler(
   // Permitir CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
@@ -19,7 +19,7 @@ export default async function handler(
     return;
   }
 
-  if (req.method !== 'GET') {
+  if (req.method !== 'DELETE') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
@@ -37,36 +37,16 @@ export default async function handler(
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Obtener parámetros de query
-    const { 
-      limit = '50', 
-      offset = '0', 
-      category,
-      search 
-    } = req.query;
-
-    let query = supabase
+    // Eliminar todos los productos
+    const { error, count } = await supabase
       .from('products')
-      .select('*', { count: 'exact' })
-      .order('date_add', { ascending: false, nullsFirst: false })
-      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
-
-    // Filtrar por categoría si se proporciona (buscar en el campo que puede contener múltiples categorías)
-    if (category && typeof category === 'string') {
-      query = query.ilike('category', `%${category}%`);
-    }
-
-    // Buscar por nombre o SKU si se proporciona
-    if (search && typeof search === 'string') {
-      query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
-    }
-
-    const { data, error, count } = await query;
+      .delete()
+      .neq('id', 0); // Esto eliminará todos los productos
 
     if (error) {
       console.error('Supabase error:', error);
       res.status(500).json({ 
-        error: 'Error fetching products',
+        error: 'Error clearing products',
         details: error.message 
       });
       return;
@@ -74,13 +54,11 @@ export default async function handler(
 
     res.status(200).json({ 
       success: true,
-      products: data || [],
-      total: count || 0,
-      limit: parseInt(limit as string),
-      offset: parseInt(offset as string)
+      message: 'Todos los productos han sido eliminados',
+      deleted: count || 0
     });
   } catch (error) {
-    console.error('Get products error:', error);
+    console.error('Clear products error:', error);
     res.status(500).json({ 
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'

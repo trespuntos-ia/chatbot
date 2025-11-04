@@ -76,6 +76,48 @@ async function getCategoryName(
 }
 
 /**
+ * Obtiene todas las categorías de un producto y las concatena.
+ */
+async function getProductCategories(
+  product: any,
+  categoryCache: Map<number, string>,
+  config: ApiConfig
+): Promise<string> {
+  const categories: string[] = [];
+  const categoryIds = new Set<number>();
+
+  // Agregar categoría por defecto
+  if (product.id_category_default) {
+    categoryIds.add(parseInt(product.id_category_default));
+  }
+
+  // Obtener todas las categorías de las asociaciones
+  if (product.associations?.categories?.category) {
+    const cats = Array.isArray(product.associations.categories.category)
+      ? product.associations.categories.category
+      : [product.associations.categories.category];
+    
+    cats.forEach((cat: any) => {
+      if (cat.id) {
+        categoryIds.add(parseInt(cat.id));
+      }
+    });
+  }
+
+  // Obtener nombres de categorías
+  for (const categoryId of categoryIds) {
+    if (categoryId) {
+      const categoryName = await getCategoryName(categoryId, categoryCache, config);
+      if (categoryName && !categories.includes(categoryName)) {
+        categories.push(categoryName);
+      }
+    }
+  }
+
+  return categories.join(', ');
+}
+
+/**
  * Mapea un producto de la API a nuestro formato.
  */
 async function mapProduct(
@@ -88,14 +130,8 @@ async function mapProduct(
     ? sanitizeDescription(extractMultilanguageValue(product.description_short))
     : '';
 
-  let category = '';
-  if (product.id_category_default) {
-    category = await getCategoryName(
-      parseInt(product.id_category_default),
-      categoryCache,
-      config
-    );
-  }
+  // Obtener todas las categorías del producto
+  const category = await getProductCategories(product, categoryCache, config);
 
   const linkRewrite = extractMultilanguageValue(product.link_rewrite);
   const imageId = product.id_default_image || '';
@@ -124,6 +160,13 @@ async function mapProduct(
     productUrl += '.html';
   }
 
+  // Formatear fecha de creación de PrestaShop
+  let dateAdd = '';
+  if (product.date_add) {
+    // PrestaShop devuelve la fecha en formato ISO
+    dateAdd = product.date_add;
+  }
+
   return {
     name,
     price: priceValue,
@@ -132,6 +175,7 @@ async function mapProduct(
     sku: product.reference || product.ean13 || '',
     image: imageUrl,
     product_url: productUrl,
+    date_add: dateAdd,
   };
 }
 
@@ -190,7 +234,7 @@ export async function fetchAllProducts(
     const query = {
       language: String(config.langCode || 1),
       limit: `${offset},${chunkSize}`,
-      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short]',
+      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,date_add,associations]',
       sort: 'id_ASC',
     };
 

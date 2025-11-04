@@ -9,6 +9,7 @@ interface ProductFromDB {
   sku: string;
   image_url: string;
   product_url: string;
+  date_add: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -88,7 +89,13 @@ export function ProductsReport() {
   }, [products]);
 
   const totalPages = stats ? Math.ceil(stats.total / itemsPerPage) : 1;
-  const categories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
+  // Extraer todas las categorías únicas (pueden estar separadas por comas)
+  const allCategories = products
+    .map(p => p.category)
+    .filter(Boolean)
+    .flatMap(cat => cat.split(',').map(c => c.trim()))
+    .filter(Boolean);
+  const categories = Array.from(new Set(allCategories));
 
   return (
     <div className="space-y-6">
@@ -308,6 +315,9 @@ export function ProductsReport() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
                       URL
                     </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Fecha Creación
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -369,6 +379,17 @@ export function ProductsReport() {
                           </a>
                         ) : (
                           <span className="text-xs text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 text-sm">
+                        {product.date_add ? (
+                          new Date(product.date_add).toLocaleDateString('es-ES', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                          })
+                        ) : (
+                          <span className="text-slate-400">-</span>
                         )}
                       </td>
                     </tr>

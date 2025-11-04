@@ -73,6 +73,8 @@ export default async function handler(
         // Preservar imagen existente si la nueva está vacía
         image_url: product.image || existing?.image_url || '',
         product_url: product.product_url || '',
+        // Guardar fecha de creación de PrestaShop (solo si no existe, para no sobrescribir)
+        date_add: product.date_add || existing?.date_add || null,
         updated_at: new Date().toISOString(),
       };
     });
