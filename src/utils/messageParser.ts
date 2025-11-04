@@ -103,6 +103,53 @@ export function findProductsInMessage(
 }
 
 /**
+ * Detecta si el texto contiene información descriptiva de productos (listas numeradas con precios, descripciones)
+ */
+function hasProductDescriptiveContent(text: string): boolean {
+  // Patrón para detectar listas numeradas con productos
+  const numberedListPattern = /\d+\.\s*\*\*[^*]+\*\*/;
+  
+  // Patrón para detectar líneas con precios (€, EUR, etc.)
+  const pricePattern = /(?:Precio|Price)[:\-]\s*[\d.,]+\s*€?/i;
+  
+  // Patrón para detectar descripciones de productos en listas
+  const descriptionPattern = /(?:Descripción|Description)[:\-]/i;
+  
+  // Patrón para detectar "Ver más detalles" o botones
+  const detailsPattern = /(?:Ver\s+más\s+detalles|View\s+details)/i;
+  
+  return numberedListPattern.test(text) || 
+         (pricePattern.test(text) && descriptionPattern.test(text)) ||
+         detailsPattern.test(text);
+}
+
+/**
+ * Extrae solo el texto introductorio (antes de cualquier lista de productos)
+ */
+function extractIntroText(text: string): string {
+  const lines = text.split('\n');
+  const introLines: string[] = [];
+  
+  for (const line of lines) {
+    // Si encontramos una lista numerada, parar
+    if (/\d+\.\s*\*\*/.test(line)) {
+      break;
+    }
+    // Si encontramos un precio o descripción, probablemente es parte de una lista
+    if (/(?:Precio|Price)[:\-]/.test(line) || /(?:Descripción|Description)[:\-]/.test(line)) {
+      break;
+    }
+    // Si encontramos "Ver más detalles", parar
+    if (/(?:Ver\s+más\s+detalles|View\s+details)/i.test(line)) {
+      break;
+    }
+    introLines.push(line);
+  }
+  
+  return introLines.join('\n').trim();
+}
+
+/**
  * Divide el mensaje en partes (texto y productos) - texto primero, luego tarjetas
  */
 export function splitMessageWithProducts(
@@ -119,13 +166,17 @@ export function splitMessageWithProducts(
     ? [recommendedProduct] 
     : products;
 
-  // SIEMPRE mostrar primero todo el texto, luego todas las tarjetas
+  // Si hay productos, verificar si hay contenido descriptivo que debe ocultarse
+  const hasDescriptiveContent = hasProductDescriptiveContent(message);
+  
+  // SIEMPRE mostrar primero el texto (solo intro si hay contenido descriptivo), luego las tarjetas
   if (productMap.size === 0) {
     // Si no hay productos específicos en lista, verificar si hay recomendación
     if (recommendedProduct && products.length > 1) {
-      // Mostrar solo el producto recomendado
+      // Extraer solo el intro si hay contenido descriptivo
+      const textContent = hasDescriptiveContent ? extractIntroText(message) : message;
       const result: MessagePart[] = [
-        { type: 'text' as const, content: message },
+        { type: 'text' as const, content: textContent },
         { 
           type: 'product' as const, 
           content: recommendedProduct, 
@@ -136,8 +187,9 @@ export function splitMessageWithProducts(
     }
     
     // Si no hay recomendación específica, mostrar texto primero, luego todos los productos
+    const textContent = hasDescriptiveContent ? extractIntroText(message) : message;
     const result: MessagePart[] = [
-      { type: 'text' as const, content: message }
+      { type: 'text' as const, content: textContent }
     ];
     productsToShow.forEach((product, idx) => {
       result.push({ 
@@ -149,10 +201,10 @@ export function splitMessageWithProducts(
     return result;
   }
 
-  // Si hay productos en lista numerada, mostrar TODO el texto primero, luego las tarjetas
-  // Simplificar: mostrar texto completo, luego productos
+  // Si hay productos en lista numerada, extraer solo el intro
+  const textContent = hasDescriptiveContent ? extractIntroText(message) : message;
   const result: MessagePart[] = [
-    { type: 'text' as const, content: message }
+    { type: 'text' as const, content: textContent }
   ];
   
   // Añadir todos los productos al final
@@ -247,4 +299,3 @@ export function parseMessageContent(
 
   return { html, productPositions: productMap };
 }
-

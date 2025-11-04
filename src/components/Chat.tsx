@@ -178,10 +178,17 @@ export function Chat({ config }: ChatProps) {
               
               return (
                 <div key={index} className="space-y-4">
-                  {/* Primero: Todo el texto */}
+                  {/* Mostrar texto introductorio (ya filtrado por splitMessageWithProducts) */}
                   {textParts.map((part, partIndex) => {
+                    const textContent = part.content as string;
+                    
+                    // Solo mostrar si hay contenido significativo (más de 10 caracteres)
+                    if (!textContent || textContent.trim().length < 10) {
+                      return null;
+                    }
+                    
                     // Parsear el texto con formato markdown (sin imágenes si hay productos)
-                    const { html } = parseMessageContent(part.content as string, message.products);
+                    const { html } = parseMessageContent(textContent, message.products);
                     
                     return (
                       <div key={`text-${partIndex}`} className="flex justify-start">
@@ -195,25 +202,26 @@ export function Chat({ config }: ChatProps) {
                               🔍 Consultó la base de datos
                             </div>
                           )}
-                          {/* Fuentes de información */}
-                          {partIndex === textParts.length - 1 && message.sources && message.sources.length > 0 && (
-                            <div className="mt-3 pt-3 border-t border-slate-200">
-                              <p className="text-xs text-slate-500">
-                                Fuente: {formatSources(message.sources)}
-                              </p>
-                            </div>
-                          )}
                         </div>
                       </div>
                     );
                   })}
                   
-                  {/* Luego: Todas las tarjetas de productos en grid */}
+                  {/* Todas las tarjetas de productos en grid */}
                   {productParts.length > 0 && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {productParts.map((part, productIndex) => (
                         <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
                       ))}
+                    </div>
+                  )}
+                  
+                  {/* Mostrar fuentes al final */}
+                  {message.sources && message.sources.length > 0 && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[90%] text-xs text-slate-500">
+                        Fuente: {formatSources(message.sources)}
+                      </div>
                     </div>
                   )}
                 </div>

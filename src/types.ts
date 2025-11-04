@@ -75,3 +75,30 @@ export interface ChatResponse {
   details?: string;
 }
 
+// Tipos para Documentación
+export interface Document {
+  id: number;
+  filename: string;
+  original_filename: string;
+  file_type: string;
+  file_size: number;
+  mime_type?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DocumentUploadResponse {
+  success: boolean;
+  document?: Document;
+  error?: string;
+  details?: string;
+}
+
+export interface DocumentSearchResult {
+  id: number;
+  filename: string;
+  file_type: string;
+  snippet: string;
+  created_at?: string;
+}
+

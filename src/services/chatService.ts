@@ -73,7 +73,7 @@ export async function sendChatMessage(
 export const DEFAULT_CHAT_CONFIG: ChatConfig = {
   model: 'gpt-3.5-turbo',
   temperature: 0.7,
-  max_tokens: 1500, // Reducido para respuestas más rápidas
+  max_tokens: 800, // Reducido significativamente para respuestas más rápidas
   top_p: 1.0,
   frequency_penalty: 0.0,
   presence_penalty: 0.0

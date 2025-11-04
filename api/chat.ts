@@ -103,41 +103,41 @@ export default async function handler(
       variables: activePrompts.prompt_variables || []
     });
 
-    // 3. Limitar historial de conversación (últimos 10 mensajes para evitar tokens innecesarios)
-    const limitedHistory = conversationHistory.slice(-10);
+    // 3. Limitar historial de conversación (últimos 6 mensajes para mayor velocidad)
+    const limitedHistory = conversationHistory.slice(-6);
 
     // 4. Definir funciones disponibles para Function Calling
     const functions = [
       {
         name: 'search_products',
-        description: 'Busca productos en la base de datos. IMPORTANTE: Usa esta función SIEMPRE antes de afirmar que tienes un producto. Si el usuario pregunta por un producto específico, busca primero con esta función. Si hay múltiples resultados similares, presenta las opciones al usuario y pregunta cuál es el correcto. Si no hay coincidencia exacta, pregunta por más detalles.',
+        description: 'Busca productos. Si hay >4 resultados, pregunta por más criterios (SKU, categoría). Si hay 1-4, muestra opciones. Máximo 4 productos.',
         parameters: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'Texto de búsqueda para buscar en nombre, descripción o SKU. Si está vacío, devuelve todos los productos (con límite).'
+              description: 'Texto de búsqueda (nombre, descripción, SKU).'
             },
             category: {
               type: 'string',
-              description: 'Filtrar por categoría principal. Ejemplos: "Electrónica", "Ropa", "Hogar". Si no se especifica, no se filtra por categoría.'
+              description: 'Categoría principal.'
             },
             subcategory: {
               type: 'string',
-              description: 'Filtrar por subcategoría específica. Si no se especifica, no se filtra por subcategoría.'
+              description: 'Subcategoría.'
             },
             limit: {
               type: 'number',
-              description: 'Número máximo de resultados a devolver. Por defecto: 20. Máximo recomendado: 50.'
+              description: 'Máximo 4 resultados.'
             },
             offset: {
               type: 'number',
-              description: 'Número de resultados a saltar (para paginación). Por defecto: 0.'
+              description: 'Offset para paginación.'
             },
             sort_by: {
               type: 'string',
               enum: ['name', 'price_asc', 'price_desc', 'date_add', 'created_at'],
-              description: 'Orden de los resultados. "name": alfabético, "price_asc": precio menor a mayor, "price_desc": precio mayor a menor, "date_add": más recientes primero, "created_at": más recientes en Supabase.'
+              description: 'Orden: name, price_asc, price_desc, date_add, created_at.'
             }
           },
           required: []
@@ -145,16 +145,34 @@ export default async function handler(
       },
       {
         name: 'get_product_by_sku',
-        description: 'Obtiene un producto específico por su SKU. IMPORTANTE: Usa esta función cuando el usuario proporcione un SKU específico. Si no encuentras el producto con ese SKU exacto, informa al usuario que ese SKU no existe en lugar de afirmar que sí lo tienes.',
+        description: 'Obtiene producto por SKU. Si no existe, informa al usuario.',
         parameters: {
           type: 'object',
           properties: {
             sku: {
               type: 'string',
-              description: 'SKU del producto (código único). Puede ser exacto o parcial. Si es parcial, se buscarán productos que contengan ese texto en el SKU.'
+              description: 'SKU del producto (exacto o parcial).'
             }
           },
           required: ['sku']
+        }
+      },
+      {
+        name: 'search_documents',
+        description: 'Busca información en los documentos subidos. Usa esta función cuando el usuario pregunte sobre información que podría estar en documentos, manuales, guías, políticas, o cualquier contenido que haya sido subido previamente. Si no encuentras información relevante en los documentos, informa al usuario que no encontraste información sobre ese tema en la documentación disponible.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Texto de búsqueda para buscar en el contenido de los documentos subidos. Debe ser específico y relevante a la pregunta del usuario.'
+            },
+            limit: {
+              type: 'number',
+              description: 'Número máximo de documentos a devolver. Por defecto: 5. Máximo: 10.'
+            }
+          },
+          required: ['query']
         }
       }
     ];
@@ -169,7 +187,7 @@ export default async function handler(
     // 6. Configuración de OpenAI
     const model = config.model || 'gpt-3.5-turbo'; // Por defecto más rápido
     const temperature = config.temperature !== undefined ? config.temperature : 0.7;
-    const maxTokens = config.max_tokens || 1500; // Reducido para respuestas más rápidas
+    const maxTokens = config.max_tokens || 800; // Reducido para respuestas más rápidas
 
     // 7. Llamar a OpenAI (con timeout para evitar errores de Vercel)
     let completion;
@@ -187,7 +205,7 @@ export default async function handler(
           tool_choice: 'auto'
         }),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('OpenAI request timeout')), 25000)
+          setTimeout(() => reject(new Error('OpenAI request timeout')), 20000)
         )
       ]) as any;
     } catch (openaiError) {
@@ -251,6 +269,9 @@ export default async function handler(
           //   }
           // }
           break;
+        case 'search_documents':
+          functionResult = await searchDocuments(supabase, functionArgs);
+          break;
         default:
           res.status(500).json({
             success: false,
@@ -263,21 +284,70 @@ export default async function handler(
       // Preparar contexto enriquecido con instrucciones de validación
       let enrichedContext = '';
       
-      // Añadir instrucciones para validación cuando hay múltiples productos
-      if (functionResult.products && functionResult.products.length > 1) {
-        enrichedContext += '\n\n⚠️ IMPORTANTE: Has encontrado múltiples productos. NO asumas cuál es el correcto. Debes:\n';
-        enrichedContext += '1. Listar todos los productos encontrados con sus nombres completos\n';
-        enrichedContext += '2. Preguntar al usuario cuál de estos productos es el que busca\n';
-        enrichedContext += '3. NO afirmes que tienes un producto específico sin confirmar primero\n';
-      } else if (functionResult.products && functionResult.products.length === 1) {
-        const product = functionResult.products[0];
-        // Verificar si el nombre coincide exactamente con la búsqueda
-        if (functionArgs.query && typeof functionArgs.query === 'string') {
-          const searchTerm = functionArgs.query.toLowerCase().trim();
-          const productName = product.name.toLowerCase();
-          if (!productName.includes(searchTerm) && !searchTerm.includes(productName.split(' ')[0])) {
-            enrichedContext += '\n\n⚠️ IMPORTANTE: El producto encontrado no coincide exactamente con la búsqueda. Debes preguntar al usuario si este es el producto que busca antes de confirmar.\n';
+      // Contexto para documentos
+      if (functionName === 'search_documents') {
+        if (functionResult.results && functionResult.results.length > 0) {
+          enrichedContext += '\n\n📄 INFORMACIÓN ENCONTRADA EN DOCUMENTOS:\n';
+          functionResult.results.forEach((doc: any, idx: number) => {
+            enrichedContext += `\nDocumento ${idx + 1}: ${doc.filename} (${doc.file_type.toUpperCase()})\n`;
+            if (doc.snippet) {
+              enrichedContext += `Contenido relevante: ${doc.snippet}\n`;
+            }
+          });
+          enrichedContext += '\nIMPORTANTE: Usa esta información de los documentos para responder la pregunta del usuario. Si la información es relevante, cita el documento del que proviene.';
+        } else {
+          enrichedContext += '\n\n⚠️ No se encontró información relevante en los documentos subidos. Informa al usuario que no hay documentos que contengan información sobre ese tema.';
+        }
+      }
+      
+      // Contexto para productos
+      if (functionName === 'search_products' || functionName === 'get_product_by_sku') {
+        // Si hay más de 4 resultados, debe preguntar al usuario por más criterios
+        // Y NO devolver productos al frontend
+        if (functionResult.total && functionResult.total > 4) {
+          enrichedContext += '\n\n🚫 CRÍTICO: Has encontrado ' + functionResult.total + ' productos (más de 4). REGLAS ESTRICTAS:\n';
+          enrichedContext += '1. NO muestres ningún producto. NO uses tarjetas. NO listes productos.\n';
+          enrichedContext += '2. NO devuelvas productos al usuario en esta respuesta.\n';
+          enrichedContext += '3. DEBES preguntar al usuario por más criterios específicos para reducir la búsqueda.\n';
+          enrichedContext += '4. Ejemplos de preguntas que debes hacer:\n';
+          enrichedContext += '   - "He encontrado ' + functionResult.total + ' productos. Para ayudarte mejor, ¿podrías ser más específico?"\n';
+          enrichedContext += '   - "¿Tienes el SKU del producto?"\n';
+          enrichedContext += '   - "¿Qué categoría o tipo de producto buscas?"\n';
+          enrichedContext += '   - "¿Hay algún rango de precio en particular?"\n';
+          enrichedContext += '5. SOLO cuando el usuario proporcione más criterios, entonces busca de nuevo y muestra productos (máximo 4).\n';
+          
+          // Limpiar productos para que NO se muestren en el frontend
+          functionResult.products = [];
+          if (functionResult.product) {
+            functionResult.product = null;
+            functionResult.found = false;
           }
+        }
+        
+        // Añadir instrucciones para validación cuando hay múltiples productos
+        if (functionResult.products && functionResult.products.length > 1) {
+          enrichedContext += '\n\n⚠️ IMPORTANTE: Has encontrado ' + functionResult.products.length + ' productos. REGLAS ESTRICTAS:\n';
+          enrichedContext += '1. NO crees listas numeradas (1. **Producto**, etc.)\n';
+          enrichedContext += '2. NO menciones precios, descripciones o detalles de productos en el texto\n';
+          enrichedContext += '3. Las tarjetas se mostrarán automáticamente con toda la información\n';
+          enrichedContext += '4. SOLO escribe un texto introductorio breve (2-3 líneas) que:\n';
+          enrichedContext += '   - Presente los productos encontrados de forma general\n';
+          enrichedContext += '   - Ofrezca consejos o sugerencias sobre cómo elegir\n';
+          enrichedContext += '   - Invite al usuario a hacer preguntas\n';
+          enrichedContext += '5. Ejemplo de texto introductorio: "Aquí tienes algunos productos para [categoría] que pueden ser de tu interés. Puedes revisar las tarjetas para ver precios y detalles. ¿Te interesa alguno en particular o necesitas más información?"\n';
+          enrichedContext += '6. NO afirmes que tienes un producto específico sin confirmar primero\n';
+        } else if (functionResult.products && functionResult.products.length === 1) {
+          const product = functionResult.products[0];
+          // Verificar si el nombre coincide exactamente con la búsqueda
+          if (functionArgs.query && typeof functionArgs.query === 'string') {
+            const searchTerm = functionArgs.query.toLowerCase().trim();
+            const productName = product.name.toLowerCase();
+            if (!productName.includes(searchTerm) && !searchTerm.includes(productName.split(' ')[0])) {
+              enrichedContext += '\n\n⚠️ IMPORTANTE: El producto encontrado no coincide exactamente con la búsqueda. Debes preguntar al usuario si este es el producto que busca antes de confirmar.\n';
+            }
+          }
+          // Si hay un solo producto, mostrar solo la tarjeta con texto introductorio breve
+          enrichedContext += '\n\n⚠️ IMPORTANTE: Muestra SOLO un texto introductorio breve (1-2 líneas) y la tarjeta. NO añadas texto descriptivo adicional ni listas numeradas. El producto ya se mostrará en formato de tarjeta con toda su información.\n';
         }
       }
       
@@ -364,7 +434,7 @@ export default async function handler(
             tool_choice: 'auto'
           }),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OpenAI request timeout')), 25000)
+            setTimeout(() => reject(new Error('OpenAI request timeout')), 20000)
           )
         ]) as any;
       } catch (openaiError) {
@@ -394,6 +464,15 @@ export default async function handler(
         sources.push('web');
       }
 
+      // Si hay más de 4 resultados, asegurar que NO se envíen productos al frontend
+      if (functionResult.total && functionResult.total > 4) {
+        functionResult.products = [];
+        functionResult.product = null;
+        if (functionResult.found !== undefined) {
+          functionResult.found = false;
+        }
+      }
+
       // Preparar mensaje del asistente con productos y fuentes
       const assistantMessage: any = {
         role: 'assistant',
@@ -401,6 +480,16 @@ export default async function handler(
         function_calls: [toolCall],
         sources: sources.length > 0 ? sources : ['general']
       };
+
+      // NO añadir productos al mensaje si hay más de 4 resultados
+      if (!(functionResult.total && functionResult.total > 4)) {
+        // Solo añadir productos si hay productos válidos y no hay más de 4 resultados totales
+        if (functionResult.products && functionResult.products.length > 0) {
+          assistantMessage.products = functionResult.products;
+        } else if (functionResult.product && functionResult.found) {
+          assistantMessage.products = [functionResult.product];
+        }
+      }
 
       res.status(200).json({
         success: true,
@@ -546,8 +635,8 @@ async function searchProducts(supabase: any, params: any) {
     query = query.order('name', { ascending: true });
   }
 
-  // Límite reducido por defecto (más rápido)
-  const limit = Math.min(params.limit || 15, 30); // Reducido de 20 a 15, máx de 50 a 30
+  // Límite máximo de 4 productos - si hay más, debe preguntar al usuario
+  const limit = Math.min(params.limit || 4, 4); // Máximo 4 productos
   query = query.limit(limit);
 
   // Offset
@@ -611,6 +700,81 @@ async function getProductBySku(supabase: any, params: any) {
   return {
     product: mappedProduct,
     found: !!data
+  };
+}
+
+// Función para buscar en documentos
+async function searchDocuments(supabase: any, params: any) {
+  const searchTerm = params.query?.trim() || '';
+  const limit = Math.min(params.limit || 5, 10); // Máximo 10 documentos
+
+  if (!searchTerm) {
+    return {
+      results: [],
+      total: 0,
+      message: 'No search query provided'
+    };
+  }
+
+  // Buscar en el texto extraído y en el nombre del archivo
+  const { data, error } = await supabase
+    .from('documents')
+    .select('id, filename, original_filename, file_type, extracted_text, created_at')
+    .or(`extracted_text.ilike.%${searchTerm}%,original_filename.ilike.%${searchTerm}%`)
+    .limit(limit);
+
+  if (error) {
+    console.error('Supabase error searching documents:', error);
+    return {
+      results: [],
+      total: 0,
+      error: error.message
+    };
+  }
+
+  // Preparar resultados con snippets del texto relevante
+  const results = (data || []).map((doc: any) => {
+    let snippet = '';
+    let relevance = 0;
+
+    if (doc.extracted_text) {
+      const text = doc.extracted_text;
+      const index = text.toLowerCase().indexOf(searchTerm.toLowerCase());
+      if (index !== -1) {
+        // Encontró el término, extraer snippet alrededor
+        const start = Math.max(0, index - 150);
+        const end = Math.min(text.length, index + searchTerm.length + 150);
+        snippet = text.substring(start, end);
+        if (start > 0) snippet = '...' + snippet;
+        if (end < text.length) snippet = snippet + '...';
+        relevance = 1;
+      } else {
+        // No encontró el término exacto, tomar primeros 200 caracteres
+        snippet = text.substring(0, 200);
+        if (text.length > 200) snippet += '...';
+      }
+    } else if (doc.original_filename.toLowerCase().includes(searchTerm.toLowerCase())) {
+      snippet = `Documento encontrado: ${doc.original_filename}`;
+      relevance = 0.5;
+    }
+
+    return {
+      id: doc.id,
+      filename: doc.original_filename,
+      file_type: doc.file_type,
+      snippet,
+      relevance,
+      created_at: doc.created_at
+    };
+  });
+
+  // Ordenar por relevancia (los que tienen el término en el texto primero)
+  results.sort((a, b) => b.relevance - a.relevance);
+
+  return {
+    results,
+    total: results.length,
+    query: searchTerm
   };
 }
 
