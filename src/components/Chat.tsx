@@ -119,12 +119,13 @@ export function Chat({ config }: ChatProps) {
     }
   };
 
-  const _handleClearChat = () => {
-    if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
-      setMessages([]);
-      setError('');
-    }
-  };
+  // Función para limpiar el chat (no se usa actualmente, pero se mantiene para futuras implementaciones)
+  // const handleClearChat = () => {
+  //   if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
+  //     setMessages([]);
+  //     setError('');
+  //   }
+  // };
 
   // Mensajes de bienvenida iniciales
   const initialMessages = [
