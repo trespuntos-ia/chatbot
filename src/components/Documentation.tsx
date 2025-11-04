@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Document } from '../types';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configurar worker para pdf.js
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
 
@@ -35,6 +39,42 @@ export function Documentation() {
     }
   };
 
+  // Función para extraer texto de PDF en el cliente
+  const extractTextFromPDF = async (file: File): Promise<string> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str)
+          .join(' ');
+        fullText += pageText + '\n';
+      }
+
+      return fullText;
+    } catch (error) {
+      console.error('Error extracting PDF text:', error);
+      throw new Error('No se pudo extraer el texto del PDF');
+    }
+  };
+
+  // Función para extraer texto de archivos de texto
+  const extractTextFromTextFile = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        resolve(text);
+      };
+      reader.onerror = () => reject(new Error('Error al leer el archivo'));
+      reader.readAsText(file);
+    });
+  };
+
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -49,6 +89,33 @@ export function Documentation() {
     setSuccess('');
 
     try {
+      // Extraer texto en el cliente antes de subir
+      let extractedText = '';
+      const extension = file.name.split('.').pop()?.toLowerCase() || '';
+      const mimeType = file.type || '';
+
+      try {
+        if (extension === 'pdf' || mimeType.includes('pdf')) {
+          console.log('Extracting text from PDF in client...');
+          extractedText = await extractTextFromPDF(file);
+          console.log('PDF text extracted:', extractedText.length, 'characters');
+        } else if (extension === 'txt' || extension === 'md' || mimeType.includes('text/plain') || mimeType.includes('text/markdown')) {
+          console.log('Extracting text from text file...');
+          extractedText = await extractTextFromTextFile(file);
+          console.log('Text file extracted:', extractedText.length, 'characters');
+        }
+      } catch (extractError) {
+        console.warn('Error extracting text, continuing without it:', extractError);
+        // Continuar sin texto extraído
+      }
+
+      // Limitar texto extraído a 50KB
+      const maxTextLength = 50 * 1024;
+      if (extractedText.length > maxTextLength) {
+        extractedText = extractedText.substring(0, maxTextLength) + '...[truncado]';
+      }
+
+      // Convertir archivo a base64
       const reader = new FileReader();
       reader.onload = async (e) => {
         try {
@@ -58,8 +125,7 @@ export function Documentation() {
           console.log('Sending request:', {
             filename: file.name,
             size: file.size,
-            base64Length: base64Data.length,
-            estimatedSize: (base64Data.length * 0.75 / 1024 / 1024).toFixed(2) + 'MB'
+            extractedTextLength: extractedText.length
           });
 
           const response = await fetch('/api/upload-document', {
@@ -70,7 +136,8 @@ export function Documentation() {
             body: JSON.stringify({
               file: base64Data,
               filename: file.name,
-              mimeType: file.type || ''
+              mimeType: file.type || '',
+              extractedText: extractedText // Enviar texto extraído
             })
           });
 
@@ -89,8 +156,7 @@ export function Documentation() {
           }
 
           if (response.ok && data.success) {
-            setSuccess(`Archivo "${file.name}" subido correctamente`);
-            const documentId = data.document?.id;
+            setSuccess(`Archivo "${file.name}" subido correctamente${extractedText ? ' con texto extraído' : ''}`);
             
             if (fileInputRef.current) {
               fileInputRef.current.value = '';
@@ -98,14 +164,6 @@ export function Documentation() {
 
             // Recargar documentos para mostrar el nuevo
             await loadDocuments();
-
-            // Extraer texto del documento en segundo plano
-            if (documentId) {
-              console.log('Starting text extraction for document:', documentId);
-              extractDocumentText(documentId);
-            } else {
-              console.warn('No document ID returned from upload');
-            }
           } else {
             setError(data.error || data.details || `Error al subir el archivo (${response.status})`);
           }
@@ -130,65 +188,10 @@ export function Documentation() {
     }
   };
 
+  // Esta función ya no es necesaria porque extraemos el texto en el cliente
+  // Pero la mantenemos por si acaso algún documento antiguo necesita procesarse
   const extractDocumentText = async (documentId: number) => {
-    console.log('extractDocumentText called for:', documentId);
-    
-    // Marcar como procesando
-    setProcessingDocs(prev => {
-      const newSet = new Set(prev);
-      newSet.add(documentId);
-      console.log('Processing docs set:', Array.from(newSet));
-      return newSet;
-    });
-
-    try {
-      console.log('Calling extract-document-text endpoint...');
-      const response = await fetch('/api/extract-document-text', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ documentId })
-      });
-
-      console.log('Extract response status:', response.status);
-      
-      // Leer respuesta como texto primero para manejar errores no-JSON
-      const responseText = await response.text();
-      console.log('Extract response text:', responseText.substring(0, 200));
-      
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseErr) {
-        console.error('Error parsing JSON response:', parseErr);
-        setError(`Error del servidor (${response.status}): ${responseText.substring(0, 100)}`);
-        return;
-      }
-      
-      console.log('Extract response data:', data);
-
-      if (response.ok && data.success) {
-        console.log('Text extraction successful, reloading documents...');
-        // Recargar documentos para mostrar el texto extraído
-        await loadDocuments();
-        setSuccess('Texto extraído correctamente');
-      } else {
-        console.error('Error extracting text:', data.error);
-        setError(data.error || 'Error al extraer el texto');
-      }
-    } catch (err) {
-      console.error('Error extracting document text:', err);
-      setError('Error al conectarse con el servidor para extraer texto');
-    } finally {
-      // Quitar de procesando
-      setProcessingDocs(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(documentId);
-        console.log('Removed from processing, remaining:', Array.from(newSet));
-        return newSet;
-      });
-    }
+    setError('La extracción de texto ahora se hace en el cliente. Por favor, vuelve a subir el documento.');
   };
 
   const handleDelete = async (id: number, filename: string) => {

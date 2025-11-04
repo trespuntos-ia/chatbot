@@ -35,7 +35,7 @@ export default async function handler(
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Obtener datos del body
-    const { file, filename, mimeType } = req.body;
+    const { file, filename, mimeType, extractedText } = req.body;
 
     console.log('Request body:', {
       hasFile: !!file,
@@ -75,9 +75,17 @@ export default async function handler(
       bufferType: fileBuffer.constructor.name
     });
 
-    // Guardar el archivo SIN extraer texto (por ahora)
-    // TODO: Extraer texto en un endpoint separado o proceso asíncrono
+    // Guardar el archivo con texto extraído (si viene del cliente)
+    // El texto se extrae en el cliente usando pdf.js para evitar problemas en Vercel
     try {
+      // Limitar texto extraído a 50KB
+      const maxTextLength = 50 * 1024;
+      const finalExtractedText = extractedText && extractedText.length > 0
+        ? (extractedText.length > maxTextLength 
+            ? extractedText.substring(0, maxTextLength) + '...[truncado]'
+            : extractedText)
+        : '';
+
       const { data, error } = await supabase
         .from('documents')
         .insert({
@@ -86,7 +94,7 @@ export default async function handler(
           file_type: extension,
           file_size: fileBuffer.length,
           file_content: fileBuffer,
-          extracted_text: '', // Vacío por ahora
+          extracted_text: finalExtractedText,
           mime_type: mimeType || 'application/octet-stream'
         })
         .select()

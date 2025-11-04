@@ -16,6 +16,7 @@
     "mammoth": "^1.11.0",
     "openai": "^6.8.0",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.4.394",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
