@@ -8,6 +8,7 @@ export interface Product {
   image: string;
   product_url: string;
   date_add?: string; // Fecha de creación en PrestaShop
+  colors?: string[]; // Colores disponibles del producto
 }
 
 export interface ApiConfig {

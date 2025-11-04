@@ -93,6 +93,22 @@ export function ProductCard({ product }: ProductCardProps) {
                 {product.subcategory && ` • ${product.subcategory}`}
               </span>
             )}
+            {/* Colores disponibles */}
+            {product.colors && product.colors.length > 0 && (
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-xs text-slate-500">Colores:</span>
+                <div className="flex gap-1.5 flex-wrap">
+                  {product.colors.map((color, idx) => (
+                    <span
+                      key={idx}
+                      className="text-xs px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full"
+                    >
+                      {color}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

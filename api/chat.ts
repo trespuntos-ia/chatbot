@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { scrapeProductPage } from './utils/productScraper';
 
 // Función para procesar prompt con variables
 function processPrompt(prompt: any): string {
@@ -206,9 +207,17 @@ export default async function handler(
       switch (functionName) {
         case 'search_products':
           functionResult = await searchProducts(supabase, functionArgs);
+          // Enriquecer productos con información de la web
+          if (functionResult.products && functionResult.products.length > 0) {
+            await enrichProductsWithWebData(functionResult.products);
+          }
           break;
         case 'get_product_by_sku':
           functionResult = await getProductBySku(supabase, functionArgs);
+          // Enriquecer producto con información de la web
+          if (functionResult.product && functionResult.found) {
+            await enrichProductsWithWebData([functionResult.product]);
+          }
           break;
         default:
           res.status(500).json({
@@ -218,20 +227,76 @@ export default async function handler(
           return;
       }
 
-      // 9. Enviar resultados de vuelta a OpenAI
+      // Preparar contexto enriquecido con información de la web
+      let enrichedContext = '';
+      if (functionResult.products && functionResult.products.length > 0) {
+        const productsWithWebData = functionResult.products.filter((p: any) => p.webData);
+        if (productsWithWebData.length > 0) {
+          enrichedContext = '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
+          productsWithWebData.forEach((product: any, idx: number) => {
+            enrichedContext += `\nProducto ${idx + 1}: ${product.name}\n`;
+            if (product.webData?.description) {
+              enrichedContext += `- Descripción completa: ${product.webData.description}\n`;
+            }
+            if (product.webData?.features && product.webData.features.length > 0) {
+              enrichedContext += `- Características: ${product.webData.features.join(', ')}\n`;
+            }
+            if (product.webData?.specifications) {
+              const specs = Object.entries(product.webData.specifications)
+                .slice(0, 5)
+                .map(([key, value]) => `${key}: ${value}`)
+                .join(', ');
+              if (specs) {
+                enrichedContext += `- Especificaciones: ${specs}\n`;
+              }
+            }
+            if (product.webData?.availableColors && product.webData.availableColors.length > 0) {
+              enrichedContext += `- Colores disponibles: ${product.webData.availableColors.join(', ')}\n`;
+            }
+          });
+        }
+      } else if (functionResult.product && functionResult.product.webData) {
+        const product = functionResult.product;
+        enrichedContext = '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
+        if (product.webData.description) {
+          enrichedContext += `- Descripción completa: ${product.webData.description}\n`;
+        }
+        if (product.webData.features && product.webData.features.length > 0) {
+          enrichedContext += `- Características: ${product.webData.features.join(', ')}\n`;
+        }
+        if (product.webData.specifications) {
+          const specs = Object.entries(product.webData.specifications)
+            .slice(0, 5)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join(', ');
+          if (specs) {
+            enrichedContext += `- Especificaciones: ${specs}\n`;
+          }
+        }
+        if (product.webData.availableColors && product.webData.availableColors.length > 0) {
+          enrichedContext += `- Colores disponibles: ${product.webData.availableColors.join(', ')}\n`;
+        }
+      }
+
+      // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
+      const systemPromptWithContext = systemPrompt + enrichedContext;
+      const messagesWithContext = [
+        { role: 'system', content: systemPromptWithContext },
+        ...limitedHistory,
+        { role: 'user', content: message },
+        responseMessage,
+        {
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(functionResult)
+        }
+      ];
+
       const secondCompletion = await openai.chat.completions.create({
         model,
         temperature,
         max_tokens: maxTokens,
-        messages: [
-          ...messages,
-          responseMessage,
-          {
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(functionResult)
-          }
-        ] as any,
+        messages: messagesWithContext as any,
         tools: functions.map(f => ({
           type: 'function' as const,
           function: f
@@ -245,6 +310,10 @@ export default async function handler(
       const sources: string[] = [];
       if (functionName === 'search_products' || functionName === 'get_product_by_sku') {
         sources.push('products_db');
+        // Si se obtuvo información de la web, añadirla como fuente
+        if (enrichedContext) {
+          sources.push('web');
+        }
       } else if (functionName === 'search_documents') {
         sources.push('documents');
       } else if (functionName === 'search_web_documentation') {
@@ -298,6 +367,28 @@ export default async function handler(
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
+}
+
+// Función para enriquecer productos con información de la web
+async function enrichProductsWithWebData(products: any[]): Promise<void> {
+  // Procesar solo los primeros 3 productos para no ralentizar demasiado
+  const productsToEnrich = products.slice(0, 3);
+  
+  await Promise.all(
+    productsToEnrich.map(async (product: any) => {
+      if (product.product_url) {
+        try {
+          const webData = await scrapeProductPage(product.product_url);
+          if (!webData.error) {
+            product.webData = webData;
+          }
+        } catch (error) {
+          // Silenciar errores de scraping para no romper el flujo
+          console.error(`Error scraping ${product.product_url}:`, error);
+        }
+      }
+    })
+  );
 }
 
 // Función para buscar productos (optimizada)
