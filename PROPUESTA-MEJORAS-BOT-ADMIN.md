@@ -98,43 +98,418 @@ Permitir añadir productos al carrito de PrestaShop directamente desde las tarje
    - Si el chat está en iframe o widget, necesitamos compartir cookies
 
 3. **Frontend (Componente React/JS):**
+   
+   **Función completa para añadir al carrito:**
    ```typescript
-   // Función para añadir al carrito
-   async function addToCart(productId: number, quantity: number = 1) {
+   // types.ts - Tipos necesarios
+   interface AddToCartParams {
+     productId: number;
+     quantity?: number;
+     productAttributeId?: number; // Para variantes (tallas, colores)
+     prestashopUrl: string;
+     csrfToken?: string;
+   }
+   
+   interface AddToCartResponse {
+     success: boolean;
+     message?: string;
+     error?: string;
+     cartCount?: number;
+   }
+   
+   // Función para obtener token CSRF (si es necesario)
+   async function getCsrfToken(prestashopUrl: string): Promise<string | null> {
      try {
-       // Opción 1: Usar endpoint de PrestaShop
+       const response = await fetch(`${prestashopUrl}/index.php`, {
+         credentials: 'include',
+       });
+       const html = await response.text();
+       // Extraer token del HTML (depende de cómo PrestaShop lo genere)
+       const match = html.match(/token['"]\s*:\s*['"]([^'"]+)['"]/);
+       return match ? match[1] : null;
+     } catch (error) {
+       console.error('Error obteniendo token CSRF:', error);
+       return null;
+     }
+   }
+   
+   // Función principal para añadir al carrito
+   async function addToCart(params: AddToCartParams): Promise<AddToCartResponse> {
+     const {
+       productId,
+       quantity = 1,
+       productAttributeId,
+       prestashopUrl,
+       csrfToken,
+     } = params;
+   
+     try {
+       // Obtener token CSRF si no se proporciona
+       let token = csrfToken;
+       if (!token) {
+         token = await getCsrfToken(prestashopUrl) || '';
+       }
+   
+       // Preparar parámetros
+       const bodyParams = new URLSearchParams({
+         id_product: productId.toString(),
+         qty: quantity.toString(),
+         token: token,
+       });
+   
+       // Añadir atributo de producto si existe (variantes)
+       if (productAttributeId) {
+         bodyParams.append('id_product_attribute', productAttributeId.toString());
+       }
+   
+       // Realizar petición a PrestaShop
        const response = await fetch(
          `${prestashopUrl}/index.php?controller=cart&action=add&ajax=1`,
          {
            method: 'POST',
            headers: {
              'Content-Type': 'application/x-www-form-urlencoded',
+             'X-Requested-With': 'XMLHttpRequest', // Para identificar como AJAX
            },
-           credentials: 'include', // Importante para cookies
-           body: new URLSearchParams({
-             id_product: productId.toString(),
-             qty: quantity.toString(),
-             token: csrfToken, // Necesario para seguridad
-           }),
+           credentials: 'include', // CRÍTICO: Para mantener cookies de sesión
+           body: bodyParams,
          }
        );
-       
-       if (response.ok) {
-         // Mostrar confirmación
-         showNotification('✓ Producto añadido al carrito');
-         // Opcional: Actualizar contador de carrito si está visible
+   
+       if (!response.ok) {
+         throw new Error(`HTTP error! status: ${response.status}`);
+       }
+   
+       const data = await response.json();
+   
+       // PrestaShop devuelve diferentes formatos según la versión
+       // Ajustar según la respuesta real
+       if (data.hasError === false || data.success) {
+         return {
+           success: true,
+           message: 'Producto añadido al carrito',
+           cartCount: data.cart?.products_count || data.productsCount,
+         };
+       } else {
+         return {
+           success: false,
+           error: data.errors?.[0] || data.message || 'Error desconocido',
+         };
        }
      } catch (error) {
-       showError('Error al añadir al carrito');
+       console.error('Error añadiendo al carrito:', error);
+       return {
+         success: false,
+         error: error instanceof Error ? error.message : 'Error al añadir al carrito',
+       };
+     }
+   }
+   
+   // Hook de React para usar en componentes
+   import { useState, useCallback } from 'react';
+   
+   export function useAddToCart(prestashopUrl: string) {
+     const [loading, setLoading] = useState(false);
+     const [error, setError] = useState<string | null>(null);
+   
+     const addProduct = useCallback(
+       async (
+         productId: number,
+         quantity: number = 1,
+         productAttributeId?: number
+       ) => {
+         setLoading(true);
+         setError(null);
+   
+         try {
+           const result = await addToCart({
+             productId,
+             quantity,
+             productAttributeId,
+             prestashopUrl,
+           });
+   
+           if (result.success) {
+             // Mostrar notificación de éxito
+             // Puedes usar tu sistema de notificaciones (toast, etc.)
+             return { success: true, cartCount: result.cartCount };
+           } else {
+             setError(result.error || 'Error al añadir al carrito');
+             return { success: false, error: result.error };
+           }
+         } catch (err) {
+           const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
+           setError(errorMessage);
+           return { success: false, error: errorMessage };
+         } finally {
+           setLoading(false);
+         }
+       },
+       [prestashopUrl]
+     );
+   
+     return { addProduct, loading, error };
+   }
+   
+   // Ejemplo de uso en componente React
+   function ProductCard({ product, prestashopUrl }: { product: Product; prestashopUrl: string }) {
+     const { addProduct, loading } = useAddToCart(prestashopUrl);
+     const [added, setAdded] = useState(false);
+   
+     const handleAddToCart = async () => {
+       const result = await addProduct(product.id, 1);
+       if (result.success) {
+         setAdded(true);
+         // Mostrar confirmación visual
+         setTimeout(() => setAdded(false), 3000);
+       }
+     };
+   
+     return (
+       <div className="product-card">
+         <img src={product.image_url} alt={product.name} />
+         <h3>{product.name}</h3>
+         <p className="price">{product.price}</p>
+         <button
+           onClick={handleAddToCart}
+           disabled={loading || added}
+           className={added ? 'added' : ''}
+         >
+           {loading ? 'Añadiendo...' : added ? '✓ Añadido' : 'Añadir al Carrito'}
+         </button>
+       </div>
+     );
+   }
+   ```
+   
+   **Alternativa: Usando API Proxy (Recomendado para producción):**
+   ```typescript
+   // Si prefieres usar tu propio backend como proxy
+   async function addToCartViaProxy(
+     productId: number,
+     quantity: number = 1,
+     productAttributeId?: number
+   ): Promise<AddToCartResponse> {
+     try {
+       const response = await fetch('/api/cart/add', {
+         method: 'POST',
+         headers: {
+           'Content-Type': 'application/json',
+         },
+         credentials: 'include',
+         body: JSON.stringify({
+           productId,
+           quantity,
+           productAttributeId,
+         }),
+       });
+   
+       const data = await response.json();
+       return data;
+     } catch (error) {
+       return {
+         success: false,
+         error: error instanceof Error ? error.message : 'Error desconocido',
+       };
      }
    }
    ```
 
 4. **Backend (API Proxy - Opcional pero recomendado):**
-   - Crear endpoint en tu backend: `POST /api/cart/add`
-   - El backend hace la llamada a PrestaShop
-   - Maneja autenticación y tokens CSRF
-   - Retorna respuesta estructurada
+   
+   **Código del endpoint API (Vercel/Serverless):**
+   ```typescript
+   // api/cart-add.ts (Vercel Serverless Function)
+   import type { VercelRequest, VercelResponse } from '@vercel/node';
+   
+   export default async function handler(
+     req: VercelRequest,
+     res: VercelResponse
+   ) {
+     // Permitir CORS
+     res.setHeader('Access-Control-Allow-Credentials', 'true');
+     res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+     res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+     res.setHeader(
+       'Access-Control-Allow-Headers',
+       'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+     );
+   
+     // Manejar preflight
+     if (req.method === 'OPTIONS') {
+       res.status(200).end();
+       return;
+     }
+   
+     if (req.method !== 'POST') {
+       res.status(405).json({ error: 'Method not allowed' });
+       return;
+     }
+   
+     try {
+       const { productId, quantity = 1, productAttributeId, prestashopUrl } = req.body;
+   
+       if (!productId || !prestashopUrl) {
+         res.status(400).json({ 
+           success: false,
+           error: 'productId y prestashopUrl son requeridos' 
+         });
+         return;
+       }
+   
+       // Obtener token CSRF de PrestaShop
+       const csrfResponse = await fetch(`${prestashopUrl}/index.php`, {
+         headers: {
+           'Cookie': req.headers.cookie || '', // Pasar cookies de sesión
+         },
+       });
+       
+       const csrfHtml = await csrfResponse.text();
+       const csrfMatch = csrfHtml.match(/token['"]\s*:\s*['"]([^'"]+)['"]/);
+       const csrfToken = csrfMatch ? csrfMatch[1] : '';
+   
+       // Preparar parámetros para añadir al carrito
+       const params = new URLSearchParams({
+         id_product: productId.toString(),
+         qty: quantity.toString(),
+         token: csrfToken,
+       });
+   
+       if (productAttributeId) {
+         params.append('id_product_attribute', productAttributeId.toString());
+       }
+   
+       // Realizar petición a PrestaShop
+       const cartResponse = await fetch(
+         `${prestashopUrl}/index.php?controller=cart&action=add&ajax=1`,
+         {
+           method: 'POST',
+           headers: {
+             'Content-Type': 'application/x-www-form-urlencoded',
+             'X-Requested-With': 'XMLHttpRequest',
+             'Cookie': req.headers.cookie || '', // Pasar cookies de sesión
+           },
+           body: params,
+         }
+       );
+   
+       if (!cartResponse.ok) {
+         throw new Error(`PrestaShop error: ${cartResponse.status}`);
+       }
+   
+       const cartData = await cartResponse.json();
+   
+       // Retornar respuesta estructurada
+       if (cartData.hasError === false || cartData.success) {
+         res.status(200).json({
+           success: true,
+           message: 'Producto añadido al carrito',
+           cartCount: cartData.cart?.products_count || cartData.productsCount,
+           data: cartData,
+         });
+       } else {
+         res.status(400).json({
+           success: false,
+           error: cartData.errors?.[0] || cartData.message || 'Error desconocido',
+           data: cartData,
+         });
+       }
+     } catch (error) {
+       console.error('Error añadiendo al carrito:', error);
+       res.status(500).json({
+         success: false,
+         error: error instanceof Error ? error.message : 'Error al añadir al carrito',
+       });
+     }
+   }
+   ```
+   
+   **Alternativa con Laravel (si usas backend Laravel):**
+   ```php
+   // app/Http/Controllers/CartController.php
+   namespace App\Http\Controllers;
+   
+   use Illuminate\Http\Request;
+   use Illuminate\Http\JsonResponse;
+   use GuzzleHttp\Client;
+   
+   class CartController extends Controller
+   {
+       public function addToCart(Request $request): JsonResponse
+       {
+           $request->validate([
+               'product_id' => 'required|integer',
+               'quantity' => 'integer|min:1',
+               'product_attribute_id' => 'integer|nullable',
+           ]);
+   
+           $prestashopUrl = session('prestashop_url') ?? $request->input('prestashop_url');
+           $productId = $request->input('product_id');
+           $quantity = $request->input('quantity', 1);
+           $productAttributeId = $request->input('product_attribute_id');
+   
+           try {
+               $client = new Client([
+                   'cookies' => true,
+                   'allow_redirects' => true,
+               ]);
+   
+               // Obtener token CSRF
+               $csrfResponse = $client->get("{$prestashopUrl}/index.php");
+               $csrfHtml = $csrfResponse->getBody()->getContents();
+               preg_match('/token["\']\s*:\s*["\']([^"\']+)["\']/', $csrfHtml, $matches);
+               $csrfToken = $matches[1] ?? '';
+   
+               // Preparar parámetros
+               $params = [
+                   'id_product' => $productId,
+                   'qty' => $quantity,
+                   'token' => $csrfToken,
+               ];
+   
+               if ($productAttributeId) {
+                   $params['id_product_attribute'] = $productAttributeId;
+               }
+   
+               // Añadir al carrito
+               $response = $client->post(
+                   "{$prestashopUrl}/index.php?controller=cart&action=add&ajax=1",
+                   [
+                       'form_params' => $params,
+                       'headers' => [
+                           'X-Requested-With' => 'XMLHttpRequest',
+                       ],
+                   ]
+               );
+   
+               $data = json_decode($response->getBody()->getContents(), true);
+   
+               if (isset($data['hasError']) && $data['hasError'] === false) {
+                   return response()->json([
+                       'success' => true,
+                       'message' => 'Producto añadido al carrito',
+                       'cart_count' => $data['cart']['products_count'] ?? null,
+                       'data' => $data,
+                   ]);
+               } else {
+                   return response()->json([
+                       'success' => false,
+                       'error' => $data['errors'][0] ?? 'Error desconocido',
+                       'data' => $data,
+                   ], 400);
+               }
+           } catch (\Exception $e) {
+               return response()->json([
+                   'success' => false,
+                   'error' => $e->getMessage(),
+               ], 500);
+           }
+       }
+   }
+   
+   // routes/api.php
+   Route::post('/cart/add', [CartController::class, 'addToCart']);
+   ```
 
 5. **Token CSRF:**
    - PrestaShop requiere token CSRF para seguridad

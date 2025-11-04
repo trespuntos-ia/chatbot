@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
+import { parseMessageContent, splitMessageWithProducts } from '../utils/messageParser';
 import type { ChatMessage, ChatConfig, Product } from '../types';
 
 interface ChatProps {
@@ -151,42 +152,74 @@ export function Chat({ config }: ChatProps) {
             <p>Comienza una conversación escribiendo un mensaje</p>
           </div>
         ) : (
-          messages.map((message, index) => (
-            <div key={index}>
-              {/* Mensaje de texto */}
-              <div
-                className={`flex ${
-                  message.role === 'user' ? 'justify-end' : 'justify-start'
-                } mb-2`}
-              >
-                <div
-                  className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                    message.role === 'user'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 text-slate-900'
-                  }`}
-                >
-                  <div className="whitespace-pre-wrap">{message.content}</div>
-                  {message.function_calls && (
-                    <div className="mt-2 text-xs opacity-75">
-                      🔍 Consultó la base de datos
-                    </div>
-                  )}
+          messages.map((message, index) => {
+            if (message.role === 'assistant' && message.products && message.products.length > 0) {
+              // Dividir mensaje en partes (texto y productos)
+              const parts = splitMessageWithProducts(message.content, message.products);
+              
+              return (
+                <div key={index} className="space-y-4">
+                  {parts.map((part, partIndex) => {
+                    if (part.type === 'text') {
+                      // Parsear el texto con formato markdown
+                      const { html } = parseMessageContent(part.content as string, message.products);
+                      
+                      return (
+                        <div key={partIndex} className="flex justify-start">
+                          <div className="max-w-[90%] rounded-lg px-4 py-3 bg-slate-100 text-slate-900">
+                            <div 
+                              className="prose prose-sm max-w-none prose-headings:text-slate-900 prose-p:text-slate-700 prose-a:text-indigo-600"
+                              dangerouslySetInnerHTML={{ __html: html }}
+                            />
+                            {partIndex === 0 && message.function_calls && (
+                              <div className="mt-2 text-xs opacity-75">
+                                🔍 Consultó la base de datos
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      // Mostrar tarjeta de producto
+                      return (
+                        <div key={partIndex} className="flex justify-start">
+                          <div className="w-full max-w-[400px]">
+                            <ProductCard product={part.content as Product} />
+                          </div>
+                        </div>
+                      );
+                    }
+                  })}
                 </div>
-              </div>
+              );
+            }
 
-              {/* Tarjetas de productos si existen */}
-              {message.role === 'assistant' && message.products && message.products.length > 0 && (
-                <div className="mb-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {message.products.map((product, productIndex) => (
-                      <ProductCard key={productIndex} product={product} />
-                    ))}
+            // Mensaje normal (usuario o asistente sin productos)
+            return (
+              <div key={index}>
+                <div
+                  className={`flex ${
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                  } mb-2`}
+                >
+                  <div
+                    className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                      message.role === 'user'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-900'
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                    {message.function_calls && (
+                      <div className="mt-2 text-xs opacity-75">
+                        🔍 Consultó la base de datos
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
-          ))
+              </div>
+            );
+          })
         )}
 
         {isLoading && (
