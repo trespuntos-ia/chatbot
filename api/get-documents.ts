@@ -44,6 +44,15 @@ export default async function handler(
       .from('documents')
       .select('id, filename, original_filename, file_type, file_size, mime_type, created_at, updated_at, extracted_text')
       .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Supabase error:', error);
+      res.status(500).json({
+        error: 'Database error',
+        details: error.message
+      });
+      return;
+    }
     
     // Transformar para incluir solo si tiene texto (no el texto completo)
     const documents = (data || []).map((doc: any) => ({
@@ -57,15 +66,6 @@ export default async function handler(
       updated_at: doc.updated_at,
       has_extracted_text: !!(doc.extracted_text && doc.extracted_text.length > 0)
     }));
-
-    if (error) {
-      console.error('Supabase error:', error);
-      res.status(500).json({
-        error: 'Database error',
-        details: error.message
-      });
-      return;
-    }
 
     res.status(200).json({
       success: true,
