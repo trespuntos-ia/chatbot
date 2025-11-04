@@ -170,18 +170,35 @@ export default async function handler(
     const temperature = config.temperature !== undefined ? config.temperature : 0.7;
     const maxTokens = config.max_tokens || 1500; // Reducido para respuestas más rápidas
 
-    // 7. Llamar a OpenAI
-    const completion = await openai.chat.completions.create({
-      model,
-      temperature,
-      max_tokens: maxTokens,
-      messages,
-      tools: functions.map(f => ({
-        type: 'function' as const,
-        function: f
-      })),
-      tool_choice: 'auto'
-    });
+    // 7. Llamar a OpenAI (con timeout para evitar errores de Vercel)
+    let completion;
+    try {
+      completion = await Promise.race([
+        openai.chat.completions.create({
+          model,
+          temperature,
+          max_tokens: maxTokens,
+          messages,
+          tools: functions.map(f => ({
+            type: 'function' as const,
+            function: f
+          })),
+          tool_choice: 'auto'
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('OpenAI request timeout')), 25000)
+        )
+      ]) as any;
+    } catch (openaiError) {
+      console.error('OpenAI API error:', openaiError);
+      res.status(500).json({
+        success: false,
+        error: 'Error al comunicarse con OpenAI',
+        message: openaiError instanceof Error ? openaiError.message : 'Timeout o error desconocido',
+        details: 'Por favor, intenta de nuevo en un momento'
+      });
+      return;
+    }
 
     const responseMessage = completion.choices[0].message;
 
@@ -191,13 +208,18 @@ export default async function handler(
       const functionName = toolCall.function.name;
       let functionArgs: any;
 
+      let functionArgs: any;
       try {
         functionArgs = JSON.parse(toolCall.function.arguments);
       } catch (e) {
-        res.status(500).json({
-          error: 'Invalid function arguments',
-          details: 'Failed to parse function arguments from OpenAI'
-        });
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: 'Invalid function arguments',
+            details: 'Failed to parse function arguments from OpenAI',
+            message: 'Error al procesar la solicitud de OpenAI'
+          });
+        }
         return;
       }
 
@@ -207,20 +229,33 @@ export default async function handler(
       switch (functionName) {
         case 'search_products':
           functionResult = await searchProducts(supabase, functionArgs);
-          // Enriquecer productos con información de la web
+          // Enriquecer productos con información de la web (con manejo de errores)
           if (functionResult.products && functionResult.products.length > 0) {
-            await enrichProductsWithWebData(functionResult.products);
+            try {
+              await enrichProductsWithWebData(functionResult.products);
+            } catch (scrapingError) {
+              // Si falla el scraping, continuar sin esa información
+              console.error('Error enriching products with web data:', scrapingError);
+              // No lanzar el error, continuar con los productos sin web data
+            }
           }
           break;
         case 'get_product_by_sku':
           functionResult = await getProductBySku(supabase, functionArgs);
-          // Enriquecer producto con información de la web
+          // Enriquecer producto con información de la web (con manejo de errores)
           if (functionResult.product && functionResult.found) {
-            await enrichProductsWithWebData([functionResult.product]);
+            try {
+              await enrichProductsWithWebData([functionResult.product]);
+            } catch (scrapingError) {
+              // Si falla el scraping, continuar sin esa información
+              console.error('Error enriching product with web data:', scrapingError);
+              // No lanzar el error, continuar con el producto sin web data
+            }
           }
           break;
         default:
           res.status(500).json({
+            success: false,
             error: 'Unknown function',
             details: `Function ${functionName} is not implemented`
           });
@@ -311,17 +346,35 @@ export default async function handler(
         }
       ];
 
-      const secondCompletion = await openai.chat.completions.create({
-        model,
-        temperature,
-        max_tokens: maxTokens,
-        messages: messagesWithContext as any,
-        tools: functions.map(f => ({
-          type: 'function' as const,
-          function: f
-        })),
-        tool_choice: 'auto'
-      });
+      // Segunda llamada a OpenAI también con timeout
+      let secondCompletion;
+      try {
+        secondCompletion = await Promise.race([
+          openai.chat.completions.create({
+            model,
+            temperature,
+            max_tokens: maxTokens,
+            messages: messagesWithContext as any,
+            tools: functions.map(f => ({
+              type: 'function' as const,
+              function: f
+            })),
+            tool_choice: 'auto'
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('OpenAI request timeout')), 25000)
+          )
+        ]) as any;
+      } catch (openaiError) {
+        console.error('OpenAI second completion error:', openaiError);
+        res.status(500).json({
+          success: false,
+          error: 'Error al generar respuesta final',
+          message: openaiError instanceof Error ? openaiError.message : 'Timeout o error desconocido',
+          details: 'Por favor, intenta de nuevo en un momento'
+        });
+        return;
+      }
 
       const finalMessage = secondCompletion.choices[0].message.content;
 
@@ -383,21 +436,40 @@ export default async function handler(
     console.error('Chat API error:', error);
     
     // Asegurar que siempre devolvemos JSON, incluso en caso de error
-    try {
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        details: error instanceof Error && error.stack ? error.stack.substring(0, 500) : undefined
-      });
-    } catch (jsonError) {
-      // Si falla al escribir JSON, intentar enviar un error básico
-      console.error('Failed to send JSON error response:', jsonError);
-      res.status(500).send(JSON.stringify({
-        success: false,
-        error: 'Internal server error',
-        message: 'Failed to process request'
-      }));
+    // Verificar que la respuesta no se haya enviado ya
+    if (!res.headersSent) {
+      try {
+        const errorMessage = error instanceof Error 
+          ? error.message 
+          : typeof error === 'string' 
+          ? error 
+          : 'Unknown error';
+        
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error',
+          message: errorMessage,
+          details: 'Ha ocurrido un error al procesar tu solicitud. Por favor, intenta de nuevo.'
+        });
+      } catch (jsonError) {
+        // Si falla al escribir JSON, intentar enviar un error básico
+        console.error('Failed to send JSON error response:', jsonError);
+        if (!res.headersSent) {
+          try {
+            res.status(500).send(JSON.stringify({
+              success: false,
+              error: 'Internal server error',
+              message: 'Failed to process request'
+            }));
+          } catch (sendError) {
+            // Último recurso: solo loguear
+            console.error('Failed to send any response:', sendError);
+          }
+        }
+      }
+    } else {
+      // Si ya se envió una respuesta, solo loguear
+      console.error('Response already sent, cannot send error response');
     }
   }
 }
@@ -407,7 +479,8 @@ async function enrichProductsWithWebData(products: any[]): Promise<void> {
   // Procesar solo los primeros 3 productos para no ralentizar demasiado
   const productsToEnrich = products.slice(0, 3);
   
-  await Promise.all(
+  // Usar Promise.allSettled para que un error no rompa todo
+  const results = await Promise.allSettled(
     productsToEnrich.map(async (product: any) => {
       if (product.product_url) {
         try {
@@ -418,10 +491,18 @@ async function enrichProductsWithWebData(products: any[]): Promise<void> {
         } catch (error) {
           // Silenciar errores de scraping para no romper el flujo
           console.error(`Error scraping ${product.product_url}:`, error);
+          // No lanzar el error, solo loguearlo
         }
       }
     })
   );
+  
+  // Log de resultados para debugging
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.error(`Failed to enrich product ${index}:`, result.reason);
+    }
+  });
 }
 
 // Función para buscar productos (optimizada)
