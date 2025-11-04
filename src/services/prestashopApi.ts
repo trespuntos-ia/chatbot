@@ -39,7 +39,7 @@ function sanitizeDescription(content: string): string {
 }
 
 /**
- * Obtiene el nombre de la categoría por su ID.
+ * Obtiene el nombre de la categoría por su ID usando el proxy de Vercel.
  */
 async function getCategoryName(
   categoryId: number,
@@ -53,14 +53,11 @@ async function getCategoryName(
   }
 
   try {
-    const url = `${config.prestashopUrl}/categories/${categoryId}?ws_key=${config.apiKey}&output_format=JSON&language=${config.langCode || 1}`;
+    // Usar el proxy de Vercel en lugar de llamar directamente a la API
+    const proxyUrl = `/api/prestashop-category?categoryId=${categoryId}&language=${config.langCode || 1}&prestashop_url=${encodeURIComponent(config.prestashopUrl)}&ws_key=${encodeURIComponent(config.apiKey)}`;
     
-    const response = await fetch(url, {
+    const response = await fetch(proxyUrl, {
       method: 'GET',
-      headers: {
-        'Authorization': `Basic ${btoa(config.apiKey + ':')}`,
-        'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
-      },
     });
 
     if (!response.ok) return '';
@@ -139,41 +136,39 @@ async function mapProduct(
 }
 
 /**
- * Realiza una solicitud GET a la API de PrestaShop.
+ * Realiza una solicitud GET a la API de PrestaShop usando el proxy de Vercel.
  */
 async function prestashopGet(
   endpoint: string,
   query: Record<string, string> = {},
   config: ApiConfig
 ): Promise<any> {
+  // Usar el proxy de Vercel en lugar de llamar directamente a la API
   const queryParams = new URLSearchParams({
+    prestashop_url: config.prestashopUrl,
     ws_key: config.apiKey,
     output_format: 'JSON',
     ...query,
   });
 
-  const url = `${config.prestashopUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}?${queryParams.toString()}`;
+  const proxyUrl = `/api/prestashop-proxy?endpoint=${encodeURIComponent(endpoint)}&${queryParams.toString()}`;
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(proxyUrl, {
       method: 'GET',
-      headers: {
-        'Authorization': `Basic ${btoa(config.apiKey + ':')}`,
-        'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
-      },
-      mode: 'cors',
     });
 
     if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `API Error: ${response.status} ${response.statusText}`);
     }
 
     return await response.json();
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
-      throw new Error('Error de CORS: La API de PrestaShop no permite solicitudes desde el navegador. Considera usar un proxy o habilitar CORS en PrestaShop.');
+    if (error instanceof Error) {
+      throw error;
     }
-    throw error;
+    throw new Error('Error desconocido al obtener datos de la API');
   }
 }
 
