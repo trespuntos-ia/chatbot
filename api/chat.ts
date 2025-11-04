@@ -381,10 +381,24 @@ export default async function handler(
     }
   } catch (error) {
     console.error('Chat API error:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
+    
+    // Asegurar que siempre devolvemos JSON, incluso en caso de error
+    try {
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        details: error instanceof Error && error.stack ? error.stack.substring(0, 500) : undefined
+      });
+    } catch (jsonError) {
+      // Si falla al escribir JSON, intentar enviar un error básico
+      console.error('Failed to send JSON error response:', jsonError);
+      res.status(500).send(JSON.stringify({
+        success: false,
+        error: 'Internal server error',
+        message: 'Failed to process request'
+      }));
+    }
   }
 }
 

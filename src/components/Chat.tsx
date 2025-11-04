@@ -93,11 +93,18 @@ export function Chat({ config }: ChatProps) {
         throw new Error(response.error || 'Error al obtener respuesta');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido');
-      // Añadir mensaje de error
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : typeof err === 'string' 
+        ? err 
+        : 'Error desconocido al comunicarse con el servidor';
+      
+      setError(errorMessage);
+      
+      // Añadir mensaje de error al chat
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Lo siento, hubo un error: ${err instanceof Error ? err.message : 'Error desconocido'}`
+        content: `Lo siento, hubo un error: ${errorMessage}. Por favor, intenta de nuevo o contacta con soporte si el problema persiste.`
       }]);
     } finally {
       setIsLoading(false);

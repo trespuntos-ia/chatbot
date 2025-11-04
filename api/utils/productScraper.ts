@@ -123,10 +123,18 @@ export async function scrapeProductPage(productUrl: string): Promise<{
 
     return result;
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      return { error: 'Timeout' };
+    // Manejar errores de forma segura
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        return { error: 'Timeout' };
+      }
+      // Errores de red o CORS
+      if (error.message.includes('fetch') || error.message.includes('CORS')) {
+        return { error: 'Network error' };
+      }
+      return { error: error.message };
     }
-    return { error: error instanceof Error ? error.message : 'Unknown error' };
+    return { error: 'Unknown error' };
   }
 }
 

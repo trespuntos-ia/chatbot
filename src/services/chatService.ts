@@ -23,15 +23,45 @@ export async function sendChatMessage(
       }),
     });
 
+    // Verificar el tipo de contenido antes de parsear
+    const contentType = response.headers.get('content-type');
+    const isJson = contentType && contentType.includes('application/json');
+
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `Error: ${response.statusText}`);
+      let errorMessage = `Error: ${response.statusText}`;
+      
+      if (isJson) {
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch (e) {
+          // Si falla el parseo JSON, usar el texto de la respuesta
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        }
+      } else {
+        // Si no es JSON, leer como texto
+        const text = await response.text();
+        errorMessage = text || errorMessage;
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    // Asegurar que la respuesta es JSON antes de parsear
+    if (!isJson) {
+      const text = await response.text();
+      throw new Error(`Expected JSON but got: ${contentType}. Response: ${text.substring(0, 200)}`);
     }
 
     const data: ChatResponse = await response.json();
     return data;
   } catch (error) {
     console.error('Error sending chat message:', error);
+    // Si es un error de red o timeout, proporcionar un mensaje más claro
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new Error('Error de conexión. Por favor, verifica tu conexión a internet.');
+    }
     throw error;
   }
 }
