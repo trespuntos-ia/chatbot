@@ -39,10 +39,24 @@ export default async function handler(
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Obtener documentos (sin el contenido binario para ahorrar ancho de banda)
+    // Incluimos extracted_text para verificar si está procesado (pero no lo enviamos completo, solo su longitud)
     const { data, error } = await supabase
       .from('documents')
-      .select('id, filename, original_filename, file_type, file_size, mime_type, created_at, updated_at')
+      .select('id, filename, original_filename, file_type, file_size, mime_type, created_at, updated_at, extracted_text')
       .order('created_at', { ascending: false });
+    
+    // Transformar para incluir solo si tiene texto (no el texto completo)
+    const documents = (data || []).map((doc: any) => ({
+      id: doc.id,
+      filename: doc.filename,
+      original_filename: doc.original_filename,
+      file_type: doc.file_type,
+      file_size: doc.file_size,
+      mime_type: doc.mime_type,
+      created_at: doc.created_at,
+      updated_at: doc.updated_at,
+      has_extracted_text: !!(doc.extracted_text && doc.extracted_text.length > 0)
+    }));
 
     if (error) {
       console.error('Supabase error:', error);
@@ -55,7 +69,7 @@ export default async function handler(
 
     res.status(200).json({
       success: true,
-      documents: data || []
+      documents: documents
     });
   } catch (error) {
     console.error('Get documents error:', error);

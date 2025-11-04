@@ -85,6 +85,7 @@ export interface Document {
   mime_type?: string;
   created_at?: string;
   updated_at?: string;
+  has_extracted_text?: boolean; // Indica si el documento tiene texto extraído
 }
 
 export interface DocumentUploadResponse {

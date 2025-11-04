@@ -7,6 +7,7 @@ export function Documentation() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [processingDocs, setProcessingDocs] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -89,9 +90,18 @@ export function Documentation() {
 
           if (response.ok && data.success) {
             setSuccess(`Archivo "${file.name}" subido correctamente`);
+            const documentId = data.document?.id;
+            
+            // Recargar documentos para mostrar el nuevo
             await loadDocuments();
+            
             if (fileInputRef.current) {
               fileInputRef.current.value = '';
+            }
+
+            // Extraer texto del documento en segundo plano
+            if (documentId) {
+              extractDocumentText(documentId);
             }
           } else {
             setError(data.error || data.details || `Error al subir el archivo (${response.status})`);
@@ -117,6 +127,39 @@ export function Documentation() {
     }
   };
 
+  const extractDocumentText = async (documentId: number) => {
+    // Marcar como procesando
+    setProcessingDocs(prev => new Set(prev).add(documentId));
+
+    try {
+      const response = await fetch('/api/extract-document-text', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ documentId })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        // Recargar documentos para mostrar el texto extraído
+        await loadDocuments();
+      } else {
+        console.error('Error extracting text:', data.error);
+      }
+    } catch (err) {
+      console.error('Error extracting document text:', err);
+    } finally {
+      // Quitar de procesando
+      setProcessingDocs(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(documentId);
+        return newSet;
+      });
+    }
+  };
+
   const handleDelete = async (id: number, filename: string) => {
     if (!confirm(`¿Eliminar "${filename}"?`)) return;
 
@@ -134,6 +177,21 @@ export function Documentation() {
     } catch (err) {
       setError('Error al conectarse con el servidor');
     }
+  };
+
+  const getDocumentStatus = (doc: Document) => {
+    // Si está procesando
+    if (processingDocs.has(doc.id)) {
+      return { text: 'Procesando...', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' };
+    }
+    
+    // Si tiene texto extraído, está listo
+    if (doc.has_extracted_text) {
+      return { text: 'Listo', color: 'bg-green-100 text-green-800 border-green-200' };
+    }
+    
+    // Si no tiene texto extraído y no está procesando, está pendiente
+    return { text: 'Pendiente', color: 'bg-gray-100 text-gray-800 border-gray-200' };
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -188,22 +246,30 @@ export function Documentation() {
           <p className="text-slate-500">No hay documentos</p>
         ) : (
           <div className="space-y-3">
-            {documents.map((doc) => (
-              <div key={doc.id} className="flex items-center justify-between p-4 border border-slate-200 rounded-lg">
-                <div>
-                  <p className="font-medium">{doc.original_filename}</p>
-                  <p className="text-sm text-slate-500">
-                    {formatFileSize(doc.file_size)} • {doc.file_type} • {formatDate(doc.created_at)}
-                  </p>
+            {documents.map((doc) => {
+              const status = getDocumentStatus(doc);
+              return (
+                <div key={doc.id} className="flex items-center justify-between p-4 border border-slate-200 rounded-lg">
+                  <div className="flex-1">
+                    <p className="font-medium">{doc.original_filename}</p>
+                    <p className="text-sm text-slate-500">
+                      {formatFileSize(doc.file_size)} • {doc.file_type} • {formatDate(doc.created_at)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-1 text-xs font-medium rounded border ${status.color}`}>
+                      {status.text}
+                    </span>
+                    <button
+                      onClick={() => handleDelete(doc.id, doc.original_filename)}
+                      className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => handleDelete(doc.id, doc.original_filename)}
-                  className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg"
-                >
-                  Eliminar
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
