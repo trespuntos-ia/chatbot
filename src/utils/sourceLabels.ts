@@ -6,7 +6,7 @@ import type { MessageSource } from '../types';
 export const SOURCE_LABELS: Record<MessageSource, string> = {
   'products_db': 'Base de datos de productos',
   'web': 'Información de la web',
-  'documents': 'Documentos',
+  'documents': 'Documentación',
   'general': 'Información general'
 };
 

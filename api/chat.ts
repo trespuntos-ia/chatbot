@@ -159,7 +159,7 @@ export default async function handler(
       },
       {
         name: 'search_documents',
-        description: 'Busca información en los documentos subidos. Usa esta función cuando el usuario pregunte sobre información que podría estar en documentos, manuales, guías, políticas, o cualquier contenido que haya sido subido previamente. Si no encuentras información relevante en los documentos, informa al usuario que no encontraste información sobre ese tema en la documentación disponible.',
+        description: 'IMPORTANTE: Busca información en los documentos PDF y de texto subidos por el usuario. DEBES usar esta función SIEMPRE que el usuario pregunte sobre: procedimientos, políticas, guías, manuales, instrucciones, cambios, devoluciones, garantías, términos, condiciones, o cualquier información que pueda estar documentada. Si el usuario pregunta "cómo hacer X", "procedimiento de Y", "política de Z", o menciona términos como "devolución", "cambio", "garantía", "manual", "guía", etc., DEBES buscar primero en los documentos antes de responder con información general. Usa esta función para encontrar información exacta de los documentos subidos.',
         parameters: {
           type: 'object',
           properties: {
@@ -287,16 +287,36 @@ export default async function handler(
       // Contexto para documentos
       if (functionName === 'search_documents') {
         if (functionResult.results && functionResult.results.length > 0) {
-          enrichedContext += '\n\n📄 INFORMACIÓN ENCONTRADA EN DOCUMENTOS:\n';
+          enrichedContext += '\n\n📄 INFORMACIÓN ENCONTRADA EN DOCUMENTOS SUBIDOS:\n';
+          enrichedContext += 'IMPORTANTE: Esta información proviene de documentos reales subidos por el usuario. Debes usar EXACTAMENTE esta información para responder. NO inventes información.\n\n';
           functionResult.results.forEach((doc: any, idx: number) => {
-            enrichedContext += `\nDocumento ${idx + 1}: ${doc.filename} (${doc.file_type.toUpperCase()})\n`;
-            if (doc.snippet) {
-              enrichedContext += `Contenido relevante: ${doc.snippet}\n`;
+            enrichedContext += `\n--- Documento ${idx + 1}: ${doc.filename} (${doc.file_type.toUpperCase()}) ---\n`;
+            // Si hay texto extraído, usar más contexto (hasta 2000 caracteres)
+            if (doc.extracted_text && doc.extracted_text.length > 0) {
+              // Si hay snippet relevante, usar ese más contexto alrededor
+              if (doc.snippet && doc.snippet.trim() && doc.snippet.length > 100) {
+                enrichedContext += `${doc.snippet}\n`;
+              } else {
+                // Usar más texto del documento (hasta 2000 caracteres para dar contexto completo)
+                const contextText = doc.extracted_text.length > 2000 
+                  ? doc.extracted_text.substring(0, 2000) + '...'
+                  : doc.extracted_text;
+                enrichedContext += `${contextText}\n`;
+              }
+            } else if (doc.snippet && doc.snippet.trim()) {
+              enrichedContext += `${doc.snippet}\n`;
             }
           });
-          enrichedContext += '\nIMPORTANTE: Usa esta información de los documentos para responder la pregunta del usuario. Si la información es relevante, cita el documento del que proviene.';
+          enrichedContext += '\n\nREGLAS ESTRICTAS PARA RESPONDER:\n';
+          enrichedContext += '1. Usa SOLO la información de los documentos mostrados arriba.\n';
+          enrichedContext += '2. Si los documentos tienen pasos específicos o procedimientos, cita los pasos EXACTOS tal como aparecen.\n';
+          enrichedContext += '3. NO inventes pasos o información que no esté en los documentos.\n';
+          enrichedContext += '4. Si la pregunta es sobre un procedimiento y está en los documentos, responde con los pasos exactos del documento.\n';
+          enrichedContext += '5. Si hay información relevante en los documentos, úsala completa. No omitas detalles importantes.\n';
+          enrichedContext += '6. Al final de tu respuesta, menciona que la información proviene de la documentación subida.';
         } else {
-          enrichedContext += '\n\n⚠️ No se encontró información relevante en los documentos subidos. Informa al usuario que no hay documentos que contengan información sobre ese tema.';
+          enrichedContext += '\n\n⚠️ No se encontró información relevante en los documentos subidos sobre este tema.';
+          enrichedContext += '\nIMPORTANTE: Si no hay información en documentos, debes informar al usuario que no encontraste información sobre ese tema en la documentación disponible.';
         }
       }
       
@@ -716,12 +736,30 @@ async function searchDocuments(supabase: any, params: any) {
     };
   }
 
+  console.log('Searching documents for:', searchTerm);
+
   // Buscar en el texto extraído y en el nombre del archivo
-  const { data, error } = await supabase
+  // Dividir el término de búsqueda en palabras para búsqueda más flexible
+  const searchWords = searchTerm.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  
+  let query = supabase
     .from('documents')
-    .select('id, filename, original_filename, file_type, extracted_text, created_at')
-    .or(`extracted_text.ilike.%${searchTerm}%,original_filename.ilike.%${searchTerm}%`)
-    .limit(limit);
+    .select('id, filename, original_filename, file_type, extracted_text, created_at');
+
+  // Si hay texto extraído, buscar en él. Si no, buscar solo en el nombre del archivo
+  if (searchWords.length > 0) {
+    // Construir query OR para buscar cada palabra en el texto extraído
+    const textConditions = searchWords.map(word => `extracted_text.ilike.%${word}%`).join(',');
+    const filenameConditions = searchWords.map(word => `original_filename.ilike.%${word}%`).join(',');
+    query = query.or(`${textConditions},${filenameConditions}`);
+  } else {
+    // Búsqueda simple si es muy corta
+    query = query.or(`extracted_text.ilike.%${searchTerm}%,original_filename.ilike.%${searchTerm}%`);
+  }
+
+  query = query.limit(limit);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Supabase error searching documents:', error);
@@ -732,29 +770,59 @@ async function searchDocuments(supabase: any, params: any) {
     };
   }
 
+  console.log('Found documents:', data?.length || 0);
+
   // Preparar resultados con snippets del texto relevante
   const results = (data || []).map((doc: any) => {
     let snippet = '';
     let relevance = 0;
+    let extractedText = doc.extracted_text || '';
 
-    if (doc.extracted_text) {
-      const text = doc.extracted_text;
-      const index = text.toLowerCase().indexOf(searchTerm.toLowerCase());
+    if (extractedText && extractedText.length > 0) {
+      const textLower = extractedText.toLowerCase();
+      const searchLower = searchTerm.toLowerCase();
+      
+      // Buscar el término en el texto
+      const index = textLower.indexOf(searchLower);
       if (index !== -1) {
-        // Encontró el término, extraer snippet alrededor
-        const start = Math.max(0, index - 150);
-        const end = Math.min(text.length, index + searchTerm.length + 150);
-        snippet = text.substring(start, end);
+        // Encontró el término, extraer snippet alrededor (más contexto)
+        const start = Math.max(0, index - 300);
+        const end = Math.min(extractedText.length, index + searchTerm.length + 300);
+        snippet = extractedText.substring(start, end);
         if (start > 0) snippet = '...' + snippet;
-        if (end < text.length) snippet = snippet + '...';
+        if (end < extractedText.length) snippet = snippet + '...';
         relevance = 1;
       } else {
-        // No encontró el término exacto, tomar primeros 200 caracteres
-        snippet = text.substring(0, 200);
-        if (text.length > 200) snippet += '...';
+        // Buscar palabras individuales
+        const foundWords = searchWords.filter(word => textLower.includes(word));
+        if (foundWords.length > 0) {
+          // Encontrar la primera ocurrencia de cualquier palabra
+          let firstIndex = -1;
+          for (const word of foundWords) {
+            const idx = textLower.indexOf(word);
+            if (idx !== -1 && (firstIndex === -1 || idx < firstIndex)) {
+              firstIndex = idx;
+            }
+          }
+          if (firstIndex !== -1) {
+            const start = Math.max(0, firstIndex - 200);
+            const end = Math.min(extractedText.length, firstIndex + 200);
+            snippet = extractedText.substring(start, end);
+            if (start > 0) snippet = '...' + snippet;
+            if (end < extractedText.length) snippet = snippet + '...';
+            relevance = 0.8;
+          }
+        }
+        
+        // Si aún no hay snippet, usar los primeros caracteres
+        if (!snippet && extractedText.length > 0) {
+          snippet = extractedText.substring(0, 300);
+          if (extractedText.length > 300) snippet += '...';
+          relevance = 0.3;
+        }
       }
     } else if (doc.original_filename.toLowerCase().includes(searchTerm.toLowerCase())) {
-      snippet = `Documento encontrado: ${doc.original_filename}`;
+      snippet = `Documento: ${doc.original_filename}`;
       relevance = 0.5;
     }
 
@@ -762,7 +830,8 @@ async function searchDocuments(supabase: any, params: any) {
       id: doc.id,
       filename: doc.original_filename,
       file_type: doc.file_type,
-      snippet,
+      snippet: snippet || '',
+      extracted_text: extractedText, // Incluir el texto completo para el contexto
       relevance,
       created_at: doc.created_at
     };
@@ -770,6 +839,8 @@ async function searchDocuments(supabase: any, params: any) {
 
   // Ordenar por relevancia (los que tienen el término en el texto primero)
   results.sort((a, b) => b.relevance - a.relevance);
+
+  console.log('Returning results:', results.length, 'with relevance:', results.map(r => r.relevance));
 
   return {
     results,

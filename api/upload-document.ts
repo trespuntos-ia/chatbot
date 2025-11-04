@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import pdf from 'pdf-parse';
 
 export default async function handler(
   req: VercelRequest,
@@ -68,10 +69,29 @@ export default async function handler(
     // Determinar tipo de archivo simple
     const extension = filename.split('.').pop()?.toLowerCase() || 'txt';
     
+    // Extraer texto del documento para búsqueda
+    let extractedText = '';
+    try {
+      if (extension === 'pdf' || mimeType?.includes('pdf')) {
+        console.log('Extracting text from PDF...');
+        const pdfData = await pdf(fileBuffer);
+        extractedText = pdfData.text || '';
+        console.log('PDF text extracted:', extractedText.length, 'characters');
+      } else if (extension === 'txt' || extension === 'md' || mimeType?.includes('text/plain') || mimeType?.includes('text/markdown')) {
+        extractedText = fileBuffer.toString('utf-8');
+        console.log('Text file extracted:', extractedText.length, 'characters');
+      }
+    } catch (extractError) {
+      console.error('Error extracting text:', extractError);
+      // Continuar sin texto extraído
+      extractedText = '';
+    }
+    
     console.log('Saving to Supabase:', {
       filename,
       extension,
-      size: fileBuffer.length
+      size: fileBuffer.length,
+      extractedTextLength: extractedText.length
     });
 
     // Guardar en Supabase - solo campos esenciales
@@ -83,7 +103,7 @@ export default async function handler(
         file_type: extension,
         file_size: fileBuffer.length,
         file_content: fileBuffer,
-        extracted_text: '', // Vacío por ahora
+        extracted_text: extractedText,
         mime_type: mimeType || 'application/octet-stream'
       })
       .select()
