@@ -1,0 +1,241 @@
+import type { Product, ApiConfig } from '../types';
+
+/**
+ * Extrae un valor compatible con múltiples formatos devueltos por la API.
+ */
+function extractMultilanguageValue(field: any): string {
+  if (typeof field === 'string') {
+    return field;
+  }
+
+  if (Array.isArray(field)) {
+    if (field[0]?.value) {
+      return field[0].value;
+    }
+  }
+
+  if (field?.value) {
+    return field.value;
+  }
+
+  const first = Array.isArray(field) ? field[0] : field;
+  if (first?.value) {
+    return first.value;
+  }
+
+  return '';
+}
+
+/**
+ * Sanitiza el HTML de la descripción corta.
+ */
+function sanitizeDescription(content: string): string {
+  if (!content) return '';
+  
+  // Remover HTML tags pero mantener algunos básicos
+  const div = document.createElement('div');
+  div.innerHTML = content;
+  return div.textContent || div.innerText || '';
+}
+
+/**
+ * Obtiene el nombre de la categoría por su ID.
+ */
+async function getCategoryName(
+  categoryId: number,
+  cache: Map<number, string>,
+  config: ApiConfig
+): Promise<string> {
+  if (!categoryId) return '';
+
+  if (cache.has(categoryId)) {
+    return cache.get(categoryId)!;
+  }
+
+  try {
+    const url = `${config.prestashopUrl}/categories/${categoryId}?ws_key=${config.apiKey}&output_format=JSON&language=${config.langCode || 1}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${btoa(config.apiKey + ':')}`,
+        'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
+      },
+    });
+
+    if (!response.ok) return '';
+
+    const data = await response.json();
+    if (data?.category) {
+      const name = extractMultilanguageValue(data.category.name);
+      cache.set(categoryId, name);
+      return name;
+    }
+  } catch (error) {
+    console.error('Error fetching category:', error);
+  }
+
+  return '';
+}
+
+/**
+ * Mapea un producto de la API a nuestro formato.
+ */
+async function mapProduct(
+  product: any,
+  categoryCache: Map<number, string>,
+  config: ApiConfig
+): Promise<Product> {
+  const name = extractMultilanguageValue(product.name);
+  const description = product.description_short
+    ? sanitizeDescription(extractMultilanguageValue(product.description_short))
+    : '';
+
+  let category = '';
+  if (product.id_category_default) {
+    category = await getCategoryName(
+      parseInt(product.id_category_default),
+      categoryCache,
+      config
+    );
+  }
+
+  const linkRewrite = extractMultilanguageValue(product.link_rewrite);
+  const imageId = product.id_default_image || '';
+  let imageUrl = '';
+
+  if (imageId && linkRewrite) {
+    const baseUrl = config.baseUrl || config.prestashopUrl.replace('/api/', '/');
+    imageUrl = `${baseUrl}${imageId}-medium_default/${linkRewrite}.jpg`;
+  }
+
+  const priceValue = product.price
+    ? parseFloat(product.price).toLocaleString('es-ES', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : '';
+
+  let productUrl = '';
+  if (linkRewrite) {
+    const baseUrl = config.baseUrl || config.prestashopUrl.replace('/api/', '/');
+    const langSlug = config.langSlug || 'es';
+    productUrl = `${baseUrl}${langSlug}/${product.id}-${linkRewrite}`;
+    if (product.ean13) {
+      productUrl += `-${product.ean13}`;
+    }
+    productUrl += '.html';
+  }
+
+  return {
+    name,
+    price: priceValue,
+    category,
+    description,
+    sku: product.reference || product.ean13 || '',
+    image: imageUrl,
+    product_url: productUrl,
+  };
+}
+
+/**
+ * Realiza una solicitud GET a la API de PrestaShop.
+ */
+async function prestashopGet(
+  endpoint: string,
+  query: Record<string, string> = {},
+  config: ApiConfig
+): Promise<any> {
+  const queryParams = new URLSearchParams({
+    ws_key: config.apiKey,
+    output_format: 'JSON',
+    ...query,
+  });
+
+  const url = `${config.prestashopUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}?${queryParams.toString()}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${btoa(config.apiKey + ':')}`,
+        'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
+      },
+      mode: 'cors',
+    });
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new Error('Error de CORS: La API de PrestaShop no permite solicitudes desde el navegador. Considera usar un proxy o habilitar CORS en PrestaShop.');
+    }
+    throw error;
+  }
+}
+
+/**
+ * Obtiene todos los productos de PrestaShop con progreso.
+ */
+export async function fetchAllProducts(
+  config: ApiConfig,
+  onProgress?: (current: number, total: number | null) => void
+): Promise<Product[]> {
+  const products: Product[] = [];
+  const categoryCache = new Map<number, string>();
+  let offset = 0;
+  const chunkSize = 150;
+  let iterations = 0;
+  const maxIterations = 500;
+
+  while (iterations < maxIterations) {
+    const query = {
+      language: String(config.langCode || 1),
+      limit: `${offset},${chunkSize}`,
+      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short]',
+      sort: 'id_ASC',
+    };
+
+    try {
+      const response = await prestashopGet('products', query, config);
+
+      if (!response?.products || response.products.length === 0) {
+        break;
+      }
+
+      // Procesar productos en lotes
+      for (const product of response.products) {
+        const mappedProduct = await mapProduct(product, categoryCache, config);
+        products.push(mappedProduct);
+        
+        if (onProgress) {
+          onProgress(products.length, null);
+        }
+      }
+
+      const count = response.products.length;
+      if (count < chunkSize) {
+        break;
+      }
+
+      offset += count;
+      iterations++;
+
+      // Pequeña pausa para no saturar la API
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      throw error;
+    }
+  }
+
+  if (onProgress) {
+    onProgress(products.length, products.length);
+  }
+
+  return products;
+}
+
