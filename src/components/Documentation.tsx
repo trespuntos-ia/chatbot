@@ -92,16 +92,19 @@ export function Documentation() {
             setSuccess(`Archivo "${file.name}" subido correctamente`);
             const documentId = data.document?.id;
             
-            // Recargar documentos para mostrar el nuevo
-            await loadDocuments();
-            
             if (fileInputRef.current) {
               fileInputRef.current.value = '';
             }
 
+            // Recargar documentos para mostrar el nuevo
+            await loadDocuments();
+
             // Extraer texto del documento en segundo plano
             if (documentId) {
+              console.log('Starting text extraction for document:', documentId);
               extractDocumentText(documentId);
+            } else {
+              console.warn('No document ID returned from upload');
             }
           } else {
             setError(data.error || data.details || `Error al subir el archivo (${response.status})`);
@@ -128,10 +131,18 @@ export function Documentation() {
   };
 
   const extractDocumentText = async (documentId: number) => {
+    console.log('extractDocumentText called for:', documentId);
+    
     // Marcar como procesando
-    setProcessingDocs(prev => new Set(prev).add(documentId));
+    setProcessingDocs(prev => {
+      const newSet = new Set(prev);
+      newSet.add(documentId);
+      console.log('Processing docs set:', Array.from(newSet));
+      return newSet;
+    });
 
     try {
+      console.log('Calling extract-document-text endpoint...');
       const response = await fetch('/api/extract-document-text', {
         method: 'POST',
         headers: {
@@ -140,21 +151,28 @@ export function Documentation() {
         body: JSON.stringify({ documentId })
       });
 
+      console.log('Extract response status:', response.status);
       const data = await response.json();
+      console.log('Extract response data:', data);
 
       if (response.ok && data.success) {
+        console.log('Text extraction successful, reloading documents...');
         // Recargar documentos para mostrar el texto extraído
         await loadDocuments();
+        setSuccess('Texto extraído correctamente');
       } else {
         console.error('Error extracting text:', data.error);
+        setError(data.error || 'Error al extraer el texto');
       }
     } catch (err) {
       console.error('Error extracting document text:', err);
+      setError('Error al conectarse con el servidor para extraer texto');
     } finally {
       // Quitar de procesando
       setProcessingDocs(prev => {
         const newSet = new Set(prev);
         newSet.delete(documentId);
+        console.log('Removed from processing, remaining:', Array.from(newSet));
         return newSet;
       });
     }
@@ -260,6 +278,15 @@ export function Documentation() {
                     <span className={`px-2 py-1 text-xs font-medium rounded border ${status.color}`}>
                       {status.text}
                     </span>
+                    {!doc.has_extracted_text && !processingDocs.has(doc.id) && (
+                      <button
+                        onClick={() => extractDocumentText(doc.id)}
+                        className="px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg"
+                        title="Procesar documento para extraer texto"
+                      >
+                        Procesar
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDelete(doc.id, doc.original_filename)}
                       className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg"
