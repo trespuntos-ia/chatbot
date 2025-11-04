@@ -7,6 +7,57 @@ export interface MessagePart {
 }
 
 /**
+ * Encuentra productos mencionados específicamente en el texto (no en listas)
+ * Útil para detectar cuando se recomienda un solo producto
+ */
+export function findRecommendedProduct(
+  message: string,
+  availableProducts: Product[]
+): Product | null {
+  if (!availableProducts || availableProducts.length === 0) {
+    return null;
+  }
+
+  // Buscar patrones de recomendación específica
+  const recommendationPatterns = [
+    /recomendaría\s+(?:el\s+)?producto\s+"([^"]+)"/i,
+    /te\s+recomiendo\s+(?:el\s+)?producto\s+"([^"]+)"/i,
+    /recomiendo\s+(?:el\s+)?producto\s+"([^"]+)"/i,
+    /producto\s+"([^"]+)"[^.]*recomend/i,
+    /"([^"]+)"[^.]*es\s+(?:el\s+)?(?:producto\s+)?(?:ideal|perfecto|recomendado)/i
+  ];
+
+  for (const pattern of recommendationPatterns) {
+    const match = message.match(pattern);
+    if (match && match[1]) {
+      const productName = match[1].trim();
+      const product = availableProducts.find(p => 
+        productName.toLowerCase() === p.name.toLowerCase() ||
+        p.name.toLowerCase().includes(productName.toLowerCase()) ||
+        productName.toLowerCase().includes(p.name.toLowerCase())
+      );
+      if (product) {
+        return product;
+      }
+    }
+  }
+
+  // Si no encuentra patrón de recomendación, buscar si solo se menciona un producto
+  const mentionedProducts = availableProducts.filter(p => {
+    const nameWords = p.name.toLowerCase().split(/\s+/);
+    const nameRegex = new RegExp(nameWords.slice(0, 3).join('\\s+'), 'i');
+    return nameRegex.test(message) || message.includes(p.name);
+  });
+
+  // Si solo se menciona un producto, asumir que es el recomendado
+  if (mentionedProducts.length === 1) {
+    return mentionedProducts[0];
+  }
+
+  return null;
+}
+
+/**
  * Encuentra productos mencionados en el texto del mensaje
  */
 export function findProductsInMessage(
@@ -61,12 +112,34 @@ export function splitMessageWithProducts(
   const parts: MessagePart[] = [];
   const productMap = findProductsInMessage(message, products);
 
+  // Primero verificar si hay una recomendación específica de un solo producto
+  const recommendedProduct = findRecommendedProduct(message, products);
+  
+  // Si hay una recomendación específica y hay múltiples productos, mostrar solo el recomendado
+  const productsToShow = recommendedProduct && products.length > 1 
+    ? [recommendedProduct] 
+    : products;
+
   if (productMap.size === 0) {
-    // Si no hay productos específicos, mostrar texto y luego todos los productos
+    // Si no hay productos específicos en lista, verificar si hay recomendación
+    if (recommendedProduct && products.length > 1) {
+      // Mostrar solo el producto recomendado
+      const result: MessagePart[] = [
+        { type: 'text' as const, content: message },
+        { 
+          type: 'product' as const, 
+          content: recommendedProduct, 
+          productIndex: 0 
+        }
+      ];
+      return result;
+    }
+    
+    // Si no hay recomendación específica, mostrar todos los productos
     const result: MessagePart[] = [
       { type: 'text' as const, content: message }
     ];
-    products.forEach((product, idx) => {
+    productsToShow.forEach((product, idx) => {
       result.push({ 
         type: 'product' as const, 
         content: product, 

@@ -21,8 +21,8 @@ export function ProductCard({ product }: ProductCardProps) {
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden hover:shadow-lg transition-shadow">
-      {/* Imagen del producto */}
-      <div className="relative aspect-square bg-slate-100 overflow-hidden">
+      {/* Imagen del producto - más pequeña */}
+      <div className="relative h-48 bg-slate-100 overflow-hidden">
         {product.image && product.image.trim() !== '' ? (
           <img
             src={product.image}

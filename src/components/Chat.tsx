@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
-import { parseMessageContent, splitMessageWithProducts } from '../utils/messageParser';
+import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
 import { formatSources } from '../utils/sourceLabels';
 import type { ChatMessage, ChatConfig, Product } from '../types';
 
@@ -75,8 +75,15 @@ export function Chat({ config }: ChatProps) {
           }
         }
 
-        // Añadir productos al último mensaje
+        // Si hay productos y el mensaje recomienda uno específico, filtrar
         if (lastMessage && products.length > 0) {
+          if (lastMessage.content) {
+            const recommendedProduct = findRecommendedProduct(lastMessage.content, products);
+            if (recommendedProduct && products.length > 1) {
+              // Solo mostrar el producto recomendado si hay múltiples productos
+              products = [recommendedProduct];
+            }
+          }
           lastMessage.products = products;
         }
 
