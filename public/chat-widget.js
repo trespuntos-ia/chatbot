@@ -379,7 +379,6 @@
       position: fixed;
       inset: 0;
       background: rgba(0, 0, 0, 0.2);
-      backdrop-filter: blur(4px);
       z-index: ${widgetConfig.zIndex - 1};
       opacity: 0;
       pointer-events: none;
@@ -409,6 +408,11 @@
       pointer-events: none;
       transform: translateY(20px);
       transition: all 0.3s;
+      z-index: ${widgetConfig.zIndex};
+      will-change: transform, opacity;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      visibility: hidden;
     `;
 
     // Header
@@ -469,8 +473,13 @@
           font-family: inherit;
           outline: none;
           transition: border-color 0.2s;
-        " rows="2" onfocus="this.style.borderColor='#2563eb'" onblur="this.style.borderColor='#cbd5e1'"></textarea>
-        <button id="chat-widget-send" style="
+          background: white;
+          color: #334155;
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          appearance: none;
+        " rows="2"></textarea>
+        <button id="chat-widget-send" type="button" style="
           padding: 10px 16px;
           background: ${widgetConfig.buttonColor};
           color: white;
@@ -482,7 +491,10 @@
           align-items: center;
           gap: 8px;
           transition: background 0.2s;
-        " onmouseover="this.style.background='" + adjustBrightness(widgetConfig.buttonColor, -10) + "'" onmouseout="this.style.background='" + widgetConfig.buttonColor + "'">
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          appearance: none;
+        ">
           <svg xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
           </svg>
@@ -490,7 +502,7 @@
       </div>
     `;
 
-    // Añadir CSS para animación de spin
+    // Añadir CSS para animación de spin y estilos adicionales
     if (!document.getElementById('chat-widget-styles')) {
       const style = document.createElement('style');
       style.id = 'chat-widget-styles';
@@ -498,6 +510,25 @@
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        #chat-widget-window * {
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          text-rendering: optimizeLegibility;
+        }
+        #chat-widget-window input,
+        #chat-widget-window textarea,
+        #chat-widget-window button {
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          appearance: none;
+        }
+        #chat-widget-window textarea {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        }
+        #chat-widget-window {
+          transform: translateZ(0);
+          -webkit-transform: translateZ(0);
         }
       `;
       document.head.appendChild(style);
@@ -521,12 +552,22 @@
       }
     });
     document.getElementById('chat-widget-send').addEventListener('click', handleSend);
-    document.getElementById('chat-widget-input').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        handleSend();
-      }
-    });
+    
+    const inputElement = document.getElementById('chat-widget-input');
+    if (inputElement) {
+      inputElement.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSend();
+        }
+      });
+      inputElement.addEventListener('focus', function() {
+        this.style.borderColor = '#2563eb';
+      });
+      inputElement.addEventListener('blur', function() {
+        this.style.borderColor = '#cbd5e1';
+      });
+    }
 
     // Cargar mensajes y renderizar
     loadMessages();
@@ -559,12 +600,16 @@
       window.style.opacity = '1';
       window.style.pointerEvents = 'auto';
       window.style.transform = 'translateY(0)';
+      window.style.visibility = 'visible';
       
-      // Focus en input
+      // Focus en input después de que la animación termine
       setTimeout(() => {
         const input = document.getElementById('chat-widget-input');
-        if (input) input.focus();
-      }, 100);
+        if (input) {
+          input.focus();
+          input.disabled = false;
+        }
+      }, 350);
     } else {
       button.style.display = 'flex';
       overlay.style.opacity = '0';
@@ -572,6 +617,12 @@
       window.style.opacity = '0';
       window.style.pointerEvents = 'none';
       window.style.transform = 'translateY(20px)';
+      // No ocultar completamente hasta que la animación termine
+      setTimeout(() => {
+        if (!isOpen) {
+          window.style.visibility = 'hidden';
+        }
+      }, 300);
     }
   }
 
