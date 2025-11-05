@@ -208,8 +208,9 @@ async function mapProduct(
   let category = '';
   let subcategory: string | null = null;
   
-  if (product.id_category_default) {
-    const categoryInfo = await getCategoryInfo(parseInt(product.id_category_default), categoryCache, config);
+  // Función auxiliar para procesar una categoría
+  const processCategory = async (categoryId: number): Promise<{ category: string; subcategory: string | null }> => {
+    const categoryInfo = await getCategoryInfo(categoryId, categoryCache, config);
     const hierarchy = categoryInfo.hierarchy || [];
     
     // Manejar jerarquía de hasta 3 niveles:
@@ -219,27 +220,67 @@ async function mapProduct(
     
     if (hierarchy.length === 1) {
       // Solo 1 nivel: categoría principal sin subcategorías
-      category = hierarchy[0];
-      subcategory = null;
+      return { category: hierarchy[0], subcategory: null };
     } else if (hierarchy.length === 2) {
       // 2 niveles: categoría principal y subcategoría
-      category = hierarchy[0];
-      subcategory = hierarchy[1];
+      return { category: hierarchy[0], subcategory: hierarchy[1] };
     } else if (hierarchy.length >= 3) {
       // 3 niveles: categoría, subcategoría y sub-subcategoría
       // Guardamos: category = nivel 1, subcategory = nivel 2 > nivel 3
-      category = hierarchy[0];
-      subcategory = `${hierarchy[1]} > ${hierarchy[2]}`;
+      return { category: hierarchy[0], subcategory: `${hierarchy[1]} > ${hierarchy[2]}` };
     } else {
       // Sin jerarquía (fallback)
-      category = categoryInfo.name || '';
-      subcategory = null;
+      return { category: categoryInfo.name || '', subcategory: null };
     }
+  };
+  
+  // Obtener categoría del producto
+  let categoryIdToUse: number | null = null;
+  
+  if (product.id_category_default) {
+    const defaultCategoryId = parseInt(product.id_category_default);
+    
+    // Si la categoría predeterminada es 1 (raíz "Inicio"), buscar en las asociaciones
+    if (defaultCategoryId === 1 && product.associations && product.associations.categories) {
+      // Buscar la primera categoría asociada que no sea la raíz (1)
+      const associatedCategories = Array.isArray(product.associations.categories)
+        ? product.associations.categories
+        : product.associations.categories.category
+        ? [product.associations.categories.category]
+        : [];
+      
+      // Encontrar la primera categoría válida (no es 1)
+      for (const cat of associatedCategories) {
+        const catId = typeof cat === 'object' ? parseInt(cat.id || cat) : parseInt(cat);
+        if (catId && catId !== 1 && catId !== 0) {
+          categoryIdToUse = catId;
+          break;
+        }
+      }
+      
+      // Si no encontramos ninguna categoría válida en asociaciones, usar la predeterminada
+      if (!categoryIdToUse) {
+        categoryIdToUse = defaultCategoryId;
+      }
+    } else {
+      // Usar la categoría predeterminada si no es la raíz
+      categoryIdToUse = defaultCategoryId;
+    }
+  }
+  
+  // Procesar la categoría seleccionada
+  if (categoryIdToUse && categoryIdToUse !== 1 && categoryIdToUse !== 0) {
+    const result = await processCategory(categoryIdToUse);
+    category = result.category;
+    subcategory = result.subcategory;
     
     // Debug: Log para verificar categorías (solo algunos productos para no saturar)
     if (Math.random() < 0.01) { // Log 1% de los productos aleatoriamente
-      console.log(`Product category debug: ${product.name || 'Unknown'} - hierarchy: [${hierarchy.join(' > ')}] -> category: "${category}", subcategory: "${subcategory}"`);
+      console.log(`Product category debug: ${product.name || 'Unknown'} - id_category_default: ${product.id_category_default}, using: ${categoryIdToUse}, category: "${category}", subcategory: "${subcategory}"`);
     }
+  } else {
+    // Si no hay categoría válida, dejar vacío
+    console.warn(`Product ${product.name || 'Unknown'} has no valid category (id_category_default: ${product.id_category_default})`);
   }
   const linkRewrite = extractMultilanguageValue(product.link_rewrite);
   const imageId = product.id_default_image || '';
@@ -314,7 +355,7 @@ async function fetchAllProducts(
     const query = {
       language: String(config.langCode || 1),
       limit: `${offset},${chunkSize}`,
-      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short]',
+      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
       sort: 'id_ASC',
     };
     try {
@@ -525,7 +566,7 @@ export default async function handler(
         const query = {
           language: String(apiConfig.langCode || 1),
           limit: `${offset},${chunkSize}`,
-          display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short]',
+          display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
           sort: 'id_ASC',
         };
         
