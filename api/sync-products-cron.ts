@@ -19,7 +19,11 @@ interface Product {
   product_url: string;
 }
 
-// Funciones de utilidad para PrestaShop (inline para evitar problemas de importación)
+// ============================================
+// FUNCIONES DE UTILIDAD PARA PRESTASHOP
+// Todo el código está inline aquí para evitar problemas de importación en Vercel
+// Última actualización: $(date +%Y-%m-%d)
+// ============================================
 function extractMultilanguageValue(field: any): string {
   if (typeof field === 'string') {
     return field;
