@@ -17,6 +17,37 @@ export function Connections() {
   const [isClearing, setIsClearing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
 
+  // Función para guardar conexión existente en Supabase
+  const saveExistingConnectionToSupabase = async (apiConfig: ApiConfig) => {
+    try {
+      const response = await fetch('/api/save-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'Default Connection',
+          prestashop_url: apiConfig.prestashopUrl,
+          api_key: apiConfig.apiKey,
+          base_url: apiConfig.baseUrl,
+          lang_code: apiConfig.langCode || 1,
+          lang_slug: apiConfig.langSlug || 'es',
+          is_active: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Error al guardar conexión');
+      }
+      
+      return await response.json();
+    } catch (err) {
+      console.error('Error saving connection:', err);
+      throw err;
+    }
+  };
+
   // Cargar configuración guardada del localStorage
   useEffect(() => {
     const savedConfig = localStorage.getItem('prestashop-config');
@@ -25,6 +56,11 @@ export function Connections() {
         const parsed = JSON.parse(savedConfig);
         setConfig(parsed);
         setConnectionState('no-connection');
+        
+        // Intentar guardar automáticamente en Supabase
+        saveExistingConnectionToSupabase(parsed).catch(() => {
+          // Silencioso si falla, el usuario puede hacerlo manualmente
+        });
       } catch (e) {
         console.error('Error loading saved config:', e);
       }
@@ -247,16 +283,39 @@ export function Connections() {
               </div>
             </div>
           </div>
-          <button
-            onClick={() => {
-              localStorage.removeItem('prestashop-config');
-              setConfig(null);
-              handleReset();
-            }}
-            className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition text-sm font-medium"
-          >
-            Cambiar Conexión
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                if (config) {
+                  try {
+                    await saveExistingConnectionToSupabase(config);
+                    setSaveStatus({ 
+                      type: 'success', 
+                      message: 'Conexión guardada en Supabase correctamente' 
+                    });
+                  } catch (err) {
+                    setSaveStatus({ 
+                      type: 'error', 
+                      message: err instanceof Error ? err.message : 'Error al guardar conexión' 
+                    });
+                  }
+                }
+              }}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium"
+            >
+              Guardar en Supabase
+            </button>
+            <button
+              onClick={() => {
+                localStorage.removeItem('prestashop-config');
+                setConfig(null);
+                handleReset();
+              }}
+              className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition text-sm font-medium"
+            >
+              Cambiar Conexión
+            </button>
+          </div>
         </div>
       </div>
 
