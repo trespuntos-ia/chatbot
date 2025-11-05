@@ -70,6 +70,7 @@ export default async function handler(
       .from('chat_conversations')
       .select('*', { count: 'exact', head: true });
 
+    // Obtener conversaciones recientes - forzar sin caché usando timestamp
     const { data: recentConversationsData, error: recentError } = await supabase
       .from('chat_conversations')
       .select('*')
@@ -77,17 +78,33 @@ export default async function handler(
       .limit(20);
 
     if (recentError) {
-      console.error('[Analytics] Error obteniendo conversaciones recientes:', recentError);
+      console.error('[Analytics] Error obteniendo conversaciones recientes:', {
+        error: recentError.message,
+        code: recentError.code,
+        details: recentError.details
+      });
     } else {
       const latestDate = recentConversationsData?.[0]?.created_at;
       const now = new Date().toISOString();
+      const timeDiffMinutes = latestDate 
+        ? Math.round((new Date(now).getTime() - new Date(latestDate).getTime()) / 1000 / 60)
+        : null;
+      
       console.log('[Analytics] Conversaciones recientes obtenidas:', {
         totalInDB: totalCount || 0,
         returned: recentConversationsData?.length || 0,
         latest: latestDate || 'none',
         now: now,
-        timeDiff: latestDate ? `${Math.round((new Date(now).getTime() - new Date(latestDate).getTime()) / 1000 / 60)} minutos` : 'N/A'
+        timeDiffMinutes: timeDiffMinutes,
+        timeDiffText: timeDiffMinutes !== null 
+          ? `${timeDiffMinutes} minutos` 
+          : 'N/A'
       });
+      
+      // Si la más reciente es de hace más de 5 minutos, advertir
+      if (timeDiffMinutes !== null && timeDiffMinutes > 5) {
+        console.warn('[Analytics] ADVERTENCIA: La conversación más reciente es de hace', timeDiffMinutes, 'minutos');
+      }
     }
 
     // 2. Calcular métricas
@@ -162,6 +179,29 @@ export default async function handler(
       ? Math.round(responseTimes.reduce((a: number, b: number) => a + b, 0) / responseTimes.length)
       : 0;
 
+    // Estadísticas de feedback (satisfacción)
+    const feedbackStats = {
+      total: 0,
+      helpful: 0,
+      notHelpful: 0,
+      helpfulPercentage: 0
+    };
+    
+    conversations?.forEach((conv: any) => {
+      if (conv.feedback_helpful !== null && conv.feedback_helpful !== undefined) {
+        feedbackStats.total++;
+        if (conv.feedback_helpful === true) {
+          feedbackStats.helpful++;
+        } else {
+          feedbackStats.notHelpful++;
+        }
+      }
+    });
+    
+    if (feedbackStats.total > 0) {
+      feedbackStats.helpfulPercentage = Math.round((feedbackStats.helpful / feedbackStats.total) * 100);
+    }
+
     // Obtener último resumen si se solicita
     let lastSummary = null;
     const shouldIncludeSummary = includeSummary === 'true' || includeSummary === true || includeSummary === '1';
@@ -189,6 +229,7 @@ export default async function handler(
           end: endDate.toISOString()
         }
       },
+      feedbackStats,
       topProducts,
       topCategories,
       topQuestions,

@@ -11,6 +11,12 @@ interface AnalyticsData {
       end: string;
     };
   };
+  feedbackStats: {
+    total: number;
+    helpful: number;
+    notHelpful: number;
+    helpfulPercentage: number;
+  };
   topProducts: Array<{ name: string; count: number; category?: string }>;
   topCategories: Array<{ category: string; count: number }>;
   topQuestions: Array<{ question: string; count: number }>;
@@ -32,6 +38,13 @@ export function ChatAnalytics() {
   useEffect(() => {
     fetchAnalytics();
     fetchLastSummary();
+    
+    // Auto-refresh cada 30 segundos para ver conversaciones nuevas
+    const interval = setInterval(() => {
+      fetchAnalytics();
+    }, 30000); // 30 segundos
+    
+    return () => clearInterval(interval);
   }, [dateRange]);
 
   const fetchAnalytics = async () => {
@@ -194,7 +207,7 @@ export function ChatAnalytics() {
       </div>
 
       {/* Métricas principales */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="text-sm font-medium text-slate-600 mb-1">Total Conversaciones</div>
           <div className="text-3xl font-bold text-slate-900">{data.metrics.totalConversations}</div>
@@ -207,7 +220,54 @@ export function ChatAnalytics() {
           <div className="text-sm font-medium text-slate-600 mb-1">Tiempo Promedio</div>
           <div className="text-3xl font-bold text-slate-900">{data.metrics.avgResponseTime}ms</div>
         </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="text-sm font-medium text-slate-600 mb-1">Satisfacción</div>
+          {data.feedbackStats.total > 0 ? (
+            <>
+              <div className="text-3xl font-bold text-slate-900">{data.feedbackStats.helpfulPercentage}%</div>
+              <div className="text-xs text-slate-500 mt-1">
+                {data.feedbackStats.helpful} de {data.feedbackStats.total} respuestas útiles
+              </div>
+            </>
+          ) : (
+            <div className="text-lg text-slate-400">Sin datos</div>
+          )}
+        </div>
       </div>
+
+      {/* Estadísticas de Satisfacción */}
+      {data.feedbackStats.total > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Satisfacción del Usuario</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
+              <div className="text-sm font-medium text-green-700 mb-1">Respuestas Útiles</div>
+              <div className="text-2xl font-bold text-green-900">{data.feedbackStats.helpful}</div>
+              <div className="text-xs text-green-600 mt-1">
+                {data.feedbackStats.total > 0 
+                  ? Math.round((data.feedbackStats.helpful / data.feedbackStats.total) * 100) 
+                  : 0}% del total
+              </div>
+            </div>
+            <div className="bg-gradient-to-br from-red-50 to-rose-50 rounded-lg p-4 border border-red-200">
+              <div className="text-sm font-medium text-red-700 mb-1">No Útiles</div>
+              <div className="text-2xl font-bold text-red-900">{data.feedbackStats.notHelpful}</div>
+              <div className="text-xs text-red-600 mt-1">
+                {data.feedbackStats.total > 0 
+                  ? Math.round((data.feedbackStats.notHelpful / data.feedbackStats.total) * 100) 
+                  : 0}% del total
+              </div>
+            </div>
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+              <div className="text-sm font-medium text-blue-700 mb-1">Total de Feedback</div>
+              <div className="text-2xl font-bold text-blue-900">{data.feedbackStats.total}</div>
+              <div className="text-xs text-blue-600 mt-1">
+                de {data.metrics.totalConversations} conversaciones
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Resumen Narrativo Generado por OpenAI */}
       <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl shadow-sm border border-indigo-200 p-6">
@@ -420,6 +480,19 @@ export function ChatAnalytics() {
                 {conv.products_consulted && conv.products_consulted.length > 0 && (
                   <div className="mt-2 text-sm text-indigo-600">
                     📦 {conv.products_consulted.length} producto(s) consultado(s)
+                  </div>
+                )}
+                {conv.feedback_helpful !== null && conv.feedback_helpful !== undefined && (
+                  <div className="mt-2 text-sm">
+                    {conv.feedback_helpful ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        ✓ Respuesta útil
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        ✗ No útil
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
