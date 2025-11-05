@@ -66,11 +66,15 @@ export default async function handler(
     const openai = new OpenAI({ apiKey: openaiApiKey });
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Capturar tiempo de inicio para medir tiempo de respuesta
+    const startTime = Date.now();
+
     // Obtener datos de la request
     const {
       message,
       conversationHistory = [],
-      config = {}
+      config = {},
+      sessionId
     } = req.body;
 
     if (!message || typeof message !== 'string') {
@@ -349,6 +353,28 @@ export default async function handler(
           },
           required: []
         }
+      },
+      {
+        name: 'search_web_content',
+        description: 'Busca información detallada sobre productos en el contenido web indexado. IMPORTANTE: Usa esta función cuando el usuario pregunta por detalles específicos de un producto (características, especificaciones técnicas, instrucciones de uso, etc.) o cuando quieres información más completa que la disponible en la base de datos básica. Esta función busca en contenido web previamente indexado de páginas de productos, que incluye descripciones completas, características, especificaciones técnicas y otra información detallada.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Texto de búsqueda. Puede ser el nombre del producto, características, o términos relacionados. Ejemplos: "Aromatic Rellenable", "características", "especificaciones", "cómo usar", etc.'
+            },
+            product_id: {
+              type: 'string',
+              description: 'ID del producto si se conoce (opcional). Si se proporciona, busca contenido específico de ese producto.'
+            },
+            limit: {
+              type: 'number',
+              description: 'Número máximo de resultados. Por defecto: 5.'
+            }
+          },
+          required: ['query']
+        }
       }
     ];
 
@@ -453,6 +479,9 @@ export default async function handler(
         case 'get_popular_products':
           functionResult = await getPopularProducts(supabase, functionArgs);
           break;
+        case 'search_web_content':
+          functionResult = await searchWebContent(supabase, functionArgs, req);
+          break;
         default:
           res.status(500).json({
             success: false,
@@ -479,6 +508,51 @@ export default async function handler(
           const productName = product.name.toLowerCase();
           if (!productName.includes(searchTerm) && !searchTerm.includes(productName.split(' ')[0])) {
             enrichedContext += '\n\n⚠️ IMPORTANTE: El producto encontrado no coincide exactamente con la búsqueda. Debes preguntar al usuario si este es el producto que busca antes de confirmar.\n';
+          }
+        }
+        
+        // Buscar contenido web adicional para el producto encontrado
+        if (product.id) {
+          try {
+            const webContentResult = await searchWebContent(supabase, {
+              query: product.name,
+              product_id: product.id,
+              limit: 3
+            }, req);
+            
+            if (webContentResult && webContentResult.results && webContentResult.results.length > 0) {
+              enrichedContext += '\n\n📚 INFORMACIÓN ADICIONAL DEL PRODUCTO (de contenido web indexado):\n';
+              webContentResult.results.forEach((webItem: any, idx: number) => {
+                enrichedContext += `\n--- Información adicional ${idx + 1} ---\n`;
+                if (webItem.title) {
+                  enrichedContext += `Título: ${webItem.title}\n`;
+                }
+                if (webItem.snippet) {
+                  enrichedContext += `Descripción: ${webItem.snippet}\n`;
+                }
+                if (webItem.metadata) {
+                  if (webItem.metadata.description) {
+                    enrichedContext += `Descripción completa: ${webItem.metadata.description}\n`;
+                  }
+                  if (webItem.metadata.features && Array.isArray(webItem.metadata.features)) {
+                    enrichedContext += `Características: ${webItem.metadata.features.join(', ')}\n`;
+                  }
+                  if (webItem.metadata.specifications && typeof webItem.metadata.specifications === 'object') {
+                    const specs = Object.entries(webItem.metadata.specifications)
+                      .slice(0, 5)
+                      .map(([key, value]) => `${key}: ${value}`)
+                      .join(', ');
+                    if (specs) {
+                      enrichedContext += `Especificaciones: ${specs}\n`;
+                    }
+                  }
+                }
+              });
+              enrichedContext += '\nUsa esta información adicional para dar respuestas más completas y detalladas sobre el producto.\n';
+            }
+          } catch (error) {
+            // Silenciar errores de búsqueda web para no romper el flujo principal
+            console.error('Error searching web content for product:', error);
           }
         }
       }
@@ -741,7 +815,7 @@ export default async function handler(
         sources.push('products_db');
       } else if (functionName === 'search_documents' || functionName === 'clarify_search_intent') {
         sources.push('products_db'); // clarify_search_intent también puede usar productos
-      } else if (functionName === 'search_web_documentation') {
+      } else if (functionName === 'search_web_documentation' || functionName === 'search_web_content') {
         sources.push('web');
       }
 
@@ -752,6 +826,20 @@ export default async function handler(
         function_calls: [toolCall],
         sources: sources.length > 0 ? sources : ['general']
       };
+
+      // Guardar conversación en analytics (en background, no bloquea la respuesta)
+      const responseTime = Date.now() - startTime;
+      saveConversationToAnalytics(
+        supabase,
+        sessionId || 'default',
+        message,
+        finalMessage,
+        functionName,
+        functionResult.products || (functionResult.product ? [functionResult.product] : undefined),
+        functionArgs.category || functionArgs.subcategory,
+        model,
+        responseTime
+      ).catch(err => console.error('Error guardando analytics (no crítico):', err));
 
       res.status(200).json({
         success: true,
@@ -774,6 +862,20 @@ export default async function handler(
         content: response,
         sources: ['general']
       };
+
+      // Guardar conversación en analytics (en background, no bloquea la respuesta)
+      const responseTime = Date.now() - startTime;
+      saveConversationToAnalytics(
+        supabase,
+        sessionId || 'default',
+        message,
+        response,
+        undefined, // No hay función
+        undefined, // No hay productos
+        undefined, // No hay categoría
+        model,
+        responseTime
+      ).catch(err => console.error('Error guardando analytics (no crítico):', err));
 
       res.status(200).json({
         success: true,
@@ -869,6 +971,68 @@ function normalizeText(text: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // Eliminar acentos
     .trim();
+}
+
+// Función para calcular score de relevancia de un producto
+function calculateRelevanceScore(product: any, searchTerm: string): number {
+  if (!searchTerm) return 0;
+  
+  let score = 0;
+  const normalizedSearch = normalizeText(searchTerm);
+  const productName = normalizeText(product.name || '');
+  const description = normalizeText(product.description || '');
+  const category = normalizeText(product.category || '');
+  
+  // Coincidencia exacta en nombre (máximo peso)
+  if (productName === normalizedSearch) {
+    score += 200;
+  } else if (productName.includes(normalizedSearch)) {
+    score += 100;
+    // Bonus si está al inicio
+    const index = productName.indexOf(normalizedSearch);
+    if (index !== -1 && index < 5) {
+      score += 50;
+    }
+  }
+  
+  // Coincidencia de palabras individuales
+  const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 2);
+  searchWords.forEach(word => {
+    if (productName.includes(word)) score += 30;
+    if (description.includes(word)) score += 10;
+    if (category.includes(word)) score += 20;
+  });
+  
+  // Coincidencia en SKU (si contiene)
+  if (product.sku && normalizeText(product.sku).includes(normalizedSearch)) {
+    score += 40;
+  }
+  
+  return score;
+}
+
+// Función para formatear productos para el prompt de OpenAI
+function formatProductsForPrompt(products: any[], limit: number = 5): string {
+  if (!products || products.length === 0) {
+    return 'No se encontraron productos.';
+  }
+  
+  const limited = products.slice(0, limit);
+  const formatted = limited.map((p, i) => {
+    return `Producto ${i + 1}:
+- Nombre: ${p.name}
+- Precio: ${p.price || 'No disponible'}
+- Categoría: ${p.category || 'N/A'}
+- SKU: ${p.sku || 'N/A'}
+- Descripción: ${(p.description || '').substring(0, 150)}${p.description && p.description.length > 150 ? '...' : ''}
+- URL: ${p.product_url || 'N/A'}`;
+  }).join('\n\n');
+  
+  if (products.length > limit) {
+    return formatted + `\n\n(Se encontraron ${products.length} productos en total, mostrando los ${limit} más relevantes)`;
+  }
+  
+  return formatted;
 }
 
 // Función para generar variaciones de palabras comunes
@@ -1057,9 +1221,32 @@ async function searchProducts(supabase: any, params: any) {
     }
   }
 
+  // Calcular scores de relevancia y ordenar si hay término de búsqueda
+  if (params.query && typeof params.query === 'string' && sortedData.length > 0) {
+    sortedData = sortedData
+      .map((product: any) => ({
+        ...product,
+        relevanceScore: calculateRelevanceScore(product, params.query)
+      }))
+      .sort((a: any, b: any) => {
+        // Primero por relevancia si hay búsqueda
+        if (a.relevanceScore !== b.relevanceScore) {
+          return b.relevanceScore - a.relevanceScore;
+        }
+        // Si no hay término de búsqueda o mismo score, usar orden original
+        return 0;
+      });
+  }
+
   // Ordenar por precio si es necesario (hay que hacerlo localmente)
   if (params.sort_by === 'price_asc' || params.sort_by === 'price_desc') {
     sortedData = sortedData.sort((a: any, b: any) => {
+      // Si hay scores de relevancia, mantenerlos como prioridad
+      if (a.relevanceScore !== undefined && b.relevanceScore !== undefined) {
+        if (a.relevanceScore !== b.relevanceScore) {
+          return b.relevanceScore - a.relevanceScore;
+        }
+      }
       const priceA = parseFloat(a.price?.replace(/[^\d.,]/g, '').replace(',', '.') || '0');
       const priceB = parseFloat(b.price?.replace(/[^\d.,]/g, '').replace(',', '.') || '0');
       return params.sort_by === 'price_asc' ? priceA - priceB : priceB - priceA;
@@ -1581,5 +1768,188 @@ async function getPopularProducts(supabase: any, params: any) {
     total: count || mappedProducts.length,
     category: params.category || 'todas'
   };
+}
+
+// Función para guardar conversación en analytics
+async function saveConversationToAnalytics(
+  supabase: any,
+  sessionId: string,
+  userMessage: string,
+  botResponse: string,
+  functionCalled?: string,
+  productsConsulted?: any[],
+  categoryConsulted?: string,
+  modelUsed?: string,
+  responseTimeMs?: number
+) {
+  try {
+    // Extraer productos consultados si hay función de productos
+    let productsData: any[] = [];
+    if (productsConsulted && Array.isArray(productsConsulted)) {
+      productsData = productsConsulted.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        category: p.category,
+        price: p.price
+      }));
+    }
+
+    // Extraer categoría si hay productos
+    let detectedCategory = categoryConsulted;
+    if (!detectedCategory && productsData.length > 0) {
+      detectedCategory = productsData[0]?.category;
+    }
+
+    const { error } = await supabase
+      .from('chat_conversations')
+      .insert({
+        session_id: sessionId || 'default',
+        user_message: userMessage,
+        bot_response: botResponse,
+        function_called: functionCalled || null,
+        products_consulted: productsData.length > 0 ? productsData : null,
+        category_consulted: detectedCategory || null,
+        model_used: modelUsed || 'gpt-3.5-turbo',
+        response_time_ms: responseTimeMs || null,
+      });
+
+    if (error) {
+      console.error('Error guardando conversación en analytics:', error);
+      // No fallar si no se puede guardar
+    }
+  } catch (error) {
+    console.error('Error en saveConversationToAnalytics:', error);
+    // No fallar si no se puede guardar
+  }
+}
+
+// Función para buscar contenido web indexado
+async function searchWebContent(supabase: any, params: any, req: any) {
+  try {
+    const query = params.query || '';
+    const limit = params.limit || 5;
+    const productId = params.product_id;
+
+    if (!query || query.trim().length === 0) {
+      return {
+        results: [],
+        total: 0,
+        message: 'Query parameter is required'
+      };
+    }
+
+    // Construir consulta
+    let dbQuery = supabase
+      .from('web_content_index')
+      .select('id, url, title, content, metadata, content_type, source, product_id, last_updated_at')
+      .eq('status', 'active')
+      .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+      .limit(limit);
+
+    // Filtrar por producto si se especifica
+    if (productId) {
+      dbQuery = dbQuery.eq('product_id', productId);
+    }
+
+    const { data, error } = await dbQuery;
+
+    if (error) {
+      console.error('Error searching web content:', error);
+      return {
+        results: [],
+        total: 0,
+        error: error.message
+      };
+    }
+
+    // Ordenar por relevancia
+    const sorted = (data || []).sort((a: any, b: any) => {
+      const aScore = calculateWebContentRelevance(a, query);
+      const bScore = calculateWebContentRelevance(b, query);
+      return bScore - aScore;
+    });
+
+    // Formatear resultados
+    const results = sorted.map((item: any) => ({
+      id: item.id,
+      url: item.url,
+      title: item.title,
+      snippet: extractSnippetFromContent(item.content, query, 300),
+      metadata: item.metadata || {},
+      content_type: item.content_type,
+      source: item.source,
+      product_id: item.product_id,
+      last_updated_at: item.last_updated_at
+    }));
+
+    return {
+      results,
+      total: results.length,
+      query
+    };
+  } catch (error) {
+    console.error('Error in searchWebContent:', error);
+    return {
+      results: [],
+      total: 0,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+// Función auxiliar para calcular relevancia del contenido web
+function calculateWebContentRelevance(item: any, query: string): number {
+  const queryLower = query.toLowerCase();
+  const titleLower = (item.title || '').toLowerCase();
+  const contentLower = (item.content || '').toLowerCase();
+
+  let score = 0;
+
+  // Título tiene más peso
+  if (titleLower.includes(queryLower)) {
+    score += 10;
+    if (titleLower.startsWith(queryLower)) {
+      score += 5;
+    }
+  }
+
+  // Contenido
+  if (contentLower.includes(queryLower)) {
+    score += 1;
+    const occurrences = (contentLower.match(new RegExp(queryLower, 'g')) || []).length;
+    score += Math.min(occurrences, 5);
+  }
+
+  // Metadata
+  if (item.metadata) {
+    const metadataStr = JSON.stringify(item.metadata).toLowerCase();
+    if (metadataStr.includes(queryLower)) {
+      score += 2;
+    }
+  }
+
+  return score;
+}
+
+// Función auxiliar para extraer snippet del contenido
+function extractSnippetFromContent(content: string, query: string, maxLength: number): string {
+  const queryLower = query.toLowerCase();
+  const contentLower = content.toLowerCase();
+  const index = contentLower.indexOf(queryLower);
+
+  if (index === -1) {
+    return content.substring(0, maxLength) + (content.length > maxLength ? '...' : '');
+  }
+
+  const start = Math.max(0, index - 100);
+  const end = Math.min(content.length, index + query.length + 100);
+  
+  let snippet = content.substring(start, end);
+  
+  if (start > 0) snippet = '...' + snippet;
+  if (end < content.length) snippet = snippet + '...';
+
+  return snippet;
 }
 
