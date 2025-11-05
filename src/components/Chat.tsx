@@ -102,11 +102,20 @@ export function Chat({ config }: ChatProps) {
       
       setError(errorMessage);
       
-      // Añadir mensaje de error al chat
-      setMessages(prev => [...prev, {
+      // Añadir mensaje de error al chat solo si no hay un error previo similar
+      const errorMsg: ChatMessage = {
         role: 'assistant',
         content: `Lo siento, hubo un error: ${errorMessage}. Por favor, intenta de nuevo o contacta con soporte si el problema persiste.`
-      }]);
+      };
+      
+      setMessages(prev => {
+        // Evitar duplicar mensajes de error consecutivos
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage && lastMessage.role === 'assistant' && lastMessage.content.includes('Lo siento, hubo un error')) {
+          return prev;
+        }
+        return [...prev, errorMsg];
+      });
     } finally {
       setIsLoading(false);
       setLoadingStage('');
@@ -291,6 +300,15 @@ export function Chat({ config }: ChatProps) {
               />
             </svg>
             <span>{error}</span>
+            <button
+              onClick={() => setError('')}
+              className="ml-auto text-red-600 hover:text-red-800"
+              aria-label="Cerrar error"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         </div>
       )}
