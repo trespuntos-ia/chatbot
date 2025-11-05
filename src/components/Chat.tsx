@@ -3,15 +3,15 @@ import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
 import { getSourcesDescription } from '../utils/sourceLabels';
-import type { ChatMessage, ChatConfig, Product } from '../types';
+import { useChat } from '../contexts/ChatContext';
+import type { ChatConfig, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
-  messages: ChatMessage[];
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 }
 
-export function Chat({ config, messages, setMessages }: ChatProps) {
+export function Chat({ config }: ChatProps) {
+  const { messages, setMessages } = useChat();
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState<string>('');

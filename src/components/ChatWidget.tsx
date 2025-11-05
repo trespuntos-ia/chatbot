@@ -1,58 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Chat } from './Chat';
 import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
-import type { ChatConfig as ChatConfigType, ChatMessage } from '../types';
+import { useChat } from '../contexts/ChatContext';
+import type { ChatConfig as ChatConfigType } from '../types';
 
 interface ChatWidgetProps {
   config?: ChatConfigType;
 }
 
-const STORAGE_KEY = 'chatbot_conversation';
-
-// Función para cargar mensajes desde localStorage
-function loadMessagesFromStorage(): ChatMessage[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    }
-  } catch (error) {
-    console.error('Error loading messages from localStorage:', error);
-  }
-  return [];
-}
-
-// Función para guardar mensajes en localStorage
-function saveMessagesToStorage(messages: ChatMessage[]): void {
-  try {
-    const messagesToSave = messages.filter(m => m.role !== 'system');
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messagesToSave));
-  } catch (error) {
-    console.error('Error saving messages to localStorage:', error);
-  }
-}
-
 export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
-  // El estado de mensajes se mantiene aquí, en el componente padre que nunca se desmonta
-  const [messages, setMessages] = useState<ChatMessage[]>(() => loadMessagesFromStorage());
-
-  // Guardar mensajes en localStorage cada vez que cambien
-  useEffect(() => {
-    if (messages.length > 0) {
-      saveMessagesToStorage(messages);
-    }
-  }, [messages]);
+  const { clearMessages } = useChat();
 
   // Función para limpiar el chat
   const handleClearChat = () => {
     if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
-      setMessages([]);
-      localStorage.removeItem(STORAGE_KEY);
+      clearMessages();
     }
   };
 
@@ -204,11 +168,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
           {/* Contenido del chat */}
           <div className="flex-1 overflow-hidden">
-            <Chat 
-              config={config} 
-              messages={messages}
-              setMessages={setMessages}
-            />
+            <Chat config={config} />
           </div>
 
         </div>
