@@ -8,7 +8,8 @@ const API_BASE = '/api';
 export async function sendChatMessage(
   message: string,
   conversationHistory: ChatMessage[] = [],
-  config: ChatConfig
+  config: ChatConfig,
+  sessionId?: string
 ): Promise<ChatResponse> {
   try {
     const response = await fetch(`${API_BASE}/chat`, {
@@ -19,7 +20,8 @@ export async function sendChatMessage(
       body: JSON.stringify({
         message,
         conversationHistory,
-        config
+        config,
+        sessionId
       }),
     });
 

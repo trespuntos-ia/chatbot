@@ -16,7 +16,18 @@ export function Chat({ config }: ChatProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState<string>('');
   const [error, setError] = useState<string>('');
+  const [sessionId, setSessionId] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Generar o recuperar session_id desde localStorage
+  useEffect(() => {
+    let storedSessionId = localStorage.getItem('chat_session_id');
+    if (!storedSessionId) {
+      storedSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('chat_session_id', storedSessionId);
+    }
+    setSessionId(storedSessionId);
+  }, []);
 
   // Scroll automático al final - solo si no hay productos en el último mensaje
   const scrollToBottom = () => {
@@ -59,7 +70,8 @@ export function Chat({ config }: ChatProps) {
       const response = await sendChatMessage(
         inputMessage.trim(),
         conversationHistory,
-        config
+        config,
+        sessionId
       );
 
       if (response.function_called) {
