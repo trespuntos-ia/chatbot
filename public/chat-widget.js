@@ -301,20 +301,13 @@
     // Limpiar contenedor
     messagesContainer.innerHTML = '';
 
-    // Mensajes de bienvenida si no hay conversación
+    // Mensajes de bienvenida si no hay conversación (combinados en un solo mensaje)
     if (messages.length === 0) {
       messagesContainer.innerHTML = `
         <div style="margin-bottom: 12px;">
           <div style="max-width: 85%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
             <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-              👋 ¡Bienvenido a 100%Chef!
-            </div>
-          </div>
-        </div>
-        <div style="margin-bottom: 12px;">
-          <div style="max-width: 85%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
-            <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-              Si mezclas curiosidad con técnica, estás en el lugar correcto. Cuéntame tu receta… yo pongo la tecnología. ¿En qué puedo ayudarte hoy?
+              👋 ¡Bienvenido a 100%Chef!\n\nSi mezclas curiosidad con técnica, estás en el lugar correcto. Cuéntame tu receta… yo pongo la tecnología. ¿En qué puedo ayudarte hoy?
             </div>
           </div>
         </div>
