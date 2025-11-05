@@ -20,17 +20,17 @@ export function ProductCard({ product }: ProductCardProps) {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden hover:shadow-lg transition-shadow">
-      {/* Imagen del producto - más pequeña */}
-      <div className="relative h-48 bg-slate-100 overflow-hidden">
+    <div className="w-full bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden flex flex-row">
+      {/* Imagen del producto - a la izquierda */}
+      <div className="relative w-48 min-w-[12rem] bg-slate-50 overflow-hidden flex items-center justify-center flex-shrink-0">
         {product.image && product.image.trim() !== '' ? (
           <img
             src={product.image}
             alt={product.name}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain p-4"
             onError={(e) => {
               const target = e.target as HTMLImageElement;
-              target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400"%3E%3Crect width="400" height="400" fill="%23e2e8f0"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-size="16"%3ESin imagen%3C/text%3E%3C/svg%3E';
+              target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400"%3E%3Crect width="400" height="400" fill="%23f1f5f9"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-size="16"%3ESin imagen%3C/text%3E%3C/svg%3E';
             }}
           />
         ) : (
@@ -58,7 +58,7 @@ export function ProductCard({ product }: ProductCardProps) {
           const daysSinceAdded = (Date.now() - dateAdded.getTime()) / (1000 * 60 * 60 * 24);
           if (daysSinceAdded < 30) {
             return (
-              <div className="absolute top-2 left-2 bg-black text-white px-2 py-1 text-xs font-bold uppercase rounded">
+              <div className="absolute top-3 left-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white px-3 py-1 text-xs font-bold uppercase rounded-full shadow-md">
                 Nuevo
               </div>
             );
@@ -67,69 +67,57 @@ export function ProductCard({ product }: ProductCardProps) {
         })()}
       </div>
 
-      {/* Contenido de la tarjeta */}
-      <div className="p-4">
+      {/* Contenido de la tarjeta - a la derecha */}
+      <div className="p-4 flex-1 flex flex-col">
         {/* Título */}
-        <h3 className="font-bold text-lg text-slate-900 mb-2 line-clamp-2">
+        <h3 className="font-bold text-sm text-slate-900 mb-1.5 line-clamp-2 leading-tight">
           {product.name}
         </h3>
 
         {/* Descripción */}
         {product.description && (
-          <p className="text-sm text-slate-600 mb-3 line-clamp-2">
-            {truncateDescription(product.description)}
+          <p className="text-xs text-slate-600 mb-2 line-clamp-2 leading-relaxed">
+            {truncateDescription(product.description, 120)}
           </p>
         )}
 
-        {/* Precio y categoría */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex flex-col">
-            <span className="font-bold text-lg text-slate-900">
-              {formatPrice(product.price)}
-            </span>
-            {product.category && (
-              <span className="text-xs text-slate-500 mt-1">
-                {product.category}
-                {product.subcategory && ` • ${product.subcategory}`}
-              </span>
-            )}
-            {/* Colores disponibles */}
-            {product.colors && product.colors.length > 0 && (
-              <div className="flex items-center gap-2 mt-2">
-                <span className="text-xs text-slate-500">Colores:</span>
-                <div className="flex gap-1.5 flex-wrap">
-                  {product.colors.map((color, idx) => (
-                    <span
-                      key={idx}
-                      className="text-xs px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full"
-                    >
-                      {color}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+        {/* Precio destacado */}
+        <div className="mb-2">
+          <span className="font-bold text-lg text-slate-900">
+            {formatPrice(product.price)}
+          </span>
         </div>
 
-        {/* Botón Ver Producto - compacto y pequeño */}
-        {product.product_url && (
-          <a
-            href={product.product_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-full text-center py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded transition-colors duration-150"
-          >
-            Ver Producto
-          </a>
+        {/* Colores disponibles */}
+        {product.colors && product.colors.length > 0 && (
+          <div className="mb-3">
+            <span className="text-xs text-slate-500 block mb-1 leading-tight">Colores:</span>
+            <div className="flex gap-1.5 flex-wrap">
+              {product.colors.map((color, idx) => (
+                <span
+                  key={idx}
+                  className="text-xs px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md font-medium"
+                >
+                  {color}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
 
-        {/* SKU (opcional, pequeño) */}
-        {product.sku && (
-          <p className="text-xs text-slate-400 mt-2 text-center font-mono">
-            SKU: {product.sku}
-          </p>
-        )}
+        {/* Botón Ver Producto */}
+        <div className="mt-auto">
+          {product.product_url && (
+            <a
+              href={product.product_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full text-center py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-all duration-200 hover:shadow-md"
+            >
+              Ver Producto
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

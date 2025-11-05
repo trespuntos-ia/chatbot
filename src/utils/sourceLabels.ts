@@ -42,10 +42,34 @@ export function formatSources(sources: MessageSource[]): string {
     return '';
   }
 
-  return sources.map(source => {
+  if (sources.length === 1) {
+    const icon = getSourceIcon(sources[0]);
+    const label = getSourceLabel(sources[0]);
+    return `${icon} ${label}`;
+  }
+
+  // Si hay múltiples fuentes, enumerarlas de forma más clara
+  const formattedSources = sources.map((source) => {
     const icon = getSourceIcon(source);
     const label = getSourceLabel(source);
     return `${icon} ${label}`;
-  }).join(' • ');
+  });
+
+  return formattedSources.join(', ');
+}
+
+/**
+ * Obtener texto descriptivo para las fuentes
+ */
+export function getSourcesDescription(sources: MessageSource[]): string {
+  if (!sources || sources.length === 0) {
+    return 'Información general';
+  }
+
+  if (sources.length === 1) {
+    return `Obtuve esta información de: ${formatSources(sources)}`;
+  }
+
+  return `Obtuve esta información de: ${formatSources(sources)}`;
 }
 

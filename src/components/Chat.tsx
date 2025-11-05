@@ -2,20 +2,74 @@ import { useState, useRef, useEffect } from 'react';
 import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
-import { formatSources } from '../utils/sourceLabels';
+import { getSourcesDescription } from '../utils/sourceLabels';
 import type { ChatMessage, ChatConfig, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
 }
 
+const STORAGE_KEY = 'chatbot_conversation';
+
+// Función para cargar mensajes desde localStorage
+function loadMessagesFromStorage(): ChatMessage[] {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Validar que sea un array
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.error('Error loading messages from localStorage:', error);
+  }
+  return [];
+}
+
+// Función para guardar mensajes en localStorage
+function saveMessagesToStorage(messages: ChatMessage[]): void {
+  try {
+    // Filtrar mensajes del sistema antes de guardar
+    const messagesToSave = messages.filter(m => m.role !== 'system');
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messagesToSave));
+  } catch (error) {
+    console.error('Error saving messages to localStorage:', error);
+    // Si hay error (por ejemplo, storage lleno), intentar limpiar mensajes antiguos
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.filter(m => m.role !== 'system')));
+    } catch (retryError) {
+      console.error('Error retrying save to localStorage:', retryError);
+    }
+  }
+}
+
 export function Chat({ config }: ChatProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Cargar mensajes desde localStorage al inicializar
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadMessagesFromStorage());
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState<string>('');
   const [error, setError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Escuchar evento para limpiar chat desde el botón del menú
+  useEffect(() => {
+    const handleClearChat = () => {
+      if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
+        setMessages([]);
+        setError('');
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    };
+
+    window.addEventListener('clearChat', handleClearChat);
+    return () => {
+      window.removeEventListener('clearChat', handleClearChat);
+    };
+  }, []);
 
   // Scroll automático al final
   const scrollToBottom = () => {
@@ -24,6 +78,16 @@ export function Chat({ config }: ChatProps) {
 
   useEffect(() => {
     scrollToBottom();
+  }, [messages]);
+
+  // Guardar mensajes en localStorage cada vez que cambien
+  useEffect(() => {
+    // Guardar siempre, incluso si está vacío (para limpiar cuando se borra)
+    if (messages.length === 0) {
+      localStorage.removeItem(STORAGE_KEY);
+    } else {
+      saveMessagesToStorage(messages);
+    }
   }, [messages]);
 
   const handleSendMessage = async () => {
@@ -119,123 +183,31 @@ export function Chat({ config }: ChatProps) {
     }
   };
 
-  // Función para limpiar el chat (no se usa actualmente, pero se mantiene para futuras implementaciones)
-  // const handleClearChat = () => {
-  //   if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
-  //     setMessages([]);
-  //     setError('');
-  //   }
-  // };
 
-  // Mensajes de bienvenida iniciales
-  const initialMessages = [
-    {
-      role: 'assistant' as const,
-      content: 'Hello, welcome to Tidio Support 👋',
-    },
-    {
-      role: 'assistant' as const,
-      content: 'How can we help you today?',
-    },
-  ];
-
-  // Botones de acción rápida
-  const quickReplies = [
-    'I have a question about Tidio',
-    'I have different questions',
-  ];
-
-  const handleQuickReply = async (reply: string) => {
-    if (isLoading) return;
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: reply
-    };
-
-    setIsLoading(true);
-    setError('');
-    setLoadingStage('Analizando tu pregunta...');
-
-    // Preparar historial de conversación (sin system messages) incluyendo el nuevo mensaje
-    const conversationHistory = [...messages.filter(m => m.role !== 'system'), userMessage];
-
-    // Añadir mensaje del usuario
-    setMessages(prev => [...prev, userMessage]);
-
-    try {
-
-      // Enviar mensaje
-      setLoadingStage('Consultando con OpenAI...');
-      const response = await sendChatMessage(
-        reply,
-        conversationHistory,
-        config
-      );
-
-      if (response.function_called) {
-        setLoadingStage('Consultando base de datos...');
-        await new Promise(resolve => setTimeout(resolve, 100));
-        setLoadingStage('Generando respuesta...');
-      }
-
-      if (response.success && response.conversation_history) {
-        const lastMessage = response.conversation_history[response.conversation_history.length - 1];
-        let products: Product[] = [];
-
-        if (response.function_result) {
-          if (response.function_result.products && Array.isArray(response.function_result.products)) {
-            products = response.function_result.products;
-          } else if (response.function_result.product && response.function_result.found) {
-            products = [response.function_result.product];
-          }
-        }
-
-        if (lastMessage && products.length > 0) {
-          if (lastMessage.content) {
-            const recommendedProduct = findRecommendedProduct(lastMessage.content, products);
-            if (recommendedProduct && products.length > 1) {
-              products = [recommendedProduct];
-            }
-          }
-          lastMessage.products = products;
-        }
-
-        setMessages(response.conversation_history);
-      } else {
-        throw new Error(response.error || 'Error al obtener respuesta');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error 
-        ? err.message 
-        : typeof err === 'string' 
-        ? err 
-        : 'Error desconocido al comunicarse con el servidor';
-      
-      setError(errorMessage);
-      
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Lo siento, hubo un error: ${errorMessage}. Por favor, intenta de nuevo o contacta con soporte si el problema persiste.`
-      }]);
-    } finally {
-      setIsLoading(false);
-      setLoadingStage('');
-    }
-  };
 
   return (
     <div className="flex flex-col h-full">
       {/* Mensajes */}
       <div className="flex-1 overflow-y-auto space-y-3 mb-4 px-4 py-4">
-        {/* Mensajes iniciales de bienvenida */}
-        {messages.length === 0 && initialMessages.map((message, index) => (
-          <div key={index} className="flex justify-start">
-            <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-slate-100 text-slate-700">
-              <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+        {/* Mensajes de bienvenida cuando no hay conversación */}
+        {messages.length === 0 && (
+          <div className="space-y-3">
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-slate-100 text-slate-700">
+                <div className="whitespace-pre-wrap text-sm">
+                  👋 ¡Bienvenido a 100%Chef!
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-slate-100 text-slate-700">
+                <div className="whitespace-pre-wrap text-sm">
+                  Si mezclas curiosidad con técnica, estás en el lugar correcto. Cuéntame tu receta… yo pongo la tecnología. ¿En qué puedo ayudarte hoy?
+                </div>
+              </div>
             </div>
           </div>
-        ))}
+        )}
 
         {/* Mensajes de la conversación */}
         {messages.map((message, index) => {
@@ -278,9 +250,9 @@ export function Chat({ config }: ChatProps) {
                   );
                 })}
                 
-                {/* Todas las tarjetas de productos en grid */}
+                {/* Todas las tarjetas de productos - ancho completo */}
                 {productParts.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="w-full -mx-4 px-4 space-y-3">
                     {productParts.map((part, productIndex) => (
                       <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
                     ))}
@@ -291,7 +263,7 @@ export function Chat({ config }: ChatProps) {
                 {message.sources && message.sources.length > 0 && (
                   <div className="flex justify-start">
                     <div className="max-w-[90%] text-xs text-slate-500">
-                      Fuente: {formatSources(message.sources)}
+                      {getSourcesDescription(message.sources)}
                     </div>
                   </div>
                 )}
@@ -324,7 +296,7 @@ export function Chat({ config }: ChatProps) {
                   {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-200">
                       <p className="text-xs text-slate-500">
-                        Fuente: {formatSources(message.sources)}
+                        {getSourcesDescription(message.sources)}
                       </p>
                     </div>
                   )}
@@ -334,20 +306,6 @@ export function Chat({ config }: ChatProps) {
           );
         })}
 
-        {/* Botones de acción rápida - solo cuando no hay mensajes */}
-        {messages.length === 0 && (
-          <div className="space-y-2 mt-4">
-            {quickReplies.map((reply, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleQuickReply(reply)}
-                className="w-full text-left px-4 py-3 border-2 border-blue-600 text-blue-600 rounded-xl hover:bg-blue-50 transition font-medium text-sm"
-              >
-                {reply}
-              </button>
-            ))}
-          </div>
-        )}
 
         {isLoading && (
           <div className="flex justify-start">
@@ -374,7 +332,7 @@ export function Chat({ config }: ChatProps) {
                   ></path>
                 </svg>
                 <span className="text-sm text-slate-600">
-                  {loadingStage || 'Pensando...'}
+                  {loadingStage || 'Consultando...'}
                 </span>
               </div>
             </div>

@@ -104,3 +104,4 @@ git checkout -b restore-stable v1.0-stable
 - El filtrado de productos nuevos compara SKUs normalizados (trim)
 - La limpieza de BD funciona con política DELETE habilitada
 
+

@@ -18,3 +18,4 @@ COMMENT ON COLUMN products.subcategory IS 'Subcategoría del producto (categorí
 -- Crear índice para búsquedas por subcategoría
 CREATE INDEX IF NOT EXISTS idx_products_subcategory ON products(subcategory);
 
+
