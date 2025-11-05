@@ -223,6 +223,9 @@ export default async function handler(
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   
+  // Log para debugging
+  console.log('Sync cron endpoint called at:', new Date().toISOString());
+  
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
