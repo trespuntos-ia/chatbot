@@ -242,27 +242,49 @@ async function mapProduct(
     
     // Si la categoría predeterminada es 1 (raíz "Inicio"), buscar en las asociaciones
     if (defaultCategoryId === 1 && product.associations && product.associations.categories) {
-      // Buscar la primera categoría asociada que no sea la raíz (1)
-      const associatedCategories = Array.isArray(product.associations.categories)
-        ? product.associations.categories
-        : product.associations.categories.category
-        ? [product.associations.categories.category]
-        : [];
+      // PrestaShop puede devolver asociaciones en diferentes formatos:
+      // 1. { categories: [{ id: "2" }, { id: "3" }] }
+      // 2. { categories: { category: [{ id: "2" }, { id: "3" }] } }
+      // 3. { categories: { category: { id: "2" } } } (un solo objeto)
       
-      // Encontrar la primera categoría válida (no es 1)
+      let associatedCategories: any[] = [];
+      
+      if (Array.isArray(product.associations.categories)) {
+        // Formato 1: array directo
+        associatedCategories = product.associations.categories;
+      } else if (product.associations.categories.category) {
+        if (Array.isArray(product.associations.categories.category)) {
+          // Formato 2: array dentro de category
+          associatedCategories = product.associations.categories.category;
+        } else {
+          // Formato 3: objeto único
+          associatedCategories = [product.associations.categories.category];
+        }
+      }
+      
+      // Encontrar la primera categoría válida (no es 1 ni 0)
       for (const cat of associatedCategories) {
-        const catId = typeof cat === 'object' ? parseInt(cat.id || cat) : parseInt(cat);
+        let catId: number | null = null;
+        
+        if (typeof cat === 'object' && cat !== null) {
+          // Puede ser { id: "2" } o { id: 2 }
+          catId = parseInt(cat.id || cat.id.value || '0');
+        } else if (typeof cat === 'string' || typeof cat === 'number') {
+          catId = parseInt(String(cat));
+        }
+        
         if (catId && catId !== 1 && catId !== 0) {
           categoryIdToUse = catId;
           break;
         }
       }
       
-      // Si no encontramos ninguna categoría válida en asociaciones, usar la predeterminada
+      // Si no encontramos ninguna categoría válida en asociaciones, dejar vacío (no usar "Inicio")
       if (!categoryIdToUse) {
-        categoryIdToUse = defaultCategoryId;
+        console.warn(`Product ${product.name || 'Unknown'} has id_category_default=1 but no valid associated categories`);
+        categoryIdToUse = null; // No usar categoría raíz
       }
-    } else {
+    } else if (defaultCategoryId !== 1 && defaultCategoryId !== 0) {
       // Usar la categoría predeterminada si no es la raíz
       categoryIdToUse = defaultCategoryId;
     }
