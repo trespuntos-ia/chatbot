@@ -169,12 +169,16 @@ export function Dashboard() {
                 </div>
               </button>
               <button
-                onClick={() => setActiveTab('history')}
+                onClick={() => {
+                  console.log('Historial tab clicked');
+                  setActiveTab('history');
+                }}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'history'
                     ? 'border-indigo-500 text-indigo-600'
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                 }`}
+                style={{ display: 'block' }}
               >
                 <div className="flex items-center gap-2">
                   <svg
@@ -191,7 +195,7 @@ export function Dashboard() {
                       d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                  Historial
+                  <span>Historial</span>
                 </div>
               </button>
             </nav>
