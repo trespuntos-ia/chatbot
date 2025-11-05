@@ -7,13 +7,14 @@ import { ChatConfig } from './ChatConfig';
 import { Documentation } from './Documentation';
 import { SyncHistory } from './SyncHistory';
 import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
-import type { ChatConfig as ChatConfigType } from '../types';
+import type { ChatConfig as ChatConfigType, ChatMessage } from '../types';
 
 type Tab = 'products' | 'connections' | 'chat' | 'prompts' | 'documentation' | 'history';
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('products');
   const [chatConfig, setChatConfig] = useState<ChatConfigType>(DEFAULT_CHAT_CONFIG);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -211,7 +212,7 @@ export function Dashboard() {
             <div className="space-y-6">
               <ChatConfig config={chatConfig} onConfigChange={setChatConfig} />
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <Chat config={chatConfig} />
+                <Chat config={chatConfig} messages={chatMessages} setMessages={setChatMessages} />
               </div>
             </div>
           )}

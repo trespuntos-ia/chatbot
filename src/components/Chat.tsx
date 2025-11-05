@@ -7,84 +7,16 @@ import type { ChatMessage, ChatConfig, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
-  isVisible?: boolean;
+  messages: ChatMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 }
 
-const STORAGE_KEY = 'chatbot_conversation';
-
-// Función para cargar mensajes desde localStorage
-function loadMessagesFromStorage(): ChatMessage[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      // Validar que sea un array
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    }
-  } catch (error) {
-    console.error('Error loading messages from localStorage:', error);
-  }
-  return [];
-}
-
-// Función para guardar mensajes en localStorage
-function saveMessagesToStorage(messages: ChatMessage[]): void {
-  try {
-    // Filtrar mensajes del sistema antes de guardar
-    const messagesToSave = messages.filter(m => m.role !== 'system');
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messagesToSave));
-  } catch (error) {
-    console.error('Error saving messages to localStorage:', error);
-    // Si hay error (por ejemplo, storage lleno), intentar limpiar mensajes antiguos
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.filter(m => m.role !== 'system')));
-    } catch (retryError) {
-      console.error('Error retrying save to localStorage:', retryError);
-    }
-  }
-}
-
-export function Chat({ config, isVisible = true }: ChatProps) {
-  // Cargar mensajes desde localStorage al inicializar
-  const [messages, setMessages] = useState<ChatMessage[]>(() => loadMessagesFromStorage());
+export function Chat({ config, messages, setMessages }: ChatProps) {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState<string>('');
   const [error, setError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const wasVisibleRef = useRef(isVisible);
-
-  // Cargar mensajes desde localStorage cuando el chat se hace visible (después de estar cerrado)
-  useEffect(() => {
-    // Si el chat acaba de abrirse (estaba cerrado y ahora está abierto)
-    if (isVisible && !wasVisibleRef.current) {
-      // Recargar desde localStorage al abrir el chat
-      const storedMessages = loadMessagesFromStorage();
-      if (storedMessages.length > 0) {
-        setMessages(storedMessages);
-      }
-    }
-    wasVisibleRef.current = isVisible;
-  }, [isVisible]);
-
-  // Escuchar evento para limpiar chat desde el botón del menú
-  useEffect(() => {
-    const handleClearChat = () => {
-      if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
-        setMessages([]);
-        setError('');
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    };
-
-    window.addEventListener('clearChat', handleClearChat);
-    return () => {
-      window.removeEventListener('clearChat', handleClearChat);
-    };
-  }, []);
 
   // Scroll automático al final
   const scrollToBottom = () => {
@@ -93,15 +25,6 @@ export function Chat({ config, isVisible = true }: ChatProps) {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
-
-  // Guardar mensajes en localStorage cada vez que cambien (solo si hay mensajes)
-  useEffect(() => {
-    // Solo guardar si hay mensajes. NO eliminar automáticamente cuando está vacío
-    // para evitar que se borre cuando se reinicializa el componente
-    if (messages.length > 0) {
-      saveMessagesToStorage(messages);
-    }
   }, [messages]);
 
   const handleSendMessage = async () => {
