@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import type { ChatMessage } from '../types';
 
 const STORAGE_KEY = 'chatbot_conversation';
