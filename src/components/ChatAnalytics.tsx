@@ -1,0 +1,351 @@
+import { useState, useEffect } from 'react';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+interface AnalyticsData {
+  metrics: {
+    totalConversations: number;
+    uniqueSessions: number;
+    avgResponseTime: number;
+    dateRange: {
+      start: string;
+      end: string;
+    };
+  };
+  topProducts: Array<{ name: string; count: number; category?: string }>;
+  topCategories: Array<{ category: string; count: number }>;
+  topQuestions: Array<{ question: string; count: number }>;
+  conversationsByDay: Array<{ date: string; count: number }>;
+  recentConversations: Array<any>;
+}
+
+export function ChatAnalytics() {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [dateRange, setDateRange] = useState<'24h' | '7d' | '30d' | 'all'>('7d');
+  const [error, setError] = useState<string>('');
+  
+  // Estados para el resumen narrativo
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryGeneratedAt, setSummaryGeneratedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAnalytics();
+    fetchLastSummary();
+  }, [dateRange]);
+
+  const fetchAnalytics = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const response = await fetch(`/api/get-chat-analytics?dateRange=${dateRange}`);
+      const result = await response.json();
+      
+      if (result.success) {
+        setData(result);
+      } else {
+        setError(result.error || 'Error al cargar analytics');
+      }
+    } catch (err) {
+      setError('Error al conectar con el servidor');
+      console.error('Error fetching analytics:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLastSummary = async () => {
+    // Obtener último resumen guardado (si existe)
+    try {
+      const response = await fetch(`/api/get-chat-analytics?dateRange=${dateRange}&includeSummary=true`);
+      const result = await response.json();
+      if (result.success && result.lastSummary) {
+        setSummary(result.lastSummary.summary_text);
+        setSummaryGeneratedAt(result.lastSummary.generated_at);
+      }
+    } catch (err) {
+      console.error('Error fetching summary:', err);
+    }
+  };
+
+  const generateSummary = async () => {
+    setSummaryLoading(true);
+    try {
+      const response = await fetch('/api/generate-analytics-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dateRange })
+      });
+      const result = await response.json();
+      
+      if (result.success) {
+        setSummary(result.summary);
+        setSummaryGeneratedAt(result.generated_at);
+      } else {
+        alert('Error al generar resumen: ' + (result.error || 'Error desconocido'));
+      }
+    } catch (err) {
+      alert('Error al conectar con el servidor');
+      console.error('Error generating summary:', err);
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+        <p className="mt-4 text-slate-600">Cargando analytics...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+        <p className="text-red-800">{error}</p>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+        <p className="text-slate-600">No hay datos disponibles</p>
+      </div>
+    );
+  }
+
+  const COLORS = ['#4f46e5', '#7c3aed', '#a855f7', '#c084fc', '#d8b4fe', '#e9d5ff', '#f3e8ff', '#faf5ff'];
+
+  return (
+    <div className="space-y-6">
+      {/* Filtros */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-medium text-slate-700">Período:</label>
+          <select
+            value={dateRange}
+            onChange={(e) => setDateRange(e.target.value as any)}
+            className="px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="24h">Últimas 24 horas</option>
+            <option value="7d">Últimos 7 días</option>
+            <option value="30d">Últimos 30 días</option>
+            <option value="all">Todo el tiempo</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Métricas principales */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="text-sm font-medium text-slate-600 mb-1">Total Conversaciones</div>
+          <div className="text-3xl font-bold text-slate-900">{data.metrics.totalConversations}</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="text-sm font-medium text-slate-600 mb-1">Usuarios Únicos</div>
+          <div className="text-3xl font-bold text-slate-900">{data.metrics.uniqueSessions}</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="text-sm font-medium text-slate-600 mb-1">Tiempo Promedio</div>
+          <div className="text-3xl font-bold text-slate-900">{data.metrics.avgResponseTime}ms</div>
+        </div>
+      </div>
+
+      {/* Resumen Narrativo Generado por OpenAI */}
+      <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl shadow-sm border border-indigo-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-slate-900">Resumen Ejecutivo</h3>
+          <button
+            onClick={generateSummary}
+            disabled={summaryLoading}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+          >
+            {summaryLoading ? 'Generando...' : 'Generar Nuevo Resumen'}
+          </button>
+        </div>
+        {summaryGeneratedAt && (
+          <p className="text-xs text-slate-500 mb-3">
+            Última actualización: {new Date(summaryGeneratedAt).toLocaleString('es-ES')}
+          </p>
+        )}
+        {summary ? (
+          <div className="prose prose-sm max-w-none">
+            <div className="whitespace-pre-wrap text-slate-700 leading-relaxed">
+              {summary}
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-slate-600 mb-4">No hay resumen disponible para este período</p>
+            <button
+              onClick={generateSummary}
+              disabled={summaryLoading}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {summaryLoading ? 'Generando...' : 'Generar Resumen'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Gráfico de conversaciones por día (Line Chart) */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Conversaciones por Día</h3>
+        {data.conversationsByDay.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={data.conversationsByDay.map(d => ({ ...d, date: new Date(d.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) }))}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="count" stroke="#4f46e5" strokeWidth={2} name="Conversaciones" />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-slate-600 text-center py-8">No hay datos para mostrar</p>
+        )}
+      </div>
+
+      {/* Gráfico de productos más consultados (Bar Chart) */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Top 10 Productos Consultados</h3>
+        {data.topProducts.length > 0 ? (
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart data={data.topProducts.slice(0, 10).map(p => ({ name: p.name.length > 30 ? p.name.substring(0, 30) + '...' : p.name, consultas: p.count }))}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="consultas" fill="#4f46e5" />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-slate-600 text-center py-8">No hay productos consultados</p>
+        )}
+      </div>
+
+      {/* Gráfico de categorías (Pie Chart) */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Distribución por Categorías</h3>
+        {data.topCategories.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={data.topCategories.slice(0, 8)}
+                dataKey="count"
+                nameKey="category"
+                cx="50%"
+                cy="50%"
+                outerRadius={100}
+                label={({ category, percent }: { category: string; percent: number }) => `${category}: ${(percent * 100).toFixed(0)}%`}
+              >
+                {data.topCategories.slice(0, 8).map((_, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-slate-600 text-center py-8">No hay categorías consultadas</p>
+        )}
+      </div>
+
+      {/* Tabla de Top Productos */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Top Productos Consultados</h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">#</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Producto</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Categoría</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Consultas</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-slate-200">
+              {data.topProducts.length > 0 ? (
+                data.topProducts.map((product, index) => (
+                  <tr key={index} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-900">{index + 1}</td>
+                    <td className="px-4 py-3 text-sm text-slate-900">{product.name}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{product.category || 'N/A'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-indigo-600 text-right">{product.count}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="px-4 py-8 text-center text-slate-600">No hay productos consultados</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Top Categorías */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Categorías Más Consultadas</h3>
+        <div className="space-y-2">
+          {data.topCategories.length > 0 ? (
+            data.topCategories.map((cat, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="font-medium text-slate-900">{cat.category}</div>
+                <div className="text-lg font-semibold text-indigo-600">{cat.count}</div>
+              </div>
+            ))
+          ) : (
+            <p className="text-slate-600 text-center py-4">No hay categorías consultadas en este período</p>
+          )}
+        </div>
+      </div>
+
+      {/* Preguntas más frecuentes */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Preguntas Más Frecuentes</h3>
+        <div className="space-y-2">
+          {data.topQuestions.map((q, index) => (
+            <div key={index} className="p-3 bg-slate-50 rounded-lg">
+              <div className="font-medium text-slate-900 mb-1">{q.question}...</div>
+              <div className="text-sm text-slate-600">{q.count} veces</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Conversaciones recientes */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Conversaciones Recientes</h3>
+        <div className="space-y-4">
+          {data.recentConversations.map((conv, index) => (
+            <div key={index} className="border-b border-slate-200 pb-4 last:border-0">
+              <div className="text-sm text-slate-500 mb-2">
+                {new Date(conv.created_at).toLocaleString('es-ES')}
+              </div>
+              <div className="mb-2">
+                <div className="text-xs font-medium text-slate-500 mb-1">Usuario:</div>
+                <div className="text-slate-900">{conv.user_message}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500 mb-1">Bot:</div>
+                <div className="text-slate-700">{conv.bot_response.substring(0, 200)}...</div>
+              </div>
+              {conv.products_consulted && conv.products_consulted.length > 0 && (
+                <div className="mt-2 text-sm text-indigo-600">
+                  📦 {conv.products_consulted.length} producto(s) consultado(s)
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
