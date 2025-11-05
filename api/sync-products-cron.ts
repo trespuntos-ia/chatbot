@@ -538,7 +538,7 @@ export default async function handler(
       addLog(`Productos nuevos encontrados: ${newProducts.length}`, 'info');
 
       let imported = 0;
-      const errors: Array<{ sku?: string; error: string }> = [];
+      const errors: Array<{ sku?: string; error: string; batch?: number }> = [];
 
       if (newProducts.length > 0) {
         addLog('Importando productos nuevos...', 'info');
