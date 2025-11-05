@@ -200,27 +200,32 @@ async function mapProduct(
     const hierarchy = categoryInfo.hierarchy || [];
     
     // Manejar jerarquía de hasta 3 niveles:
-    // Nivel 1: Categoría principal (raíz)
-    // Nivel 2: Subcategoría
-    // Nivel 3: Sub-subcategoría (la del producto)
+    // hierarchy[0] = Nivel 1 (categoría principal/raíz)
+    // hierarchy[1] = Nivel 2 (subcategoría)
+    // hierarchy[2] = Nivel 3 (sub-subcategoría, la más específica del producto)
     
     if (hierarchy.length === 1) {
-      // Solo 1 nivel: solo categoría
+      // Solo 1 nivel: categoría principal sin subcategorías
       category = hierarchy[0];
       subcategory = null;
     } else if (hierarchy.length === 2) {
-      // 2 niveles: categoría y subcategoría
+      // 2 niveles: categoría principal y subcategoría
       category = hierarchy[0];
       subcategory = hierarchy[1];
     } else if (hierarchy.length >= 3) {
       // 3 niveles: categoría, subcategoría y sub-subcategoría
-      // En Supabase guardamos: category = nivel 1, subcategory = nivel 2 > nivel 3
+      // Guardamos: category = nivel 1, subcategory = nivel 2 > nivel 3
       category = hierarchy[0];
-      subcategory = `${hierarchy[1]} > ${hierarchy[2]}`; // Concatenar niveles 2 y 3
+      subcategory = `${hierarchy[1]} > ${hierarchy[2]}`;
     } else {
-      // Sin jerarquía
+      // Sin jerarquía (fallback)
       category = categoryInfo.name || '';
       subcategory = null;
+    }
+    
+    // Debug: Log para verificar categorías (solo algunos productos para no saturar)
+    if (Math.random() < 0.01) { // Log 1% de los productos aleatoriamente
+      console.log(`Product category debug: ${product.name || 'Unknown'} - hierarchy: [${hierarchy.join(' > ')}] -> category: "${category}", subcategory: "${subcategory}"`);
     }
   }
   const linkRewrite = extractMultilanguageValue(product.link_rewrite);
@@ -493,6 +498,19 @@ export default async function handler(
       });
 
       addLog(`Productos escaneados de PrestaShop: ${allProducts.length}`, 'info');
+      
+      // Debug: Mostrar estadísticas de categorías
+      const categoryStats = new Map<string, number>();
+      allProducts.forEach((p: any) => {
+        const cat = p.category || 'Sin categoría';
+        categoryStats.set(cat, (categoryStats.get(cat) || 0) + 1);
+      });
+      const topCategories = Array.from(categoryStats.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([cat, count]) => `${cat} (${count})`)
+        .join(', ');
+      addLog(`Top categorías encontradas: ${topCategories}`, 'info');
 
       // Filtrar productos nuevos (verificar por SKU y también por nombre si no tiene SKU)
       const newProducts = allProducts.filter(product => {
