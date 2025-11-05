@@ -55,12 +55,25 @@ export function Connections() {
 
       if (!response.ok) {
         const data = await response.json();
-        console.warn('Warning: Could not save connection to database for cron job:', data.error);
-        // No bloqueamos el flujo si falla, solo guardamos en localStorage
+        console.error('Error saving connection to database:', data);
+        throw new Error(data.error || 'Error al guardar conexión en la base de datos');
       }
+      
+      const result = await response.json();
+      console.log('Connection saved successfully:', result);
+      
+      // Mostrar mensaje de éxito
+      setSaveStatus({ 
+        type: 'success', 
+        message: 'Conexión guardada correctamente. El cron job podrá usar esta configuración.' 
+      });
     } catch (err) {
-      console.warn('Warning: Could not save connection to database:', err);
-      // No bloqueamos el flujo si falla
+      console.error('Error saving connection to database:', err);
+      setSaveStatus({ 
+        type: 'error', 
+        message: err instanceof Error ? err.message : 'Error al guardar conexión en la base de datos para el cron job' 
+      });
+      // No bloqueamos el flujo, pero mostramos el error
     }
     
     setConfig(apiConfig);
