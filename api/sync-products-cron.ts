@@ -462,22 +462,29 @@ export default async function handler(
         throw new Error(`Error fetching existing products: ${existingError.message}`);
       }
       
-      // Crear sets para verificar productos existentes
-      const existingSkus = new Set(
-        (existingProducts || [])
-          .map((p: any) => p.sku)
-          .filter((sku: string) => sku && sku.trim() !== '')
-          .map((sku: string) => sku.trim().toLowerCase())
-      );
+      // Crear sets para verificar productos existentes (normalizados)
+      // Normalizar SKUs: trim, lowercase, eliminar espacios extras
+      const existingSkus = new Set<string>();
+      const existingNameSkuPairs = new Map<string, string>(); // nombre -> sku para productos sin SKU
       
-      // También crear un set de nombres para productos sin SKU
-      const existingNames = new Set(
-        (existingProducts || [])
-          .map((p: any) => p.name?.trim().toLowerCase())
-          .filter((name: string) => name)
-      );
+      (existingProducts || []).forEach((p: any) => {
+        const sku = p.sku?.trim() || '';
+        const name = p.name?.trim() || '';
+        
+        if (sku) {
+          // Normalizar SKU: lowercase y eliminar espacios
+          const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
+          existingSkus.add(normalizedSku);
+        }
+        
+        if (name) {
+          // Normalizar nombre: lowercase y eliminar espacios extras
+          const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
+          existingNameSkuPairs.set(normalizedName, sku);
+        }
+      });
 
-      addLog(`Productos existentes en base de datos: ${existingProducts?.length || 0} (${existingSkus.size} con SKU)`, 'info');
+      addLog(`Productos existentes en base de datos: ${existingProducts?.length || 0} (${existingSkus.size} con SKU, ${existingNameSkuPairs.size} con nombre)`, 'info');
 
       // Obtener todos los productos de PrestaShop
       addLog('Escaneando productos de PrestaShop...', 'info');
@@ -490,20 +497,43 @@ export default async function handler(
       // Filtrar productos nuevos (verificar por SKU y también por nombre si no tiene SKU)
       const newProducts = allProducts.filter(product => {
         const sku = product.sku?.trim() || '';
+        const name = product.name?.trim() || '';
         
         if (sku) {
-          // Producto con SKU: verificar por SKU
-          return !existingSkus.has(sku.toLowerCase());
+          // Producto con SKU: verificar por SKU normalizado
+          const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
+          return !existingSkus.has(normalizedSku);
+        } else if (name) {
+          // Producto sin SKU: verificar por nombre normalizado
+          const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
+          return !existingNameSkuPairs.has(normalizedName);
         } else {
-          // Producto sin SKU: verificar por nombre
-          const name = product.name?.trim().toLowerCase() || '';
-          if (!name) {
-            // Sin SKU ni nombre, lo consideramos nuevo pero puede dar problemas
-            return true;
-          }
-          return !existingNames.has(name);
+          // Sin SKU ni nombre, lo consideramos nuevo pero puede dar problemas
+          return true;
         }
       });
+      
+      // Debug: contar por qué se consideran nuevos
+      let newBySku = 0;
+      let newByName = 0;
+      let newByNoData = 0;
+      
+      allProducts.forEach(product => {
+        const sku = product.sku?.trim() || '';
+        const name = product.name?.trim() || '';
+        
+        if (sku) {
+          const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
+          if (!existingSkus.has(normalizedSku)) newBySku++;
+        } else if (name) {
+          const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
+          if (!existingNameSkuPairs.has(normalizedName)) newByName++;
+        } else {
+          newByNoData++;
+        }
+      });
+      
+      addLog(`Desglose de productos nuevos: ${newBySku} por SKU, ${newByName} por nombre, ${newByNoData} sin datos`, 'info');
 
       addLog(`Productos nuevos encontrados: ${newProducts.length}`, 'info');
 
@@ -532,35 +562,21 @@ export default async function handler(
         for (let i = 0; i < productsToInsert.length; i += batchSize) {
           const batch = productsToInsert.slice(i, i + batchSize);
           
-          // Verificar una vez más que no existan antes de insertar
-          // Verificar por SKU si tienen SKU, o por nombre si no tienen
-          const skusToCheck = batch.map((p: any) => p.sku).filter(Boolean);
-          const namesToCheck = batch.filter((p: any) => !p.sku).map((p: any) => p.name).filter(Boolean);
-          
-          let duplicateSkus = new Set();
-          let duplicateNames = new Set();
-          
-          if (skusToCheck.length > 0) {
-            const { data: duplicates } = await supabase
-              .from('products')
-              .select('sku')
-              .in('sku', skusToCheck);
-            duplicateSkus = new Set((duplicates || []).map((p: any) => p.sku?.trim().toLowerCase()));
-          }
-          
-          if (namesToCheck.length > 0) {
-            const { data: duplicatesByName } = await supabase
-              .from('products')
-              .select('name')
-              .in('name', namesToCheck);
-            duplicateNames = new Set((duplicatesByName || []).map((p: any) => p.name?.trim().toLowerCase()));
-          }
-          
+          // Verificar una vez más que no existan antes de insertar (usando la misma normalización)
           const trulyNewProducts = batch.filter((p: any) => {
-            if (p.sku) {
-              return !duplicateSkus.has(p.sku.trim().toLowerCase());
+            const sku = p.sku?.trim() || '';
+            const name = p.name?.trim() || '';
+            
+            if (sku) {
+              const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
+              return !existingSkus.has(normalizedSku);
+            } else if (name) {
+              const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
+              return !existingNameSkuPairs.has(normalizedName);
             } else {
-              return !duplicateNames.has((p.name || '').trim().toLowerCase());
+              // Sin SKU ni nombre: verificar si existe en la base de datos
+              // Esto es más costoso, así que solo para este caso especial
+              return true; // Ya fue filtrado en la primera verificación
             }
           });
           
