@@ -4,6 +4,10 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
@@ -12,6 +16,14 @@
     {
       "path": "/api/sync-products-cron",
       "schedule": "50 23 * * *"
+    },
+    {
+      "path": "/api/sync-web-content-cron",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cleanup-old-conversations-cron",
+      "schedule": "0 3 * * *"
     }
   ]
 }
