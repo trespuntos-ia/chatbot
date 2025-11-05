@@ -727,29 +727,74 @@ export default async function handler(
       if (trulyNewProducts.length > 0) {
         addLog('Importando productos nuevos...', 'info');
 
-        // Preparar productos para insertar
-        const productsToInsert = trulyNewProducts.map((product: any) => ({
-          name: product.name || '',
-          price: product.price || '',
-          category: product.category || '',
-          subcategory: product.subcategory || null,
-          description: product.description || '',
-          sku: product.sku || '',
-          image_url: product.image || '',
-          product_url: product.product_url || '',
-          updated_at: new Date().toISOString(),
-        }));
+        // Preparar productos para insertar, filtrando duplicados dentro del mismo lote
+        const productsToInsert: any[] = [];
+        const seenSkus = new Set<string>();
+        const seenNames = new Set<string>();
+        
+        for (const product of trulyNewProducts) {
+          const sku = product.sku?.trim() || '';
+          const name = product.name?.trim().toLowerCase() || '';
+          
+          // Verificar duplicados dentro del lote
+          if (sku) {
+            const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
+            if (seenSkus.has(normalizedSku)) {
+              continue; // Skip duplicado en el lote
+            }
+            seenSkus.add(normalizedSku);
+          } else if (name) {
+            if (seenNames.has(name)) {
+              continue; // Skip duplicado en el lote
+            }
+            seenNames.add(name);
+          }
+          
+          // Generar SKU único si está vacío (usando timestamp + índice)
+          const finalSku = sku || `AUTO-${Date.now()}-${productsToInsert.length}`;
+          
+          productsToInsert.push({
+            name: product.name || '',
+            price: product.price || '',
+            category: product.category || '',
+            subcategory: product.subcategory || null,
+            description: product.description || '',
+            sku: finalSku,
+            image_url: product.image || '',
+            product_url: product.product_url || '',
+            updated_at: new Date().toISOString(),
+          });
+        }
+        
+        addLog(`Productos a insertar después de filtrar duplicados en lote: ${productsToInsert.length}`, 'info');
 
-        // Insertar SOLO productos nuevos (NO actualizar existentes)
-        // Usar insert con ignoreDuplicates para evitar errores de duplicados
+        // Insertar SOLO productos nuevos
         const batchSize = 100;
         for (let i = 0; i < productsToInsert.length; i += batchSize) {
           const batch = productsToInsert.slice(i, i + batchSize);
           
-          // Insertar productos nuevos (ya filtrados previamente)
+          // Verificar una vez más antes de insertar
+          const skusInBatch = batch.map(p => p.sku).filter(Boolean);
+          const { data: existingInBatch } = await supabase
+            .from('products')
+            .select('sku')
+            .in('sku', skusInBatch);
+          
+          const existingSkusInBatch = new Set((existingInBatch || []).map((p: any) => p.sku?.trim().toLowerCase()));
+          const finalBatch = batch.filter(p => {
+            const normalizedSku = p.sku?.trim().toLowerCase() || '';
+            return !existingSkusInBatch.has(normalizedSku);
+          });
+          
+          if (finalBatch.length === 0) {
+            addLog(`Lote ${Math.floor(i / batchSize) + 1}: Todos los productos ya existen, saltando...`, 'info');
+            continue;
+          }
+          
+          // Insertar productos nuevos
           const { data: insertedData, error: insertError } = await supabase
             .from('products')
-            .insert(batch)
+            .insert(finalBatch)
             .select();
 
           if (insertError) {
