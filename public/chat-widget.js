@@ -40,6 +40,13 @@
   // Clave para localStorage
   const STORAGE_KEY = 'chatbot_conversation';
 
+  // Escapar HTML para seguridad
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   // Cargar mensajes desde localStorage
   function loadMessages() {
     try {
@@ -110,6 +117,18 @@
       const data = await response.json();
 
       if (data.success && data.conversation_history) {
+        // Asegurar que los productos se añadan correctamente al último mensaje
+        const lastMessage = data.conversation_history[data.conversation_history.length - 1];
+        if (lastMessage && data.function_result) {
+          // Si hay productos en function_result, añadirlos al mensaje
+          if (data.function_result.products && Array.isArray(data.function_result.products)) {
+            lastMessage.products = data.function_result.products;
+          } else if (data.function_result.product && data.function_result.found) {
+            // Producto único por SKU
+            lastMessage.products = [data.function_result.product];
+          }
+        }
+        
         messages = data.conversation_history;
         saveMessages();
         renderMessages();
@@ -131,20 +150,76 @@
     }
   }
 
-  // Parsear markdown básico a HTML
-  function parseMarkdown(text) {
+  // Detectar si hay contenido descriptivo de productos (listas numeradas con precios, descripciones)
+  function hasProductDescriptiveContent(text) {
+    const numberedListPattern = /\d+\.\s*\*\*[^*]+\*\*/;
+    const pricePattern = /(?:Precio|Price)[:\-]\s*[\d.,]+\s*€?/i;
+    const descriptionPattern = /(?:Descripción|Description)[:\-]/i;
+    const detailsPattern = /(?:Ver\s+más\s+detalles|View\s+details)/i;
+    
+    return numberedListPattern.test(text) || 
+           (pricePattern.test(text) && descriptionPattern.test(text)) ||
+           detailsPattern.test(text);
+  }
+
+  // Extraer solo el texto introductorio (antes de cualquier lista de productos)
+  function extractIntroText(text) {
+    const lines = text.split('\n');
+    const introLines = [];
+    
+    for (const line of lines) {
+      // Si encontramos una lista numerada, parar
+      if (/\d+\.\s*\*\*/.test(line)) {
+        break;
+      }
+      // Si encontramos un precio o descripción, probablemente es parte de una lista
+      if (/(?:Precio|Price)[:\-]/.test(line) || /(?:Descripción|Description)[:\-]/.test(line)) {
+        break;
+      }
+      // Si encontramos "Ver más detalles", parar
+      if (/(?:Ver\s+más\s+detalles|View\s+details)/i.test(line)) {
+        break;
+      }
+      introLines.push(line);
+    }
+    
+    return introLines.join('\n').trim();
+  }
+
+  // Parsear markdown básico a HTML con mejor manejo
+  function parseMarkdown(text, hasProducts = false) {
     if (!text) return '';
     
     let html = text;
     
-    // Negrita
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Si hay productos, extraer solo el intro
+    if (hasProducts && hasProductDescriptiveContent(html)) {
+      html = extractIntroText(html);
+    }
     
-    // Enlaces
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">$1</a>');
+    // Convertir negrita markdown primero
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight: 600; color: #0f172a;">$1</strong>');
     
-    // Saltos de línea
-    html = html.replace(/\n/g, '<br />');
+    // Convertir enlaces markdown
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+      // Escapar HTML para seguridad
+      const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const escapedUrl = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 500;">${escapedText}</a>`;
+    });
+    
+    // Convertir saltos de línea dobles en párrafos
+    html = html.split(/\n\n+/).map(para => {
+      if (para.trim()) {
+        return `<p style="margin-bottom: 8px;">${para.trim().replace(/\n/g, '<br />')}</p>`;
+      }
+      return '';
+    }).join('');
+    
+    // Si no hay párrafos, convertir saltos simples
+    if (!html.includes('<p')) {
+      html = html.replace(/\n/g, '<br />');
+    }
     
     return html;
   }
@@ -166,7 +241,7 @@
     const hasImage = imageUrl && imageUrl.trim() !== '';
 
     return `
-      <div style="width: 100%; background: white; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: row; margin-bottom: 12px;">
+      <div style="width: 100%; background: white; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: row; margin-bottom: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
         <div style="width: 192px; min-width: 192px; background: #f8fafc; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
           ${hasImage ? `
             <img src="${imageUrl}" alt="${product.name}" style="width: 100%; height: 100%; object-fit: contain; padding: 16px;" 
@@ -231,14 +306,14 @@
       messagesContainer.innerHTML = `
         <div style="margin-bottom: 12px;">
           <div style="max-width: 85%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
-            <div style="white-space: pre-wrap; font-size: 14px;">
+            <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
               👋 ¡Bienvenido a 100%Chef!
             </div>
           </div>
         </div>
         <div style="margin-bottom: 12px;">
           <div style="max-width: 85%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
-            <div style="white-space: pre-wrap; font-size: 14px;">
+            <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
               Si mezclas curiosidad con técnica, estás en el lugar correcto. Cuéntame tu receta… yo pongo la tecnología. ¿En qué puedo ayudarte hoy?
             </div>
           </div>
@@ -254,15 +329,26 @@
       messageDiv.style.marginBottom = '12px';
 
       if (message.role === 'assistant' && message.products && message.products.length > 0) {
-        // Mensaje con productos
-        let html = `<div style="max-width: 90%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
-          <div style="font-size: 14px;">${parseMarkdown(message.content)}</div>
-        </div>`;
+        // Mensaje con productos - separar texto introductorio de tarjetas
+        const introText = parseMarkdown(message.content, true);
         
-        // Añadir tarjetas de productos
+        let html = '';
+        
+        // Solo mostrar texto introductorio si hay contenido significativo (más de 10 caracteres)
+        if (introText && introText.trim().length >= 10) {
+          html += `<div style="display: flex; justify-content: flex-start; margin-bottom: 16px;">
+            <div style="max-width: 90%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
+              <div style="font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">${introText}</div>
+            </div>
+          </div>`;
+        }
+        
+        // Añadir tarjetas de productos en un contenedor separado con ancho completo
+        html += '<div style="width: 100%; margin-top: 4px; padding: 0 4px;">';
         message.products.forEach(product => {
           html += renderProductCard(product);
         });
+        html += '</div>';
 
         messageDiv.innerHTML = html;
       } else {
@@ -274,7 +360,7 @@
                 ? 'background: ' + widgetConfig.buttonColor + '; color: white;' 
                 : 'background: #f1f5f9; color: #334155;'
             }">
-              <div style="white-space: pre-wrap; font-size: 14px;">${isUser ? message.content : parseMarkdown(message.content)}</div>
+              <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">${isUser ? escapeHtml(message.content) : parseMarkdown(message.content, false)}</div>
             </div>
           </div>
         `;
@@ -448,8 +534,10 @@
     messagesContainer.style.cssText = `
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 16px;
       margin-bottom: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     `;
 
     // Input container
@@ -529,6 +617,12 @@
         #chat-widget-window {
           transform: translateZ(0);
           -webkit-transform: translateZ(0);
+        }
+        #chat-widget-window * {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        }
+        #chat-widget-messages {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
         }
       `;
       document.head.appendChild(style);
