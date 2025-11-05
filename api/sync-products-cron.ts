@@ -214,10 +214,9 @@ async function mapProduct(
       subcategory = hierarchy[1];
     } else if (hierarchy.length >= 3) {
       // 3 niveles: categoría, subcategoría y sub-subcategoría
-      // En Supabase guardamos: category = nivel 1, subcategory = nivel 2
-      // El nivel 3 (más específico) se puede concatenar en subcategory o usar solo nivel 2
+      // En Supabase guardamos: category = nivel 1, subcategory = nivel 2 > nivel 3
       category = hierarchy[0];
-      subcategory = hierarchy[1]; // O podríamos usar `${hierarchy[1]} > ${hierarchy[2]}` si quieres el nivel 3
+      subcategory = `${hierarchy[1]} > ${hierarchy[2]}`; // Concatenar niveles 2 y 3
     } else {
       // Sin jerarquía
       category = categoryInfo.name || '';
