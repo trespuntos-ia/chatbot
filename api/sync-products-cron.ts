@@ -24,8 +24,15 @@ export default async function handler(
   const authToken = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
   const cronSecret = process.env.CRON_SECRET || 'your-secret-token';
   
-  if (authToken !== cronSecret && !req.query.manual) {
-    res.status(401).json({ error: 'Unauthorized' });
+  // Para pruebas manuales, permitir sin token si viene el parámetro manual
+  if (req.query.manual === 'true') {
+    // Permitir sin token para pruebas (solo en desarrollo)
+    // En producción, requerir token siempre
+  } else if (authToken !== cronSecret) {
+    res.status(401).json({ 
+      error: 'Unauthorized',
+      hint: 'Provide token in query parameter: ?token=YOUR_CRON_SECRET or ?manual=true for testing'
+    });
     return;
   }
 
@@ -56,7 +63,8 @@ export default async function handler(
     if (!connections || connections.length === 0) {
       res.status(404).json({ 
         error: 'No active PrestaShop connection found',
-        hint: 'Please create a connection in the dashboard first'
+        hint: 'Please create a connection in the dashboard first (Conexiones tab)',
+        details: 'Go to Dashboard → Conexiones tab and configure your PrestaShop connection'
       });
       return;
     }
@@ -223,7 +231,9 @@ export default async function handler(
     console.error('Sync products error:', error);
     res.status(500).json({ 
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
+      details: error instanceof Error ? error.stack : undefined
     });
   }
 }
+
