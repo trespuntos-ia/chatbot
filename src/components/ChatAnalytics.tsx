@@ -93,6 +93,46 @@ export function ChatAnalytics() {
     }
   };
 
+  const exportToCSV = () => {
+    if (!data || !data.recentConversations || data.recentConversations.length === 0) {
+      alert('No hay conversaciones para exportar');
+      return;
+    }
+
+    // Preparar datos CSV
+    const headers = ['Fecha', 'Usuario', 'Bot', 'Función Llamada', 'Productos Consultados', 'Categoría', 'Tiempo Respuesta (ms)'];
+    const rows = data.recentConversations.map((conv: any) => {
+      const fecha = new Date(conv.created_at).toLocaleString('es-ES');
+      const userMessage = (conv.user_message || '').replace(/"/g, '""'); // Escapar comillas
+      const botResponse = (conv.bot_response || '').replace(/"/g, '""'); // Escapar comillas
+      const functionCalled = conv.function_called || '';
+      const products = conv.products_consulted 
+        ? JSON.stringify(conv.products_consulted).replace(/"/g, '""')
+        : '';
+      const category = conv.category_consulted || '';
+      const responseTime = conv.response_time_ms || '';
+      
+      return `"${fecha}","${userMessage}","${botResponse}","${functionCalled}","${products}","${category}","${responseTime}"`;
+    });
+
+    // Crear contenido CSV
+    const csvContent = [
+      headers.join(','),
+      ...rows
+    ].join('\n');
+
+    // Crear blob y descargar
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' }); // BOM para Excel
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `conversaciones_${dateRange}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   if (loading) {
     return (
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
@@ -211,53 +251,56 @@ export function ChatAnalytics() {
         )}
       </div>
 
-      {/* Gráfico de productos más consultados (Bar Chart) */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">Top 10 Productos Consultados</h3>
-        {data.topProducts.length > 0 ? (
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={data.topProducts.slice(0, 10).map(p => ({ name: p.name.length > 30 ? p.name.substring(0, 30) + '...' : p.name, consultas: p.count }))}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="consultas" fill="#4f46e5" />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <p className="text-slate-600 text-center py-8">No hay productos consultados</p>
-        )}
-      </div>
+      {/* Gráficos en la misma línea: Top Productos y Distribución por Categorías */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Gráfico de productos más consultados (Bar Chart) */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Top 10 Productos Consultados</h3>
+          {data.topProducts.length > 0 ? (
+            <ResponsiveContainer width="100%" height={400}>
+              <BarChart data={data.topProducts.slice(0, 10).map(p => ({ name: p.name.length > 30 ? p.name.substring(0, 30) + '...' : p.name, consultas: p.count }))}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="consultas" fill="#4f46e5" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-slate-600 text-center py-8">No hay productos consultados</p>
+          )}
+        </div>
 
-      {/* Gráfico de categorías (Pie Chart) */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">Distribución por Categorías</h3>
-        {data.topCategories.length > 0 ? (
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={data.topCategories.slice(0, 8)}
-                dataKey="count"
-                nameKey="category"
-                cx="50%"
-                cy="50%"
-                outerRadius={100}
-                label={(props: any) => {
-                  const percent = props.percent || 0;
-                  const category = props.category || props.name || '';
-                  return `${category}: ${(percent * 100).toFixed(0)}%`;
-                }}
-              >
-                {data.topCategories.slice(0, 8).map((_, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        ) : (
-          <p className="text-slate-600 text-center py-8">No hay categorías consultadas</p>
-        )}
+        {/* Gráfico de categorías (Pie Chart) */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Distribución por Categorías</h3>
+          {data.topCategories.length > 0 ? (
+            <ResponsiveContainer width="100%" height={400}>
+              <PieChart>
+                <Pie
+                  data={data.topCategories.slice(0, 8)}
+                  dataKey="count"
+                  nameKey="category"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={100}
+                  label={(props: any) => {
+                    const percent = props.percent || 0;
+                    const category = props.category || props.name || '';
+                    return `${category}: ${(percent * 100).toFixed(0)}%`;
+                  }}
+                >
+                  {data.topCategories.slice(0, 8).map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-slate-600 text-center py-8">No hay categorías consultadas</p>
+          )}
+        </div>
       </div>
 
       {/* Tabla de Top Productos */}
@@ -314,39 +357,62 @@ export function ChatAnalytics() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">Preguntas Más Frecuentes</h3>
         <div className="space-y-2">
-          {data.topQuestions.map((q, index) => (
-            <div key={index} className="p-3 bg-slate-50 rounded-lg">
-              <div className="font-medium text-slate-900 mb-1">{q.question}...</div>
-              <div className="text-sm text-slate-600">{q.count} veces</div>
-            </div>
-          ))}
+          {data.topQuestions.length > 0 ? (
+            data.topQuestions.map((q, index) => (
+              <div key={index} className="p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium text-slate-900">{q.question}...</div>
+                  <div className="text-sm font-semibold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+                    {q.count} {q.count === 1 ? 'vez' : 'veces'}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-slate-600 text-center py-4">No hay preguntas registradas</p>
+          )}
         </div>
       </div>
 
       {/* Conversaciones recientes */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">Conversaciones Recientes</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-slate-900">Conversaciones Recientes</h3>
+          <button
+            onClick={exportToCSV}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Descargar CSV
+          </button>
+        </div>
         <div className="space-y-4">
-          {data.recentConversations.map((conv, index) => (
-            <div key={index} className="border-b border-slate-200 pb-4 last:border-0">
-              <div className="text-sm text-slate-500 mb-2">
-                {new Date(conv.created_at).toLocaleString('es-ES')}
-              </div>
-              <div className="mb-2">
-                <div className="text-xs font-medium text-slate-500 mb-1">Usuario:</div>
-                <div className="text-slate-900">{conv.user_message}</div>
-              </div>
-              <div>
-                <div className="text-xs font-medium text-slate-500 mb-1">Bot:</div>
-                <div className="text-slate-700">{conv.bot_response.substring(0, 200)}...</div>
-              </div>
-              {conv.products_consulted && conv.products_consulted.length > 0 && (
-                <div className="mt-2 text-sm text-indigo-600">
-                  📦 {conv.products_consulted.length} producto(s) consultado(s)
+          {data.recentConversations.length > 0 ? (
+            data.recentConversations.map((conv, index) => (
+              <div key={index} className="border-b border-slate-200 pb-4 last:border-0">
+                <div className="text-sm text-slate-500 mb-2">
+                  {new Date(conv.created_at).toLocaleString('es-ES')}
                 </div>
-              )}
-            </div>
-          ))}
+                <div className="mb-2">
+                  <div className="text-xs font-medium text-slate-500 mb-1">Usuario:</div>
+                  <div className="text-slate-900">{conv.user_message}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-500 mb-1">Bot:</div>
+                  <div className="text-slate-700">{conv.bot_response.substring(0, 200)}...</div>
+                </div>
+                {conv.products_consulted && conv.products_consulted.length > 0 && (
+                  <div className="mt-2 text-sm text-indigo-600">
+                    📦 {conv.products_consulted.length} producto(s) consultado(s)
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <p className="text-slate-600 text-center py-4">No hay conversaciones recientes</p>
+          )}
         </div>
       </div>
     </div>
