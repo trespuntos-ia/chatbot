@@ -494,20 +494,36 @@ export default async function handler(
       // Preparar contexto enriquecido con instrucciones de validación
       let enrichedContext = '';
       
-      // Añadir instrucciones para validación cuando hay múltiples productos
+      // INSTRUCCIONES MEJORADAS PARA OPENAI
+      enrichedContext += '\n\n📋 INSTRUCCIONES CRÍTICAS PARA RESPONDER:\n';
+      enrichedContext += '1. SIEMPRE presenta productos con esta estructura clara:\n';
+      enrichedContext += '   - Nombre completo del producto\n';
+      enrichedContext += '   - Precio (SIEMPRE lo mencionas si está disponible)\n';
+      enrichedContext += '   - Breve descripción (1-2 líneas)\n';
+      enrichedContext += '   - Link de compra (si está disponible)\n\n';
+      enrichedContext += '2. Cuando haya múltiples productos:\n';
+      enrichedContext += '   - Lista los TOP 3-5 más relevantes (ya están ordenados por relevancia)\n';
+      enrichedContext += '   - Usa formato de lista numerada o con viñetas\n';
+      enrichedContext += '   - Incluye precio y link para cada uno\n';
+      enrichedContext += '   - Si hay más productos, menciona "y X más productos disponibles"\n\n';
+      enrichedContext += '3. SIEMPRE menciona el precio si está disponible en el producto\n\n';
+      enrichedContext += '4. Si un producto tiene categoría, menciónala brevemente\n\n';
+      enrichedContext += '5. Sé específico y detallado, NO uses respuestas genéricas como "tengo productos"\n\n';
+      enrichedContext += '6. Si el usuario pregunta por algo específico y lo encontraste, confirma que sí lo tienes\n\n';
+      enrichedContext += '7. Si no encuentras exactamente lo que busca, sugiere alternativas similares de los resultados\n\n';
+      
+      // Añadir instrucciones específicas según el caso
       if (functionResult.products && functionResult.products.length > 1) {
-        enrichedContext += '\n\n⚠️ IMPORTANTE: Has encontrado múltiples productos. NO asumas cuál es el correcto. Debes:\n';
-        enrichedContext += '1. Listar todos los productos encontrados con sus nombres completos\n';
-        enrichedContext += '2. Preguntar al usuario cuál de estos productos es el que busca\n';
-        enrichedContext += '3. NO afirmes que tienes un producto específico sin confirmar primero\n';
+        enrichedContext += '\n⚠️ IMPORTANTE: Has encontrado múltiples productos (ya ordenados por relevancia). Presenta los más relevantes primero.\n';
       } else if (functionResult.products && functionResult.products.length === 1) {
         const product = functionResult.products[0];
+        enrichedContext += '\n✅ Has encontrado un producto específico. Preséntalo con todos sus detalles.\n';
         // Verificar si el nombre coincide exactamente con la búsqueda
         if (functionArgs.query && typeof functionArgs.query === 'string') {
           const searchTerm = functionArgs.query.toLowerCase().trim();
           const productName = product.name.toLowerCase();
           if (!productName.includes(searchTerm) && !searchTerm.includes(productName.split(' ')[0])) {
-            enrichedContext += '\n\n⚠️ IMPORTANTE: El producto encontrado no coincide exactamente con la búsqueda. Debes preguntar al usuario si este es el producto que busca antes de confirmar.\n';
+            enrichedContext += '⚠️ Nota: El producto encontrado puede no coincidir exactamente con la búsqueda. Asegúrate de mencionar el nombre completo.\n';
           }
         }
         
