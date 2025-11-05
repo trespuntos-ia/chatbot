@@ -34,6 +34,7 @@ export function ChatAnalytics() {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryGeneratedAt, setSummaryGeneratedAt] = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
   useEffect(() => {
     fetchAnalytics();
@@ -42,6 +43,7 @@ export function ChatAnalytics() {
     // Auto-refresh cada 30 segundos para ver conversaciones nuevas
     const interval = setInterval(() => {
       fetchAnalytics();
+      setLastRefresh(new Date());
     }, 30000); // 30 segundos
     
     return () => clearInterval(interval);
@@ -57,6 +59,7 @@ export function ChatAnalytics() {
       
       if (result.success) {
         setData(result);
+        setLastRefresh(new Date());
       } else {
         setError(result.error || 'Error al cargar analytics');
       }
@@ -191,18 +194,24 @@ export function ChatAnalytics() {
               <option value="all">Todo el tiempo</option>
             </select>
           </div>
-          <button
-            onClick={() => {
-              fetchAnalytics();
-              fetchLastSummary();
-            }}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Actualizar
-          </button>
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-slate-500">
+              Última actualización: {lastRefresh.toLocaleTimeString('es-ES')}
+            </span>
+            <button
+              onClick={() => {
+                fetchAnalytics();
+                fetchLastSummary();
+                setLastRefresh(new Date());
+              }}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Actualizar
+            </button>
+          </div>
         </div>
       </div>
 
