@@ -89,12 +89,21 @@ async function getCategoryBasicInfo(
       language: String(config.langCode || 1),
     });
     const url = `${config.prestashopUrl.replace(/\/$/, '')}/categories/${categoryId}?${queryParams.toString()}`;
+    
+    // Añadir timeout de 5 segundos
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
     const response = await fetch(url, {
       headers: {
         'Authorization': getAuthHeader(config.apiKey),
         'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
       },
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
+    
     if (response.ok) {
       const data = await response.json();
       const category = data.category || data;
@@ -102,8 +111,12 @@ async function getCategoryBasicInfo(
       const parentId = category.id_parent ? parseInt(category.id_parent) : null;
       return { name, parentId };
     }
-  } catch (error) {
-    console.error(`Error fetching category ${categoryId}:`, error);
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.error(`Timeout fetching category ${categoryId}`);
+    } else {
+      console.error(`Error fetching category ${categoryId}:`, error);
+    }
   }
   
   return null;
@@ -498,8 +511,19 @@ export default async function handler(
 
       // Obtener todos los productos de PrestaShop
       addLog('Escaneando productos de PrestaShop...', 'info');
+      
+      // Añadir timeout total de 4 minutos (Vercel tiene límite de 5 minutos para funciones Pro)
+      const syncStartTime = Date.now();
+      const MAX_SYNC_TIME = 4 * 60 * 1000; // 4 minutos
+      
       const allProducts = await fetchAllProducts(apiConfig, (current, total) => {
-        // Opcional: actualizar progreso en la base de datos
+        // Verificar timeout cada 100 productos
+        if (current % 100 === 0) {
+          const elapsed = Date.now() - syncStartTime;
+          if (elapsed > MAX_SYNC_TIME) {
+            throw new Error('Timeout: La sincronización está tomando demasiado tiempo');
+          }
+        }
       });
 
       addLog(`Productos escaneados de PrestaShop: ${allProducts.length}`, 'info');
@@ -588,24 +612,60 @@ export default async function handler(
             ...(product.sku?.trim() ? { sku: product.sku.trim() } : {})
           }));
 
-          // Actualizar por SKU si existe, sino por nombre
-          for (const update of updates) {
-            const sku = update.sku?.trim() || '';
-            const { error: updateError } = sku
-              ? await supabase
-                  .from('products')
-                  .update(update)
-                  .eq('sku', sku)
-              : await supabase
-                  .from('products')
-                  .update(update)
-                  .eq('name', update.name);
+          // Actualizar en batch por SKU (más eficiente)
+          const skuUpdates = updates.filter(u => u.sku);
+          const nameUpdates = updates.filter(u => !u.sku);
+          
+          // Actualizar por SKU en batch
+          if (skuUpdates.length > 0) {
+            // Agrupar por SKU y actualizar
+            for (const update of skuUpdates) {
+              const sku = update.sku?.trim() || '';
+              const { error: updateError } = await supabase
+                .from('products')
+                .update({
+                  name: update.name,
+                  price: update.price,
+                  category: update.category,
+                  subcategory: update.subcategory,
+                  description: update.description,
+                  image_url: update.image_url,
+                  product_url: update.product_url,
+                  updated_at: update.updated_at
+                })
+                .eq('sku', sku);
 
-            if (updateError) {
-              errors.push({ error: updateError.message, sku });
-              addLog(`Error actualizando producto ${sku || update.name}: ${updateError.message}`, 'error');
-            } else {
-              updated++;
+              if (updateError) {
+                errors.push({ error: updateError.message, sku });
+                addLog(`Error actualizando producto SKU ${sku}: ${updateError.message}`, 'error');
+              } else {
+                updated++;
+              }
+            }
+          }
+          
+          // Actualizar por nombre (sin SKU)
+          if (nameUpdates.length > 0) {
+            for (const update of nameUpdates) {
+              const { error: updateError } = await supabase
+                .from('products')
+                .update({
+                  price: update.price,
+                  category: update.category,
+                  subcategory: update.subcategory,
+                  description: update.description,
+                  image_url: update.image_url,
+                  product_url: update.product_url,
+                  updated_at: update.updated_at
+                })
+                .eq('name', update.name);
+
+              if (updateError) {
+                errors.push({ error: updateError.message });
+                addLog(`Error actualizando producto ${update.name}: ${updateError.message}`, 'error');
+              } else {
+                updated++;
+              }
             }
           }
 
@@ -685,17 +745,26 @@ export default async function handler(
 
     } catch (error) {
       // Actualizar registro como fallido
-      addLog(`Error en sincronización: ${error instanceof Error ? error.message : 'Error desconocido'}`, 'error');
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      addLog(`Error en sincronización: ${errorMessage}`, 'error');
+      console.error('Sync error:', error);
       
-      await supabase
-        .from('product_sync_history')
-        .update({
-          sync_completed_at: new Date().toISOString(),
-          status: 'failed',
-          errors: [{ error: error instanceof Error ? error.message : 'Unknown error' }],
-          log_messages: logMessages
-        })
-        .eq('id', syncId);
+      // Intentar actualizar el estado (puede fallar si hay problema de conexión)
+      try {
+        await supabase
+          .from('product_sync_history')
+          .update({
+            sync_completed_at: new Date().toISOString(),
+            status: 'failed',
+            errors: [{ error: errorMessage }],
+            log_messages: logMessages,
+            products_updated: updated || 0,
+            products_imported: imported || 0
+          })
+          .eq('id', syncId);
+      } catch (updateError) {
+        console.error('Error updating sync status:', updateError);
+      }
 
       throw error;
     }
