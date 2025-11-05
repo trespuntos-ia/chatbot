@@ -77,6 +77,14 @@ export default async function handler(
       sessionId
     } = req.body;
 
+    // Log para debugging
+    console.log('[Chat API] Request recibida:', {
+      hasMessage: !!message,
+      messageLength: message?.length || 0,
+      sessionId: sessionId || 'NO ENVIADO',
+      conversationHistoryLength: conversationHistory?.length || 0
+    });
+
     if (!message || typeof message !== 'string') {
       res.status(400).json({
         error: 'Missing or invalid message',
@@ -1808,6 +1816,14 @@ async function saveConversationToAnalytics(
   responseTimeMs?: number
 ) {
   try {
+    console.log('[Analytics] Intentando guardar conversación:', {
+      sessionId: sessionId || 'default',
+      userMessageLength: userMessage?.length || 0,
+      botResponseLength: botResponse?.length || 0,
+      functionCalled,
+      productsCount: productsConsulted?.length || 0
+    });
+
     // Extraer productos consultados si hay función de productos
     let productsData: any[] = [];
     if (productsConsulted && Array.isArray(productsConsulted)) {
@@ -1826,25 +1842,44 @@ async function saveConversationToAnalytics(
       detectedCategory = productsData[0]?.category;
     }
 
-    const { error } = await supabase
+    const insertData = {
+      session_id: sessionId || 'default',
+      user_message: userMessage,
+      bot_response: botResponse,
+      function_called: functionCalled || null,
+      products_consulted: productsData.length > 0 ? productsData : null,
+      category_consulted: detectedCategory || null,
+      model_used: modelUsed || 'gpt-3.5-turbo',
+      response_time_ms: responseTimeMs || null,
+    };
+
+    const { data, error } = await supabase
       .from('chat_conversations')
-      .insert({
-        session_id: sessionId || 'default',
-        user_message: userMessage,
-        bot_response: botResponse,
-        function_called: functionCalled || null,
-        products_consulted: productsData.length > 0 ? productsData : null,
-        category_consulted: detectedCategory || null,
-        model_used: modelUsed || 'gpt-3.5-turbo',
-        response_time_ms: responseTimeMs || null,
-      });
+      .insert(insertData)
+      .select();
 
     if (error) {
-      console.error('Error guardando conversación en analytics:', error);
+      console.error('[Analytics] Error guardando conversación:', {
+        error: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        sessionId: sessionId || 'default'
+      });
       // No fallar si no se puede guardar
+    } else {
+      console.log('[Analytics] Conversación guardada exitosamente:', {
+        id: data?.[0]?.id,
+        sessionId: sessionId || 'default',
+        createdAt: data?.[0]?.created_at
+      });
     }
   } catch (error) {
-    console.error('Error en saveConversationToAnalytics:', error);
+    console.error('[Analytics] Error en saveConversationToAnalytics:', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      sessionId: sessionId || 'default'
+    });
     // No fallar si no se puede guardar
   }
 }
