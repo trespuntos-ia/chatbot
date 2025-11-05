@@ -7,6 +7,7 @@ import type { ChatMessage, ChatConfig, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
+  isVisible?: boolean;
 }
 
 const STORAGE_KEY = 'chatbot_conversation';
@@ -46,7 +47,7 @@ function saveMessagesToStorage(messages: ChatMessage[]): void {
   }
 }
 
-export function Chat({ config }: ChatProps) {
+export function Chat({ config, isVisible = true }: ChatProps) {
   // Cargar mensajes desde localStorage al inicializar
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadMessagesFromStorage());
   const [inputMessage, setInputMessage] = useState('');
@@ -54,6 +55,20 @@ export function Chat({ config }: ChatProps) {
   const [loadingStage, setLoadingStage] = useState<string>('');
   const [error, setError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const wasVisibleRef = useRef(isVisible);
+
+  // Cargar mensajes desde localStorage cuando el chat se hace visible (después de estar cerrado)
+  useEffect(() => {
+    // Si el chat acaba de abrirse (estaba cerrado y ahora está abierto)
+    if (isVisible && !wasVisibleRef.current) {
+      // Recargar desde localStorage al abrir el chat
+      const storedMessages = loadMessagesFromStorage();
+      if (storedMessages.length > 0) {
+        setMessages(storedMessages);
+      }
+    }
+    wasVisibleRef.current = isVisible;
+  }, [isVisible]);
 
   // Escuchar evento para limpiar chat desde el botón del menú
   useEffect(() => {
@@ -80,12 +95,11 @@ export function Chat({ config }: ChatProps) {
     scrollToBottom();
   }, [messages]);
 
-  // Guardar mensajes en localStorage cada vez que cambien
+  // Guardar mensajes en localStorage cada vez que cambien (solo si hay mensajes)
   useEffect(() => {
-    // Guardar siempre, incluso si está vacío (para limpiar cuando se borra)
-    if (messages.length === 0) {
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
+    // Solo guardar si hay mensajes. NO eliminar automáticamente cuando está vacío
+    // para evitar que se borre cuando se reinicializa el componente
+    if (messages.length > 0) {
       saveMessagesToStorage(messages);
     }
   }, [messages]);

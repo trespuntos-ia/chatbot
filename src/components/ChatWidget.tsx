@@ -160,7 +160,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
           {/* Contenido del chat */}
           <div className="flex-1 overflow-hidden">
-            <Chat config={config} />
+            <Chat config={config} isVisible={isOpen} />
           </div>
 
         </div>
