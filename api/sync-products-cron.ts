@@ -65,14 +65,26 @@ function getAuthHeader(apiKey: string): string {
   }
 }
 
-async function getCategoryName(
+// Tipo para información de categoría con jerarquía
+interface CategoryInfo {
+  name: string;
+  parentId: number | null;
+  parentName: string | null;
+}
+
+async function getCategoryInfo(
   categoryId: number,
-  cache: Map<number, string>,
+  cache: Map<number, CategoryInfo>,
   config: ApiConfig
-): Promise<string> {
-  if (!categoryId || cache.has(categoryId)) {
-    return cache.get(categoryId) || '';
+): Promise<CategoryInfo> {
+  if (!categoryId) {
+    return { name: '', parentId: null, parentName: null };
   }
+  
+  if (cache.has(categoryId)) {
+    return cache.get(categoryId)!;
+  }
+  
   try {
     const queryParams = new URLSearchParams({
       ws_key: config.apiKey,
@@ -88,28 +100,56 @@ async function getCategoryName(
     });
     if (response.ok) {
       const data = await response.json();
-      const name = extractMultilanguageValue((data.category || data).name);
-      cache.set(categoryId, name);
-      return name;
+      const category = data.category || data;
+      const name = extractMultilanguageValue(category.name);
+      const parentId = category.id_parent ? parseInt(category.id_parent) : null;
+      
+      let parentName: string | null = null;
+      if (parentId && parentId !== 1 && parentId !== 0) { // 1 es la categoría raíz
+        // Obtener nombre de la categoría padre
+        const parentInfo = await getCategoryInfo(parentId, cache, config);
+        parentName = parentInfo.name;
+      }
+      
+      const categoryInfo: CategoryInfo = {
+        name,
+        parentId,
+        parentName
+      };
+      
+      cache.set(categoryId, categoryInfo);
+      return categoryInfo;
     }
   } catch (error) {
     console.error(`Error fetching category ${categoryId}:`, error);
   }
-  return '';
+  
+  return { name: '', parentId: null, parentName: null };
 }
 
 async function mapProduct(
   product: any,
-  categoryCache: Map<number, string>,
+  categoryCache: Map<number, CategoryInfo>,
   config: ApiConfig
-): Promise<Product> {
+): Promise<Product & { subcategory?: string | null }> {
   const name = extractMultilanguageValue(product.name);
   const description = product.description_short
     ? sanitizeDescription(extractMultilanguageValue(product.description_short))
     : '';
+  
   let category = '';
+  let subcategory: string | null = null;
+  
   if (product.id_category_default) {
-    category = await getCategoryName(parseInt(product.id_category_default), categoryCache, config);
+    const categoryInfo = await getCategoryInfo(parseInt(product.id_category_default), categoryCache, config);
+    // Si tiene categoría padre, la categoría actual es la subcategoría y el padre es la categoría
+    if (categoryInfo.parentName) {
+      category = categoryInfo.parentName;
+      subcategory = categoryInfo.name;
+    } else {
+      category = categoryInfo.name;
+      subcategory = null;
+    }
   }
   const linkRewrite = extractMultilanguageValue(product.link_rewrite);
   const imageId = product.id_default_image || '';
@@ -171,9 +211,9 @@ async function prestashopGet(
 async function fetchAllProducts(
   config: ApiConfig,
   onProgress?: (current: number, total: number | null) => void
-): Promise<Product[]> {
-  const products: Product[] = [];
-  const categoryCache = new Map<number, string>();
+): Promise<Array<Product & { subcategory?: string | null }>> {
+  const products: Array<Product & { subcategory?: string | null }> = [];
+  const categoryCache = new Map<number, CategoryInfo>();
   let offset = 0;
   const chunkSize = 150;
   let iterations = 0;
@@ -339,24 +379,33 @@ export default async function handler(
         langSlug: connection.lang_slug || 'es',
       };
 
-      // Obtener SKUs existentes
+      // Obtener productos existentes (SKU y también por nombre para productos sin SKU)
       addLog('Obteniendo productos existentes de la base de datos...', 'info');
       const { data: existingProducts, error: existingError } = await supabase
         .from('products')
-        .select('sku, category');
+        .select('sku, name');
       
       if (existingError) {
         addLog(`Error obteniendo productos existentes: ${existingError.message}`, 'error');
         throw new Error(`Error fetching existing products: ${existingError.message}`);
       }
       
+      // Crear sets para verificar productos existentes
       const existingSkus = new Set(
         (existingProducts || [])
           .map((p: any) => p.sku)
           .filter((sku: string) => sku && sku.trim() !== '')
+          .map((sku: string) => sku.trim().toLowerCase())
+      );
+      
+      // También crear un set de nombres para productos sin SKU
+      const existingNames = new Set(
+        (existingProducts || [])
+          .map((p: any) => p.name?.trim().toLowerCase())
+          .filter((name: string) => name)
       );
 
-      addLog(`Productos existentes en base de datos: ${existingSkus.size}`, 'info');
+      addLog(`Productos existentes en base de datos: ${existingProducts?.length || 0} (${existingSkus.size} con SKU)`, 'info');
 
       // Obtener todos los productos de PrestaShop
       addLog('Escaneando productos de PrestaShop...', 'info');
@@ -366,12 +415,22 @@ export default async function handler(
 
       addLog(`Productos escaneados de PrestaShop: ${allProducts.length}`, 'info');
 
-      // Filtrar productos nuevos
+      // Filtrar productos nuevos (verificar por SKU y también por nombre si no tiene SKU)
       const newProducts = allProducts.filter(product => {
-        if (!product.sku || product.sku.trim() === '') {
-          return true; // Sin SKU, lo consideramos nuevo
+        const sku = product.sku?.trim() || '';
+        
+        if (sku) {
+          // Producto con SKU: verificar por SKU
+          return !existingSkus.has(sku.toLowerCase());
+        } else {
+          // Producto sin SKU: verificar por nombre
+          const name = product.name?.trim().toLowerCase() || '';
+          if (!name) {
+            // Sin SKU ni nombre, lo consideramos nuevo pero puede dar problemas
+            return true;
+          }
+          return !existingNames.has(name);
         }
-        return !existingSkus.has(product.sku.trim());
       });
 
       addLog(`Productos nuevos encontrados: ${newProducts.length}`, 'info');
@@ -387,7 +446,7 @@ export default async function handler(
           name: product.name || '',
           price: product.price || '',
           category: product.category || '',
-          subcategory: null,
+          subcategory: product.subcategory || null,
           description: product.description || '',
           sku: product.sku || '',
           image_url: product.image || '',
@@ -402,14 +461,36 @@ export default async function handler(
           const batch = productsToInsert.slice(i, i + batchSize);
           
           // Verificar una vez más que no existan antes de insertar
-          const skusToInsert = batch.map((p: any) => p.sku).filter(Boolean);
-          const { data: duplicates } = await supabase
-            .from('products')
-            .select('sku')
-            .in('sku', skusToInsert);
+          // Verificar por SKU si tienen SKU, o por nombre si no tienen
+          const skusToCheck = batch.map((p: any) => p.sku).filter(Boolean);
+          const namesToCheck = batch.filter((p: any) => !p.sku).map((p: any) => p.name).filter(Boolean);
           
-          const duplicateSkus = new Set((duplicates || []).map((p: any) => p.sku));
-          const trulyNewProducts = batch.filter((p: any) => !duplicateSkus.has(p.sku));
+          let duplicateSkus = new Set();
+          let duplicateNames = new Set();
+          
+          if (skusToCheck.length > 0) {
+            const { data: duplicates } = await supabase
+              .from('products')
+              .select('sku')
+              .in('sku', skusToCheck);
+            duplicateSkus = new Set((duplicates || []).map((p: any) => p.sku?.trim().toLowerCase()));
+          }
+          
+          if (namesToCheck.length > 0) {
+            const { data: duplicatesByName } = await supabase
+              .from('products')
+              .select('name')
+              .in('name', namesToCheck);
+            duplicateNames = new Set((duplicatesByName || []).map((p: any) => p.name?.trim().toLowerCase()));
+          }
+          
+          const trulyNewProducts = batch.filter((p: any) => {
+            if (p.sku) {
+              return !duplicateSkus.has(p.sku.trim().toLowerCase());
+            } else {
+              return !duplicateNames.has((p.name || '').trim().toLowerCase());
+            }
+          });
           
           if (trulyNewProducts.length === 0) {
             addLog(`Lote ${Math.floor(i / batchSize) + 1}: Todos los productos ya existen, saltando...`, 'info');
