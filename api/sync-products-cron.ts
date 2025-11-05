@@ -298,6 +298,7 @@ async function prestashopGet(
   return await response.json();
 }
 
+// Esta función ya no se usa directamente, pero la mantenemos por compatibilidad
 async function fetchAllProducts(
   config: ApiConfig,
   onProgress?: (current: number, total: number | null) => void
@@ -509,22 +510,71 @@ export default async function handler(
 
       addLog(`Productos existentes en base de datos: ${existingProducts?.length || 0} (${existingSkus.size} con SKU, ${existingNameSkuPairs.size} con nombre)`, 'info');
 
-      // Obtener todos los productos de PrestaShop
-      addLog('Escaneando productos de PrestaShop...', 'info');
+      // Obtener todas las categorías primero para evitar múltiples requests
+      addLog('Precargando categorías de PrestaShop...', 'info');
+      const categoryIdsSet = new Set<number>();
       
-      // Añadir timeout total de 4 minutos (Vercel tiene límite de 5 minutos para funciones Pro)
-      const syncStartTime = Date.now();
-      const MAX_SYNC_TIME = 4 * 60 * 1000; // 4 minutos
+      // Primero obtener todos los productos sin procesar categorías para extraer los IDs
+      const rawProducts: any[] = [];
+      let offset = 0;
+      const chunkSize = 150;
+      let iterations = 0;
+      const maxIterations = 500;
       
-      const allProducts = await fetchAllProducts(apiConfig, (current, total) => {
-        // Verificar timeout cada 100 productos
-        if (current % 100 === 0) {
-          const elapsed = Date.now() - syncStartTime;
-          if (elapsed > MAX_SYNC_TIME) {
-            throw new Error('Timeout: La sincronización está tomando demasiado tiempo');
+      while (iterations < maxIterations) {
+        const query = {
+          language: String(apiConfig.langCode || 1),
+          limit: `${offset},${chunkSize}`,
+          display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short]',
+          sort: 'id_ASC',
+        };
+        
+        try {
+          const response = await prestashopGet('products', query, apiConfig);
+          if (!response?.products || response.products.length === 0) {
+            break;
           }
+          
+          response.products.forEach((product: any) => {
+            if (product.id_category_default) {
+              categoryIdsSet.add(parseInt(product.id_category_default));
+            }
+            rawProducts.push(product);
+          });
+          
+          const count = response.products.length;
+          if (count < chunkSize) {
+            break;
+          }
+          
+          offset += count;
+          iterations++;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+          console.error('Error fetching products:', error);
+          throw error;
         }
-      });
+      }
+      
+      addLog(`Productos obtenidos: ${rawProducts.length}, Categorías únicas: ${categoryIdsSet.size}`, 'info');
+      
+      // Precargar todas las categorías con su jerarquía
+      addLog('Construyendo jerarquía de categorías...', 'info');
+      const categoryCache = new Map<number, CategoryInfo>();
+      for (const categoryId of categoryIdsSet) {
+        if (categoryId && categoryId !== 1 && categoryId !== 0) {
+          await getCategoryInfo(categoryId, categoryCache, apiConfig);
+        }
+      }
+      addLog(`Categorías precargadas: ${categoryCache.size}`, 'info');
+      
+      // Ahora mapear productos usando categorías ya en cache
+      addLog('Mapeando productos con categorías...', 'info');
+      const allProducts: Array<Product & { subcategory?: string | null }> = [];
+      for (const product of rawProducts) {
+        const mappedProduct = await mapProduct(product, categoryCache, apiConfig);
+        allProducts.push(mappedProduct);
+      }
 
       addLog(`Productos escaneados de PrestaShop: ${allProducts.length}`, 'info');
       
