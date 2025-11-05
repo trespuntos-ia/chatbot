@@ -538,6 +538,11 @@ export default async function handler(
 
       // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
       const systemPromptWithContext = systemPrompt + enrichedContext;
+      
+      // Log para debugging
+      console.log(`Function ${functionName} executed successfully. Result size:`, 
+        JSON.stringify(functionResult).length, 'bytes');
+      
       const messagesWithContext = [
         { role: 'system', content: systemPromptWithContext },
         ...limitedHistory,
@@ -549,16 +554,57 @@ export default async function handler(
           content: JSON.stringify(functionResult)
         }
       ];
+      
+      console.log(`Sending to OpenAI: ${messagesWithContext.length} messages, function result:`, 
+        functionResult.products ? `${functionResult.products.length} products` : 'other data');
 
       // Segunda llamada a OpenAI también con timeout
       let secondCompletion;
       try {
+        // Limitar el tamaño de functionResult para evitar problemas de tokens
+        let limitedFunctionResult = functionResult;
+        if (functionResult.products && Array.isArray(functionResult.products)) {
+          // Limitar a máximo 10 productos para no exceder tokens
+          limitedFunctionResult = {
+            ...functionResult,
+            products: functionResult.products.slice(0, 10),
+            total: functionResult.products.length,
+            limited: functionResult.products.length > 10
+          };
+        }
+        
+        // Limitar tamaño del JSON stringificado
+        const functionResultStr = JSON.stringify(limitedFunctionResult);
+        if (functionResultStr.length > 5000) {
+          // Si es muy grande, crear una versión resumida
+          limitedFunctionResult = {
+            ...functionResult,
+            products: functionResult.products ? functionResult.products.slice(0, 5).map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              price: p.price,
+              category: p.category,
+              sku: p.sku
+            })) : undefined,
+            summary: 'Resultados limitados para mostrar. Total encontrado: ' + (functionResult.total || functionResult.products?.length || 0)
+          };
+        }
+        
         secondCompletion = await Promise.race([
           openai.chat.completions.create({
             model,
             temperature,
             max_tokens: maxTokens,
-            messages: messagesWithContext as any,
+            messages: messagesWithContext.map((msg: any) => {
+              // Asegurar que el mensaje de tool tenga el resultado limitado
+              if (msg.role === 'tool') {
+                return {
+                  ...msg,
+                  content: JSON.stringify(limitedFunctionResult)
+                };
+              }
+              return msg;
+            }) as any,
             tools: functions.map(f => ({
               type: 'function' as const,
               function: f
@@ -566,11 +612,41 @@ export default async function handler(
             tool_choice: 'auto'
           }),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OpenAI request timeout')), 25000)
+            setTimeout(() => reject(new Error('OpenAI request timeout')), 30000)
           )
         ]) as any;
+        
+        console.log('OpenAI second completion received:', {
+          hasContent: !!secondCompletion?.choices?.[0]?.message?.content,
+          contentLength: secondCompletion?.choices?.[0]?.message?.content?.length || 0
+        });
       } catch (openaiError) {
         console.error('OpenAI second completion error:', openaiError);
+        // Si falla, intentar generar una respuesta básica con los datos
+        if (functionResult.products && functionResult.products.length > 0) {
+          const productNames = functionResult.products.slice(0, 5).map((p: any) => p.name).join(', ');
+          const fallbackMessage = `Encontré ${functionResult.products.length} producto(s). ${productNames}${functionResult.products.length > 5 ? ' y más...' : ''}. ¿Te gustaría más información sobre alguno de estos productos?`;
+          
+          res.status(200).json({
+            success: true,
+            message: fallbackMessage,
+            function_called: functionName,
+            function_result: functionResult,
+            fallback: true,
+            conversation_history: [
+              ...conversationHistory,
+              { role: 'user', content: message },
+              {
+                role: 'assistant',
+                content: fallbackMessage,
+                function_calls: [toolCall],
+                sources: ['products_db']
+              }
+            ]
+          });
+          return;
+        }
+        
         res.status(500).json({
           success: false,
           error: 'Error al generar respuesta final',
@@ -580,18 +656,91 @@ export default async function handler(
         return;
       }
 
-      const finalMessage = secondCompletion.choices[0].message.content;
+      // Validar que la respuesta existe y tiene contenido
+      if (!secondCompletion || !secondCompletion.choices || !secondCompletion.choices[0]) {
+        console.error('OpenAI second completion invalid structure:', secondCompletion);
+        // Respuesta de fallback
+        if (functionResult.products && functionResult.products.length > 0) {
+          const productNames = functionResult.products.slice(0, 5).map((p: any) => p.name).join(', ');
+          const fallbackMessage = `Encontré ${functionResult.products.length} producto(s): ${productNames}${functionResult.products.length > 5 ? ' y más...' : ''}. ¿Te gustaría más información sobre alguno de estos productos?`;
+          
+          res.status(200).json({
+            success: true,
+            message: fallbackMessage,
+            function_called: functionName,
+            function_result: functionResult,
+            fallback: true,
+            conversation_history: [
+              ...conversationHistory,
+              { role: 'user', content: message },
+              {
+                role: 'assistant',
+                content: fallbackMessage,
+                function_calls: [toolCall],
+                sources: ['products_db']
+              }
+            ]
+          });
+          return;
+        }
+        
+        res.status(500).json({
+          success: false,
+          error: 'Respuesta inválida de OpenAI',
+          details: 'La respuesta de OpenAI no tiene la estructura esperada'
+        });
+        return;
+      }
+
+      const finalMessage = secondCompletion.choices[0].message?.content || '';
+      
+      // Si el mensaje está vacío, generar uno de fallback
+      if (!finalMessage || finalMessage.trim().length === 0) {
+        console.warn('OpenAI returned empty message, using fallback');
+        if (functionResult.products && functionResult.products.length > 0) {
+          const productNames = functionResult.products.slice(0, 5).map((p: any) => p.name).join(', ');
+          const fallbackMessage = `Encontré ${functionResult.products.length} producto(s): ${productNames}${functionResult.products.length > 5 ? ' y más...' : ''}. ¿Te gustaría más información sobre alguno de estos productos?`;
+          
+          res.status(200).json({
+            success: true,
+            message: fallbackMessage,
+            function_called: functionName,
+            function_result: functionResult,
+            fallback: true,
+            conversation_history: [
+              ...conversationHistory,
+              { role: 'user', content: message },
+              {
+                role: 'assistant',
+                content: fallbackMessage,
+                function_calls: [toolCall],
+                sources: ['products_db']
+              }
+            ]
+          });
+          return;
+        }
+      }
 
       // Determinar fuentes de información
       const sources: string[] = [];
-      if (functionName === 'search_products' || functionName === 'get_product_by_sku') {
+      const productFunctions = [
+        'search_products',
+        'get_product_by_sku',
+        'get_similar_products',
+        'get_product_recommendations',
+        'compare_products',
+        'search_products_by_category',
+        'get_product_categories',
+        'get_products_by_price_range',
+        'get_product_specifications',
+        'get_popular_products'
+      ];
+      
+      if (productFunctions.includes(functionName)) {
         sources.push('products_db');
-        // Scraping desactivado temporalmente
-        // if (enrichedContext) {
-        //   sources.push('web');
-        // }
-      } else if (functionName === 'search_documents') {
-        sources.push('documents');
+      } else if (functionName === 'search_documents' || functionName === 'clarify_search_intent') {
+        sources.push('products_db'); // clarify_search_intent también puede usar productos
       } else if (functionName === 'search_web_documentation') {
         sources.push('web');
       }
