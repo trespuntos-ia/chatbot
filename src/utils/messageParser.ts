@@ -256,6 +256,15 @@ export function parseMessageContent(
       /!\[([^\]]*)\]\(([^)]+)\)/g,
       ''
     );
+    
+    // También eliminar enlaces de texto que mencionen "imagen del producto" o variantes
+    html = html.replace(
+      /\[([^\]]*(?:imagen|image|Imagen|Image)[^\]]*)\]\([^)]+\)/gi,
+      ''
+    );
+    
+    // Eliminar líneas que solo contengan referencias a imágenes
+    html = html.replace(/^\s*!\[.*?\]\(.*?\)\s*$/gm, '');
   }
 
   // Convertir negrita markdown

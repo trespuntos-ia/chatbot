@@ -518,8 +518,6 @@ export default async function handler(
       addLog(`Top categorías encontradas: ${topCategories}`, 'info');
 
       // Separar productos nuevos de productos que necesitan actualización
-
-      // Separar productos nuevos de productos que necesitan actualización
       const productsToUpdate: Array<{ product: any; existing: any }> = [];
       const trulyNewProducts: any[] = [];
 
