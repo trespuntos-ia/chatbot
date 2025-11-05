@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(
   req: VercelRequest,
@@ -25,7 +26,6 @@ export default async function handler(
   }
 
   try {
-    const { createClient } = require('@supabase/supabase-js');
     const openaiApiKey = process.env.OPENAI_API_KEY;
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
