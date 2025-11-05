@@ -642,6 +642,8 @@ export default async function handler(
       let updated = 0;
       const errors: Array<{ sku?: string; error: string; batch?: number }> = [];
 
+      try {
+
       // Actualizar productos existentes
       if (productsToUpdate.length > 0) {
         addLog('Actualizando productos existentes...', 'info');
@@ -838,31 +840,31 @@ export default async function handler(
         errors: errors.length > 0 ? errors : undefined
       });
 
-    } catch (error) {
-      // Actualizar registro como fallido
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      addLog(`Error en sincronización: ${errorMessage}`, 'error');
-      console.error('Sync error:', error);
-      
-      // Intentar actualizar el estado (puede fallar si hay problema de conexión)
-      try {
-        await supabase
-          .from('product_sync_history')
-          .update({
-            sync_completed_at: new Date().toISOString(),
-            status: 'failed',
-            errors: [{ error: errorMessage }],
-            log_messages: logMessages,
-            products_updated: updated || 0,
-            products_imported: imported || 0
-          })
-          .eq('id', syncId);
-      } catch (updateError) {
-        console.error('Error updating sync status:', updateError);
-      }
+      } catch (error) {
+        // Actualizar registro como fallido
+        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+        addLog(`Error en sincronización: ${errorMessage}`, 'error');
+        console.error('Sync error:', error);
+        
+        // Intentar actualizar el estado (puede fallar si hay problema de conexión)
+        try {
+          await supabase
+            .from('product_sync_history')
+            .update({
+              sync_completed_at: new Date().toISOString(),
+              status: 'failed',
+              errors: [{ error: errorMessage }],
+              log_messages: logMessages,
+              products_updated: updated || 0,
+              products_imported: imported || 0
+            })
+            .eq('id', syncId);
+        } catch (updateError) {
+          console.error('Error updating sync status:', updateError);
+        }
 
-      throw error;
-    }
+        throw error;
+      }
 
   } catch (error) {
     console.error('Sync products error:', error);

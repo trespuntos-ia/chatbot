@@ -138,7 +138,8 @@ export default async function handler(
 
     // Obtener último resumen si se solicita
     let lastSummary = null;
-    if (includeSummary === 'true' || includeSummary === true) {
+    const shouldIncludeSummary = includeSummary === 'true' || includeSummary === true || includeSummary === '1';
+    if (shouldIncludeSummary) {
       const { data: summaryData } = await supabase
         .from('chat_analytics_summaries')
         .select('*')
