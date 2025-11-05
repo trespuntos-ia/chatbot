@@ -571,6 +571,15 @@ export default async function handler(
             console.error('Error searching web content for product:', error);
           }
         }
+      } else if (functionResult.products && functionResult.products.length === 0) {
+        enrichedContext += '\n⚠️ No se encontraron productos. Sugiere términos de búsqueda alternativos o pregunta por más detalles.\n';
+      }
+      
+      // Formatear productos para mejor presentación
+      if (functionResult.products && functionResult.products.length > 0) {
+        enrichedContext += '\n\n📦 PRODUCTOS ENCONTRADOS (formateados para mejor presentación):\n';
+        enrichedContext += formatProductsForPrompt(functionResult.products, 5);
+        enrichedContext += '\n\nUsa esta información formateada para crear una respuesta clara y estructurada.\n';
       }
       
       // Scraping desactivado temporalmente - comentado para evitar FUNCTION_INVOCATION_FAILED
