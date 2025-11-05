@@ -164,18 +164,32 @@ export function ChatAnalytics() {
     <div className="space-y-6">
       {/* Filtros */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-        <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-slate-700">Período:</label>
-          <select
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value as any)}
-            className="px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <label className="text-sm font-medium text-slate-700">Período:</label>
+            <select
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value as any)}
+              className="px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="24h">Últimas 24 horas</option>
+              <option value="7d">Últimos 7 días</option>
+              <option value="30d">Últimos 30 días</option>
+              <option value="all">Todo el tiempo</option>
+            </select>
+          </div>
+          <button
+            onClick={() => {
+              fetchAnalytics();
+              fetchLastSummary();
+            }}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium flex items-center gap-2"
           >
-            <option value="24h">Últimas 24 horas</option>
-            <option value="7d">Últimos 7 días</option>
-            <option value="30d">Últimos 30 días</option>
-            <option value="all">Todo el tiempo</option>
-          </select>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Actualizar
+          </button>
         </div>
       </div>
 

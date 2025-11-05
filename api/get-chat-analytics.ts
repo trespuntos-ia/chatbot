@@ -54,7 +54,7 @@ export default async function handler(
       startDate.setFullYear(2020); // Fecha muy antigua para obtener todo
     }
 
-    // 1. Métricas generales
+    // 1. Métricas generales (con filtro de fecha)
     const { data: conversations, error: conversationsError } = await supabase
       .from('chat_conversations')
       .select('*')
@@ -63,6 +63,22 @@ export default async function handler(
       .order('created_at', { ascending: false });
 
     if (conversationsError) throw conversationsError;
+
+    // 2. Obtener conversaciones recientes (últimas 20, sin importar filtro de fecha)
+    const { data: recentConversationsData, error: recentError } = await supabase
+      .from('chat_conversations')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (recentError) {
+      console.error('[Analytics] Error obteniendo conversaciones recientes:', recentError);
+    } else {
+      console.log('[Analytics] Conversaciones recientes obtenidas:', {
+        count: recentConversationsData?.length || 0,
+        latest: recentConversationsData?.[0]?.created_at || 'none'
+      });
+    }
 
     // 2. Calcular métricas
     const totalConversations = conversations?.length || 0;
@@ -167,7 +183,7 @@ export default async function handler(
       topCategories,
       topQuestions,
       conversationsByDay: conversationsByDayArray,
-      recentConversations: conversations?.slice(0, 20) || [], // Últimas 20 conversaciones
+      recentConversations: recentConversationsData || [], // Últimas 20 conversaciones (sin filtro de fecha)
       lastSummary: lastSummary || null
     });
 
