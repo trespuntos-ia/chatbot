@@ -65,24 +65,21 @@ function getAuthHeader(apiKey: string): string {
   }
 }
 
-// Tipo para información de categoría con jerarquía
+// Tipo para información de categoría con jerarquía completa
 interface CategoryInfo {
   name: string;
   parentId: number | null;
-  parentName: string | null;
+  // Cadena completa de categorías desde la raíz hasta esta
+  hierarchy: string[]; // [raíz, nivel2, nivel3]
 }
 
-async function getCategoryInfo(
+// Obtiene la información básica de una categoría (sin recursión)
+async function getCategoryBasicInfo(
   categoryId: number,
-  cache: Map<number, CategoryInfo>,
   config: ApiConfig
-): Promise<CategoryInfo> {
-  if (!categoryId) {
-    return { name: '', parentId: null, parentName: null };
-  }
-  
-  if (cache.has(categoryId)) {
-    return cache.get(categoryId)!;
+): Promise<{ name: string; parentId: number | null } | null> {
+  if (!categoryId || categoryId === 1 || categoryId === 0) {
+    return null; // Raíz
   }
   
   try {
@@ -103,28 +100,86 @@ async function getCategoryInfo(
       const category = data.category || data;
       const name = extractMultilanguageValue(category.name);
       const parentId = category.id_parent ? parseInt(category.id_parent) : null;
-      
-      let parentName: string | null = null;
-      if (parentId && parentId !== 1 && parentId !== 0) { // 1 es la categoría raíz
-        // Obtener nombre de la categoría padre
-        const parentInfo = await getCategoryInfo(parentId, cache, config);
-        parentName = parentInfo.name;
-      }
-      
-      const categoryInfo: CategoryInfo = {
-        name,
-        parentId,
-        parentName
-      };
-      
-      cache.set(categoryId, categoryInfo);
-      return categoryInfo;
+      return { name, parentId };
     }
   } catch (error) {
     console.error(`Error fetching category ${categoryId}:`, error);
   }
   
-  return { name: '', parentId: null, parentName: null };
+  return null;
+}
+
+// Obtiene la jerarquía completa de categorías (hasta 3 niveles)
+async function getCategoryInfo(
+  categoryId: number,
+  cache: Map<number, CategoryInfo>,
+  config: ApiConfig
+): Promise<CategoryInfo> {
+  if (!categoryId) {
+    return { name: '', parentId: null, hierarchy: [] };
+  }
+  
+  // Si ya está en cache, retornarlo
+  if (cache.has(categoryId)) {
+    return cache.get(categoryId)!;
+  }
+  
+  // Construir la jerarquía desde la categoría actual hasta la raíz
+  const hierarchy: string[] = [];
+  let currentId: number | null = categoryId;
+  const visited = new Set<number>(); // Prevenir loops infinitos
+  
+  while (currentId && currentId !== 1 && currentId !== 0 && !visited.has(currentId)) {
+    visited.add(currentId);
+    
+    // Verificar si está en cache primero
+    if (cache.has(currentId)) {
+      const cached = cache.get(currentId)!;
+      hierarchy.unshift(...cached.hierarchy);
+      break;
+    }
+    
+    // Obtener información básica
+    const basicInfo = await getCategoryBasicInfo(currentId, config);
+    if (!basicInfo) {
+      break;
+    }
+    
+    hierarchy.unshift(basicInfo.name);
+    
+    // Si no tiene padre o el padre es la raíz, terminamos
+    if (!basicInfo.parentId || basicInfo.parentId === 1 || basicInfo.parentId === 0) {
+      break;
+    }
+    
+    currentId = basicInfo.parentId;
+    
+    // Limitar a 3 niveles máximo
+    if (hierarchy.length >= 3) {
+      break;
+    }
+  }
+  
+  // Guardar en cache todas las categorías de la jerarquía
+  let parentId: number | null = null;
+  if (hierarchy.length > 0) {
+    // Obtener el parentId de la categoría actual
+    const currentInfo = await getCategoryBasicInfo(categoryId, config);
+    parentId = currentInfo?.parentId || null;
+    
+    // Crear y cachear la información completa
+    const categoryInfo: CategoryInfo = {
+      name: hierarchy[hierarchy.length - 1] || '', // El último nivel es la categoría actual
+      parentId,
+      hierarchy
+    };
+    
+    cache.set(categoryId, categoryInfo);
+  } else {
+    return { name: '', parentId: null, hierarchy: [] };
+  }
+  
+  return cache.get(categoryId)!;
 }
 
 async function mapProduct(
@@ -142,12 +197,30 @@ async function mapProduct(
   
   if (product.id_category_default) {
     const categoryInfo = await getCategoryInfo(parseInt(product.id_category_default), categoryCache, config);
-    // Si tiene categoría padre, la categoría actual es la subcategoría y el padre es la categoría
-    if (categoryInfo.parentName) {
-      category = categoryInfo.parentName;
-      subcategory = categoryInfo.name;
+    const hierarchy = categoryInfo.hierarchy || [];
+    
+    // Manejar jerarquía de hasta 3 niveles:
+    // Nivel 1: Categoría principal (raíz)
+    // Nivel 2: Subcategoría
+    // Nivel 3: Sub-subcategoría (la del producto)
+    
+    if (hierarchy.length === 1) {
+      // Solo 1 nivel: solo categoría
+      category = hierarchy[0];
+      subcategory = null;
+    } else if (hierarchy.length === 2) {
+      // 2 niveles: categoría y subcategoría
+      category = hierarchy[0];
+      subcategory = hierarchy[1];
+    } else if (hierarchy.length >= 3) {
+      // 3 niveles: categoría, subcategoría y sub-subcategoría
+      // En Supabase guardamos: category = nivel 1, subcategory = nivel 2
+      // El nivel 3 (más específico) se puede concatenar en subcategory o usar solo nivel 2
+      category = hierarchy[0];
+      subcategory = hierarchy[1]; // O podríamos usar `${hierarchy[1]} > ${hierarchy[2]}` si quieres el nivel 3
     } else {
-      category = categoryInfo.name;
+      // Sin jerarquía
+      category = categoryInfo.name || '';
       subcategory = null;
     }
   }
