@@ -229,6 +229,20 @@ export function parseMessageContent(
   let html = message;
   const productMap = findProductsInMessage(message, products);
 
+  // PRIMERO: Convertir enlaces markdown a HTML (antes de otras transformaciones)
+  // Todos los enlaces se muestran como texto con link, no como botones
+  html = html.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (_match, text, url) => {
+      // Escapar HTML en el texto y URL para seguridad
+      const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const escapedUrl = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      
+      // Todos los enlaces como links de texto normales con estilo
+      return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-700 underline">${escapedText}</a>`;
+    }
+  );
+
   // Convertir imágenes markdown a <img> (mejor estilizado)
   // PERO solo si no hay productos, porque si hay productos las imágenes ya están en las tarjetas
   if (products.length === 0) {
@@ -243,48 +257,6 @@ export function parseMessageContent(
       ''
     );
   }
-
-  // Convertir enlaces markdown que contengan "Ver" en botones estilizados (más pequeños y mejor posicionados)
-  html = html.replace(
-    /-\s*\[([^\]]+)\]\(([^)]+)\)/g,
-    (_match, text, url) => {
-      // Si el texto contiene "Ver", convertir en botón
-      if (text.toLowerCase().includes('ver') || text.toLowerCase().includes('más') || text.toLowerCase().includes('detalles')) {
-        return `<div class="my-2">
-          <a href="${url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-md hover:bg-indigo-700 transition font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-            ${text}
-          </a>
-        </div>`;
-      }
-      // Otros enlaces como enlaces normales
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-700 underline font-medium">${text}</a>`;
-    }
-  );
-
-  // También convertir enlaces sin el guion inicial
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    (match, text, url) => {
-      // Si ya fue procesado como botón, no hacer nada
-      if (match.includes('bg-indigo-600')) {
-        return match;
-      }
-      // Si el texto contiene "Ver", convertir en botón (más pequeño)
-      if (text.toLowerCase().includes('ver') || text.toLowerCase().includes('más') || text.toLowerCase().includes('detalles')) {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-md hover:bg-indigo-700 transition font-medium my-2">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
-          ${text}
-        </a>`;
-      }
-      // Otros enlaces como enlaces normales
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-700 underline">${text}</a>`;
-    }
-  );
 
   // Convertir negrita markdown
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="font-bold text-slate-900">$1</strong>');

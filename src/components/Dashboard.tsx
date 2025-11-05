@@ -6,10 +6,11 @@ import { Chat } from './Chat';
 import { ChatConfig } from './ChatConfig';
 import { Documentation } from './Documentation';
 import { SyncHistory } from './SyncHistory';
+import { WidgetIntegration } from './WidgetIntegration';
 import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
 import type { ChatConfig as ChatConfigType } from '../types';
 
-type Tab = 'products' | 'connections' | 'chat' | 'prompts' | 'documentation' | 'history';
+type Tab = 'products' | 'connections' | 'chat' | 'prompts' | 'documentation' | 'history' | 'integration';
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('products');
@@ -198,6 +199,32 @@ export function Dashboard() {
                   <span>Historial</span>
                 </div>
               </button>
+              <button
+                onClick={() => setActiveTab('integration')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'integration'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                    />
+                  </svg>
+                  Integración
+                </div>
+              </button>
             </nav>
           </div>
         </div>
@@ -218,6 +245,7 @@ export function Dashboard() {
           {activeTab === 'prompts' && <PromptConfig />}
           {activeTab === 'documentation' && <Documentation />}
           {activeTab === 'history' && <SyncHistory />}
+          {activeTab === 'integration' && <WidgetIntegration />}
         </div>
       </div>
     </div>

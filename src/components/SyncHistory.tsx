@@ -8,6 +8,7 @@ interface SyncHistoryEntry {
   total_products_scanned: number;
   new_products_found: number;
   products_imported: number;
+  products_updated: number;
   errors: Array<{ error: string; sku?: string }>;
   log_messages: Array<{ timestamp: string; message: string; type?: string }>;
   prestashop_connections: {
@@ -212,13 +213,13 @@ export function SyncHistory() {
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-500 mb-1">Productos Nuevos</div>
-                      <div className="text-lg font-semibold text-blue-600">
-                        {entry.new_products_found.toLocaleString()}
+                      <div className="text-xs text-slate-500 mb-1">Productos Actualizados</div>
+                      <div className="text-lg font-semibold text-orange-600">
+                        {(entry.products_updated || 0).toLocaleString()}
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-500 mb-1">Importados</div>
+                      <div className="text-xs text-slate-500 mb-1">Productos Nuevos Importados</div>
                       <div className="text-lg font-semibold text-green-600">
                         {entry.products_imported.toLocaleString()}
                       </div>

@@ -18,12 +18,20 @@ export function Chat({ config }: ChatProps) {
   const [error, setError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Scroll automático al final
+  // Scroll automático al final - solo si no hay productos en el último mensaje
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
+    // Solo hacer scroll automático si el último mensaje no tiene productos
+    // Si hay productos, el usuario debe poder ver desde arriba y bajar manualmente
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.role === 'assistant' && lastMessage.products && lastMessage.products.length > 0) {
+      // No hacer scroll si hay productos, dejar que el usuario vea desde arriba
+      return;
+    }
+    // Hacer scroll solo para mensajes normales sin productos
     scrollToBottom();
   }, [messages]);
 

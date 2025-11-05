@@ -456,21 +456,21 @@ export default async function handler(
         langSlug: connection.lang_slug || 'es',
       };
 
-      // Obtener productos existentes (SKU y también por nombre para productos sin SKU)
+      // Obtener productos existentes (todos los campos para comparar cambios)
       addLog('Obteniendo productos existentes de la base de datos...', 'info');
       const { data: existingProducts, error: existingError } = await supabase
         .from('products')
-        .select('sku, name');
+        .select('sku, name, price, category, subcategory, description, image_url, product_url');
       
       if (existingError) {
         addLog(`Error obteniendo productos existentes: ${existingError.message}`, 'error');
         throw new Error(`Error fetching existing products: ${existingError.message}`);
       }
       
-      // Crear sets para verificar productos existentes (normalizados)
-      // Normalizar SKUs: trim, lowercase, eliminar espacios extras
+      // Crear sets y mapas para verificar productos existentes (normalizados)
       const existingSkus = new Set<string>();
       const existingNameSkuPairs = new Map<string, string>(); // nombre -> sku para productos sin SKU
+      const existingProductsMap = new Map<string, any>(); // SKU normalizado -> producto completo
       
       (existingProducts || []).forEach((p: any) => {
         const sku = p.sku?.trim() || '';
@@ -480,12 +480,17 @@ export default async function handler(
           // Normalizar SKU: lowercase y eliminar espacios
           const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
           existingSkus.add(normalizedSku);
+          existingProductsMap.set(normalizedSku, p);
         }
         
         if (name) {
           // Normalizar nombre: lowercase y eliminar espacios extras
           const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
           existingNameSkuPairs.set(normalizedName, sku);
+          // También guardar por nombre si no tiene SKU
+          if (!sku) {
+            existingProductsMap.set(`name:${normalizedName}`, p);
+          }
         }
       });
 
@@ -555,14 +560,108 @@ export default async function handler(
 
       addLog(`Productos nuevos encontrados: ${newProducts.length}`, 'info');
 
+      // Separar productos nuevos de productos que necesitan actualización
+      const productsToUpdate: Array<{ product: any; existing: any }> = [];
+      const trulyNewProducts: any[] = [];
+
+      allProducts.forEach((product: any) => {
+        const sku = product.sku?.trim() || '';
+        const name = product.name?.trim() || '';
+        let existing: any = null;
+
+        if (sku) {
+          const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
+          existing = existingProductsMap.get(normalizedSku);
+        } else if (name) {
+          const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
+          existing = existingProductsMap.get(`name:${normalizedName}`);
+        }
+
+        if (existing) {
+          // Producto existe: verificar si necesita actualización
+          const needsUpdate = 
+            (product.name?.trim() || '') !== (existing.name?.trim() || '') ||
+            (product.price?.trim() || '') !== (existing.price?.trim() || '') ||
+            (product.category?.trim() || '') !== (existing.category?.trim() || '') ||
+            (product.subcategory || null) !== (existing.subcategory || null) ||
+            (product.description?.trim() || '') !== (existing.description?.trim() || '') ||
+            (product.image?.trim() || '') !== (existing.image_url?.trim() || '') ||
+            (product.product_url?.trim() || '') !== (existing.product_url?.trim() || '');
+
+          if (needsUpdate) {
+            productsToUpdate.push({ product, existing });
+          }
+        } else {
+          // Producto nuevo
+          const normalizedSku = sku ? sku.toLowerCase().replace(/\s+/g, '') : '';
+          const normalizedName = name ? name.toLowerCase().replace(/\s+/g, ' ').trim() : '';
+          
+          if (normalizedSku && !existingSkus.has(normalizedSku)) {
+            trulyNewProducts.push(product);
+          } else if (!normalizedSku && normalizedName && !existingNameSkuPairs.has(normalizedName)) {
+            trulyNewProducts.push(product);
+          }
+        }
+      });
+
+      addLog(`Productos que necesitan actualización: ${productsToUpdate.length}`, 'info');
+      addLog(`Productos realmente nuevos: ${trulyNewProducts.length}`, 'info');
+
       let imported = 0;
+      let updated = 0;
       const errors: Array<{ sku?: string; error: string; batch?: number }> = [];
 
-      if (newProducts.length > 0) {
+      // Actualizar productos existentes
+      if (productsToUpdate.length > 0) {
+        addLog('Actualizando productos existentes...', 'info');
+        const batchSize = 100;
+        for (let i = 0; i < productsToUpdate.length; i += batchSize) {
+          const batch = productsToUpdate.slice(i, i + batchSize);
+          
+          const updates = batch.map(({ product }) => ({
+            name: product.name || '',
+            price: product.price || '',
+            category: product.category || '',
+            subcategory: product.subcategory || null,
+            description: product.description || '',
+            image_url: product.image || '',
+            product_url: product.product_url || '',
+            updated_at: new Date().toISOString(),
+            // Usar SKU o nombre para identificar el producto
+            ...(product.sku?.trim() ? { sku: product.sku.trim() } : {})
+          }));
+
+          // Actualizar por SKU si existe, sino por nombre
+          for (const update of updates) {
+            const sku = update.sku?.trim() || '';
+            const { error: updateError } = sku
+              ? await supabase
+                  .from('products')
+                  .update(update)
+                  .eq('sku', sku)
+              : await supabase
+                  .from('products')
+                  .update(update)
+                  .eq('name', update.name);
+
+            if (updateError) {
+              errors.push({ error: updateError.message, sku });
+              addLog(`Error actualizando producto ${sku || update.name}: ${updateError.message}`, 'error');
+            } else {
+              updated++;
+            }
+          }
+
+          addLog(`Lote ${Math.floor(i / batchSize) + 1} actualizado: ${batch.length} productos`, 'success');
+        }
+      }
+
+      // Insertar productos nuevos
+      if (trulyNewProducts.length > 0) {
         addLog('Importando productos nuevos...', 'info');
 
         // Preparar productos para insertar
-        const productsToInsert = newProducts.map((product: any) => ({
+        const productsToInsert = trulyNewProducts.map((product: any) => ({
           name: product.name || '',
           price: product.price || '',
           category: product.category || '',
@@ -580,33 +679,10 @@ export default async function handler(
         for (let i = 0; i < productsToInsert.length; i += batchSize) {
           const batch = productsToInsert.slice(i, i + batchSize);
           
-          // Verificar una vez más que no existan antes de insertar (usando la misma normalización)
-          const trulyNewProducts = batch.filter((p: any) => {
-            const sku = p.sku?.trim() || '';
-            const name = p.name?.trim() || '';
-            
-            if (sku) {
-              const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
-              return !existingSkus.has(normalizedSku);
-            } else if (name) {
-              const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
-              return !existingNameSkuPairs.has(normalizedName);
-            } else {
-              // Sin SKU ni nombre: verificar si existe en la base de datos
-              // Esto es más costoso, así que solo para este caso especial
-              return true; // Ya fue filtrado en la primera verificación
-            }
-          });
-          
-          if (trulyNewProducts.length === 0) {
-            addLog(`Lote ${Math.floor(i / batchSize) + 1}: Todos los productos ya existen, saltando...`, 'info');
-            continue;
-          }
-          
-          // Insertar solo productos realmente nuevos
+          // Insertar productos nuevos (ya filtrados previamente)
           const { data: insertedData, error: insertError } = await supabase
             .from('products')
-            .insert(trulyNewProducts)
+            .insert(batch)
             .select();
 
           if (insertError) {
@@ -616,10 +692,6 @@ export default async function handler(
             const insertedCount = insertedData?.length || 0;
             imported += insertedCount;
             addLog(`Lote ${Math.floor(i / batchSize) + 1} importado: ${insertedCount} productos nuevos`, 'success');
-            
-            if (trulyNewProducts.length > insertedCount) {
-              addLog(`  (${trulyNewProducts.length - insertedCount} productos ya existían y fueron omitidos)`, 'info');
-            }
           }
         }
       } else {
@@ -633,8 +705,9 @@ export default async function handler(
           sync_completed_at: new Date().toISOString(),
           status: 'completed',
           total_products_scanned: allProducts.length,
-          new_products_found: newProducts.length,
+          new_products_found: trulyNewProducts.length,
           products_imported: imported,
+          products_updated: updated,
           errors: errors,
           log_messages: logMessages
         })
@@ -647,8 +720,9 @@ export default async function handler(
         syncId,
         message: 'Sincronización completada',
         totalProductsScanned: allProducts.length,
-        newProductsFound: newProducts.length,
+        newProductsFound: trulyNewProducts.length,
         productsImported: imported,
+        productsUpdated: updated,
         errors: errors.length > 0 ? errors : undefined
       });
 

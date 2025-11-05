@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS product_sync_history (
   total_products_scanned INTEGER DEFAULT 0,
   new_products_found INTEGER DEFAULT 0,
   products_imported INTEGER DEFAULT 0,
+  products_updated INTEGER DEFAULT 0,
   errors JSONB DEFAULT '[]'::jsonb,
   log_messages JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW()

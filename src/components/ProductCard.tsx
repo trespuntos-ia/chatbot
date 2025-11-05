@@ -112,7 +112,7 @@ export function ProductCard({ product }: ProductCardProps) {
               href={product.product_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block w-full text-center py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-all duration-200 hover:shadow-md"
+              className="block w-full text-center py-2 px-3 bg-black hover:bg-gray-800 text-white text-xs font-semibold rounded-lg transition-all duration-200 hover:shadow-md"
             >
               Ver Producto
             </a>
