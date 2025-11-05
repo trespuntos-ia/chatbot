@@ -62,9 +62,23 @@ async function getCategoryName(
       language: String(config.langCode || 1),
     });
     const url = `${config.prestashopUrl.replace(/\/$/, '')}/categories/${categoryId}?${queryParams.toString()}`;
+    // Usar btoa si Buffer no está disponible (entornos web)
+    let authHeader: string;
+    try {
+      if (typeof Buffer !== 'undefined') {
+        authHeader = `Basic ${Buffer.from(config.apiKey + ':').toString('base64')}`;
+      } else {
+        // Fallback para entornos web
+        authHeader = `Basic ${btoa(config.apiKey + ':')}`;
+      }
+    } catch (e) {
+      // Fallback final
+      authHeader = `Basic ${Buffer.from ? Buffer.from(config.apiKey + ':').toString('base64') : btoa(config.apiKey + ':')}`;
+    }
+
     const response = await fetch(url, {
       headers: {
-        'Authorization': `Basic ${Buffer.from(config.apiKey + ':').toString('base64')}`,
+        'Authorization': authHeader,
         'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
       },
     });
@@ -138,9 +152,22 @@ async function prestashopGet(
     ...query,
   });
   const url = `${config.prestashopUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}?${queryParams.toString()}`;
+  
+  // Usar btoa si Buffer no está disponible (entornos web)
+  let authHeader: string;
+  try {
+    if (typeof Buffer !== 'undefined') {
+      authHeader = `Basic ${Buffer.from(config.apiKey + ':').toString('base64')}`;
+    } else {
+      authHeader = `Basic ${btoa(config.apiKey + ':')}`;
+    }
+  } catch (e) {
+    authHeader = `Basic ${Buffer.from ? Buffer.from(config.apiKey + ':').toString('base64') : btoa(config.apiKey + ':')}`;
+  }
+
   const response = await fetch(url, {
     headers: {
-      'Authorization': `Basic ${Buffer.from(config.apiKey + ':').toString('base64')}`,
+      'Authorization': authHeader,
       'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
     },
   });

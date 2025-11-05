@@ -14,6 +14,16 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
+  // Añadir CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   // Solo permitir POST (o GET para pruebas manuales)
   if (req.method !== 'POST' && req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -41,15 +51,19 @@ export default async function handler(
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
+      console.error('Missing Supabase environment variables');
       res.status(500).json({ 
-        error: 'Supabase configuration missing' 
+        error: 'Supabase configuration missing',
+        details: 'SUPABASE_URL and SUPABASE_ANON_KEY must be set in Vercel environment variables'
       });
       return;
     }
 
+    console.log('Starting sync process...');
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Obtener la conexión activa
+    console.log('Fetching active connection from Supabase...');
     const { data: connections, error: connError } = await supabase
       .from('prestashop_connections')
       .select('*')
@@ -57,10 +71,12 @@ export default async function handler(
       .limit(1);
 
     if (connError) {
+      console.error('Error fetching connection:', connError);
       throw new Error(`Error fetching connection: ${connError.message}`);
     }
 
     if (!connections || connections.length === 0) {
+      console.log('No active connection found');
       res.status(404).json({ 
         error: 'No active PrestaShop connection found',
         hint: 'Please create a connection in the dashboard first (Conexiones tab)',
@@ -68,6 +84,8 @@ export default async function handler(
       });
       return;
     }
+
+    console.log('Connection found:', connections[0].name);
 
     const connection = connections[0];
 
