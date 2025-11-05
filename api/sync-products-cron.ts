@@ -517,48 +517,7 @@ export default async function handler(
         .join(', ');
       addLog(`Top categorías encontradas: ${topCategories}`, 'info');
 
-      // Filtrar productos nuevos (verificar por SKU y también por nombre si no tiene SKU)
-      const newProducts = allProducts.filter(product => {
-        const sku = product.sku?.trim() || '';
-        const name = product.name?.trim() || '';
-        
-        if (sku) {
-          // Producto con SKU: verificar por SKU normalizado
-          const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
-          return !existingSkus.has(normalizedSku);
-        } else if (name) {
-          // Producto sin SKU: verificar por nombre normalizado
-          const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
-          return !existingNameSkuPairs.has(normalizedName);
-        } else {
-          // Sin SKU ni nombre, lo consideramos nuevo pero puede dar problemas
-          return true;
-        }
-      });
-      
-      // Debug: contar por qué se consideran nuevos
-      let newBySku = 0;
-      let newByName = 0;
-      let newByNoData = 0;
-      
-      allProducts.forEach(product => {
-        const sku = product.sku?.trim() || '';
-        const name = product.name?.trim() || '';
-        
-        if (sku) {
-          const normalizedSku = sku.toLowerCase().replace(/\s+/g, '');
-          if (!existingSkus.has(normalizedSku)) newBySku++;
-        } else if (name) {
-          const normalizedName = name.toLowerCase().replace(/\s+/g, ' ').trim();
-          if (!existingNameSkuPairs.has(normalizedName)) newByName++;
-        } else {
-          newByNoData++;
-        }
-      });
-      
-      addLog(`Desglose de productos nuevos: ${newBySku} por SKU, ${newByName} por nombre, ${newByNoData} sin datos`, 'info');
-
-      addLog(`Productos nuevos encontrados: ${newProducts.length}`, 'info');
+      // Separar productos nuevos de productos que necesitan actualización
 
       // Separar productos nuevos de productos que necesitan actualización
       const productsToUpdate: Array<{ product: any; existing: any }> = [];
