@@ -341,9 +341,14 @@ export default async function handler(
 
       // Obtener SKUs existentes
       addLog('Obteniendo productos existentes de la base de datos...', 'info');
-      const { data: existingProducts } = await supabase
+      const { data: existingProducts, error: existingError } = await supabase
         .from('products')
-        .select('sku');
+        .select('sku, category');
+      
+      if (existingError) {
+        addLog(`Error obteniendo productos existentes: ${existingError.message}`, 'error');
+        throw new Error(`Error fetching existing products: ${existingError.message}`);
+      }
       
       const existingSkus = new Set(
         (existingProducts || [])
@@ -390,24 +395,44 @@ export default async function handler(
           updated_at: new Date().toISOString(),
         }));
 
-        // Insertar en lotes
+        // Insertar SOLO productos nuevos (NO actualizar existentes)
+        // Usar insert con ignoreDuplicates para evitar errores de duplicados
         const batchSize = 100;
         for (let i = 0; i < productsToInsert.length; i += batchSize) {
           const batch = productsToInsert.slice(i, i + batchSize);
           
-          const { error: insertError } = await supabase
+          // Verificar una vez más que no existan antes de insertar
+          const skusToInsert = batch.map((p: any) => p.sku).filter(Boolean);
+          const { data: duplicates } = await supabase
             .from('products')
-            .upsert(batch, {
-              onConflict: 'sku',
-              ignoreDuplicates: false,
-            });
+            .select('sku')
+            .in('sku', skusToInsert);
+          
+          const duplicateSkus = new Set((duplicates || []).map((p: any) => p.sku));
+          const trulyNewProducts = batch.filter((p: any) => !duplicateSkus.has(p.sku));
+          
+          if (trulyNewProducts.length === 0) {
+            addLog(`Lote ${Math.floor(i / batchSize) + 1}: Todos los productos ya existen, saltando...`, 'info');
+            continue;
+          }
+          
+          // Insertar solo productos realmente nuevos
+          const { data: insertedData, error: insertError } = await supabase
+            .from('products')
+            .insert(trulyNewProducts)
+            .select();
 
           if (insertError) {
-            errors.push({ error: insertError.message });
+            errors.push({ error: insertError.message, batch: i / batchSize + 1 });
             addLog(`Error en lote ${Math.floor(i / batchSize) + 1}: ${insertError.message}`, 'error');
           } else {
-            imported += batch.length;
-            addLog(`Lote ${Math.floor(i / batchSize) + 1} importado: ${batch.length} productos`, 'success');
+            const insertedCount = insertedData?.length || 0;
+            imported += insertedCount;
+            addLog(`Lote ${Math.floor(i / batchSize) + 1} importado: ${insertedCount} productos nuevos`, 'success');
+            
+            if (trulyNewProducts.length > insertedCount) {
+              addLog(`  (${trulyNewProducts.length - insertedCount} productos ya existían y fueron omitidos)`, 'info');
+            }
           }
         }
       } else {
