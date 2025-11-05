@@ -242,7 +242,11 @@ export function ChatAnalytics() {
                 cx="50%"
                 cy="50%"
                 outerRadius={100}
-                label={({ category, percent }: { category: string; percent: number }) => `${category}: ${(percent * 100).toFixed(0)}%`}
+                label={(props: any) => {
+                  const percent = props.percent || 0;
+                  const category = props.category || props.name || '';
+                  return `${category}: ${(percent * 100).toFixed(0)}%`;
+                }}
               >
                 {data.topCategories.slice(0, 8).map((_, index) => (
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
