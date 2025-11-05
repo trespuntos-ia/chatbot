@@ -65,6 +65,11 @@ export default async function handler(
     if (conversationsError) throw conversationsError;
 
     // 2. Obtener conversaciones recientes (últimas 20, sin importar filtro de fecha)
+    // Primero verificar cuántas hay en total
+    const { count: totalCount } = await supabase
+      .from('chat_conversations')
+      .select('*', { count: 'exact', head: true });
+
     const { data: recentConversationsData, error: recentError } = await supabase
       .from('chat_conversations')
       .select('*')
@@ -74,9 +79,14 @@ export default async function handler(
     if (recentError) {
       console.error('[Analytics] Error obteniendo conversaciones recientes:', recentError);
     } else {
+      const latestDate = recentConversationsData?.[0]?.created_at;
+      const now = new Date().toISOString();
       console.log('[Analytics] Conversaciones recientes obtenidas:', {
-        count: recentConversationsData?.length || 0,
-        latest: recentConversationsData?.[0]?.created_at || 'none'
+        totalInDB: totalCount || 0,
+        returned: recentConversationsData?.length || 0,
+        latest: latestDate || 'none',
+        now: now,
+        timeDiff: latestDate ? `${Math.round((new Date(now).getTime() - new Date(latestDate).getTime()) / 1000 / 60)} minutos` : 'N/A'
       });
     }
 
