@@ -4,7 +4,7 @@ import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
 import { getSourcesDescription } from '../utils/sourceLabels';
 import { useChat } from '../contexts/ChatContext';
-import type { ChatConfig, Product } from '../types';
+import type { ChatConfig, ChatMessage, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
