@@ -564,32 +564,13 @@ export default async function handler(
       // Preparar contexto enriquecido con instrucciones de validación
       let enrichedContext = '';
       
-      // INSTRUCCIONES MEJORADAS PARA OPENAI (FASE 1 - FORMATO ENRIQUECIDO)
-      enrichedContext += '\n\n📋 INSTRUCCIONES CRÍTICAS PARA RESPONDER:\n';
-      enrichedContext += '1. SIEMPRE presenta productos con esta estructura clara y profesional:\n';
-      enrichedContext += '   - **Nombre completo del producto** (en negrita)\n';
-      enrichedContext += '   - 💰 Precio: [precio] (SIEMPRE lo mencionas si está disponible)\n';
-      enrichedContext += '   - 📦 Categoría: [categoría] (si está disponible)\n';
-      enrichedContext += '   - 📝 Descripción breve (1-2 líneas destacando características principales)\n';
-      enrichedContext += '   - 🔗 [Ver producto](URL) (si está disponible)\n\n';
-      enrichedContext += '2. Cuando haya múltiples productos, AGRÚPALOS de esta forma:\n';
-      enrichedContext += '   - 🏆 **RECOMENDADO**: El producto más relevante (el primero de la lista)\n';
-      enrichedContext += '   - 🔁 **ALTERNATIVAS**: Los siguientes 2-3 productos similares\n';
-      enrichedContext += '   - 💡 **PUEDE INTERESARTE**: Productos adicionales relacionados\n';
-      enrichedContext += '   - Usa formato de lista numerada (1., 2., 3.) o con viñetas (•)\n';
-      enrichedContext += '   - Incluye precio y link para cada uno\n';
-      enrichedContext += '   - Si hay más productos, menciona "y X más productos disponibles"\n';
-      enrichedContext += '   - Comienza con: "He encontrado X productos relacionados con [término de búsqueda]:"\n\n';
-      enrichedContext += '3. SIEMPRE menciona el precio si está disponible en el producto\n\n';
-      enrichedContext += '4. Si un producto tiene categoría, menciónala brevemente para contexto\n\n';
-      enrichedContext += '5. Sé específico y detallado, NO uses respuestas genéricas como "tengo productos" o "aquí tienes algunos productos"\n';
-      enrichedContext += '   - En su lugar, di: "He encontrado [número] productos que coinciden con tu búsqueda"\n';
-      enrichedContext += '   - Menciona características específicas de cada producto\n';
-      enrichedContext += '   - Añade un resumen breve del conjunto de productos al final\n\n';
-      enrichedContext += '6. Si el usuario pregunta por algo específico y lo encontraste, confirma claramente que sí lo tienes\n';
-      enrichedContext += '   - Ejemplo: "Sí, tenemos [nombre del producto]. Aquí están los detalles:"\n\n';
-      enrichedContext += '7. Si no encuentras exactamente lo que busca, sugiere alternativas similares de los resultados\n';
-      enrichedContext += '   - Di: "No encontré exactamente [término], pero tengo estos productos similares que podrían interesarte:"\n\n';
+      // INSTRUCCIONES MEJORADAS PARA OPENAI (FASE 1 - FORMATO ENRIQUECIDO - OPTIMIZADO)
+      enrichedContext += '\n\n📋 INSTRUCCIONES CRÍTICAS:\n';
+      enrichedContext += '1. Presenta productos: **Nombre**, 💰 Precio, 📦 Categoría, 📝 Descripción breve, 🔗 URL\n';
+      enrichedContext += '2. Agrupa: 🏆 RECOMENDADO (primero), 🔁 ALTERNATIVAS (2-3 siguientes), 💡 PUEDE INTERESARTE (resto)\n';
+      enrichedContext += '3. SIEMPRE menciona precio si está disponible\n';
+      enrichedContext += '4. Sé específico: "He encontrado X productos relacionados con [término]"\n';
+      enrichedContext += '5. Si no encuentras exactamente, sugiere alternativas similares\n\n';
       
       // Añadir instrucciones según la intención detectada
       if (userIntent.intent === 'buy') {
