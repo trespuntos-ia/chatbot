@@ -51,9 +51,18 @@ export default async function handler(
     // Agregar todos los demás parámetros
     for (const [key, value] of Object.entries(queryParams)) {
       if (key !== 'prestashop_url' && key !== 'ws_key' && key !== 'endpoint') {
-        // El parámetro 'display' necesita corchetes sin codificar
-        if (key === 'display' && typeof value === 'string' && value.startsWith('[')) {
-          queryParts.push(`${key}=${value}`);
+        // El parámetro 'display' puede venir codificado o no, necesitamos decodificarlo y mantener corchetes sin codificar
+        if (key === 'display') {
+          let displayValue = String(value);
+          // Si viene codificado, decodificarlo
+          try {
+            displayValue = decodeURIComponent(displayValue);
+          } catch (e) {
+            // Si falla la decodificación, usar el valor original
+          }
+          // Asegurarse de que los corchetes estén sin codificar
+          displayValue = displayValue.replace(/%5B/g, '[').replace(/%5D/g, ']');
+          queryParts.push(`${key}=${displayValue}`);
         } else {
           queryParts.push(`${key}=${encodeURIComponent(String(value))}`);
         }
