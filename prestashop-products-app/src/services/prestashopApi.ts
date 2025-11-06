@@ -152,15 +152,11 @@ async function mapProduct(
     ? sanitizeDescription(extractMultilanguageValue(product.description_short))
     : '';
 
-  // Extraer todas las categorías del producto
+  // Extraer todas las categorías del producto (EXACTAMENTE como en PHP)
+  // El PHP primero busca en associations, y solo usa id_category_default si no hay categorías
   const allCategoryIds: number[] = [];
-  const defaultCategoryId = product.id_category_default ? parseInt(product.id_category_default) : null;
 
-  if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0 && defaultCategoryId !== 2) {
-    allCategoryIds.push(defaultCategoryId);
-  }
-
-  // Extraer categorías de associations
+  // Primero extraer todas las categorías de associations (como en PHP)
   if (product.associations && product.associations.categories) {
     let associatedCategories: any[] = [];
 
@@ -181,10 +177,18 @@ async function mapProduct(
       } else if (typeof cat === 'string' || typeof cat === 'number') {
         catId = parseInt(String(cat));
       }
-      // Excluir categorías raíz (1, 0, 2 "Inicio")
+      // Excluir categoría "Inicio" (ID 2) y raíz (1, 0)
       if (catId && catId !== 1 && catId !== 0 && catId !== 2 && !allCategoryIds.includes(catId)) {
         allCategoryIds.push(catId);
       }
+    }
+  }
+
+  // Si no hay categorías en associations, usar la categoría por defecto (excepto si es "Inicio")
+  if (allCategoryIds.length === 0 && product.id_category_default && product.id_category_default != 2) {
+    const defaultCategoryId = parseInt(product.id_category_default);
+    if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0 && defaultCategoryId !== 2) {
+      allCategoryIds.push(defaultCategoryId);
     }
   }
 
