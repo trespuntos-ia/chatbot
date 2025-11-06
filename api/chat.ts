@@ -545,10 +545,15 @@ export default async function handler(
       // Detectar intención del usuario
       const userIntent = detectUserIntent(message);
       
+      // Pasar userIntent a searchProducts si es search_products
+      if (functionName === 'search_products' && functionArgs) {
+        functionArgs.userIntent = userIntent;
+      }
+      
       // Preparar contexto enriquecido con instrucciones de validación
       let enrichedContext = '';
       
-      // INSTRUCCIONES MEJORADAS PARA OPENAI
+      // INSTRUCCIONES MEJORADAS PARA OPENAI (FASE 1 - FORMATO ENRIQUECIDO)
       enrichedContext += '\n\n📋 INSTRUCCIONES CRÍTICAS PARA RESPONDER:\n';
       enrichedContext += '1. SIEMPRE presenta productos con esta estructura clara y profesional:\n';
       enrichedContext += '   - **Nombre completo del producto** (en negrita)\n';
@@ -556,8 +561,10 @@ export default async function handler(
       enrichedContext += '   - 📦 Categoría: [categoría] (si está disponible)\n';
       enrichedContext += '   - 📝 Descripción breve (1-2 líneas destacando características principales)\n';
       enrichedContext += '   - 🔗 [Ver producto](URL) (si está disponible)\n\n';
-      enrichedContext += '2. Cuando haya múltiples productos:\n';
-      enrichedContext += '   - Lista los TOP 3-5 más relevantes (ya están ordenados por relevancia)\n';
+      enrichedContext += '2. Cuando haya múltiples productos, AGRÚPALOS de esta forma:\n';
+      enrichedContext += '   - 🏆 **RECOMENDADO**: El producto más relevante (el primero de la lista)\n';
+      enrichedContext += '   - 🔁 **ALTERNATIVAS**: Los siguientes 2-3 productos similares\n';
+      enrichedContext += '   - 💡 **PUEDE INTERESARTE**: Productos adicionales relacionados\n';
       enrichedContext += '   - Usa formato de lista numerada (1., 2., 3.) o con viñetas (•)\n';
       enrichedContext += '   - Incluye precio y link para cada uno\n';
       enrichedContext += '   - Si hay más productos, menciona "y X más productos disponibles"\n';
@@ -566,7 +573,8 @@ export default async function handler(
       enrichedContext += '4. Si un producto tiene categoría, menciónala brevemente para contexto\n\n';
       enrichedContext += '5. Sé específico y detallado, NO uses respuestas genéricas como "tengo productos" o "aquí tienes algunos productos"\n';
       enrichedContext += '   - En su lugar, di: "He encontrado [número] productos que coinciden con tu búsqueda"\n';
-      enrichedContext += '   - Menciona características específicas de cada producto\n\n';
+      enrichedContext += '   - Menciona características específicas de cada producto\n';
+      enrichedContext += '   - Añade un resumen breve del conjunto de productos al final\n\n';
       enrichedContext += '6. Si el usuario pregunta por algo específico y lo encontraste, confirma claramente que sí lo tienes\n';
       enrichedContext += '   - Ejemplo: "Sí, tenemos [nombre del producto]. Aquí están los detalles:"\n\n';
       enrichedContext += '7. Si no encuentras exactamente lo que busca, sugiere alternativas similares de los resultados\n';
@@ -612,23 +620,69 @@ export default async function handler(
         // Esto se hace después de la primera respuesta para no bloquear
         // Por ahora, el contenido web se busca directamente en la función search_web_content
       } else if (functionResult.products && functionResult.products.length === 0) {
+        // FASE 1 - MEJOR FALLBACK (SIN RESULTADOS)
         enrichedContext += '\n⚠️ No se encontraron productos. Debes:\n';
-        enrichedContext += '   1. Ser empático: "Lo siento, no encontré productos que coincidan exactamente con tu búsqueda"\n';
-        enrichedContext += '   2. Sugerir términos alternativos o variaciones\n';
-        enrichedContext += '   3. Preguntar por más detalles: "¿Podrías ser más específico? Por ejemplo, menciona la categoría o características que buscas"\n';
-        enrichedContext += '   4. Ofrecer ayuda: "¿Te gustaría que busque productos similares o en otra categoría?"\n';
+        enrichedContext += '   1. Ser EMPÁTICO y profesional:\n';
+        enrichedContext += '      - "Lo siento, no encontré productos que coincidan exactamente con tu búsqueda de \'[término]\'."\n';
+        enrichedContext += '      - "Entiendo que puede ser frustrante. Déjame ayudarte a encontrar alternativas."\n';
+        enrichedContext += '   2. Buscar productos similares automáticamente:\n';
+        enrichedContext += '      - Intenta buscar productos relacionados por categoría\n';
+        enrichedContext += '      - Busca variaciones del término de búsqueda\n';
+        enrichedContext += '   3. Sugerir términos alternativos o variaciones\n';
+        enrichedContext += '   4. Preguntar por más detalles de forma amigable:\n';
+        enrichedContext += '      - "¿Podrías ser más específico? Por ejemplo, menciona la categoría o características que buscas"\n';
+        enrichedContext += '      - "¿Hay alguna categoría específica en la que te gustaría que busque?"\n';
+        enrichedContext += '   5. Ofrecer ayuda proactiva:\n';
+        enrichedContext += '      - "¿Te gustaría que busque productos similares o en otra categoría?"\n';
+        enrichedContext += '      - "Puedo ayudarte a explorar nuestras categorías disponibles"\n';
         
-        // Generar sugerencias automáticas
+        // Generar sugerencias automáticas mejoradas
         if (functionArgs.query && typeof functionArgs.query === 'string') {
           const suggestions = await generateSearchSuggestions(supabase, functionArgs.query);
           if (suggestions.length > 0) {
             enrichedContext += '\n💡 SUGERENCIAS DE BÚSQUEDA ALTERNATIVAS:\n';
-            suggestions.slice(0, 3).forEach((suggestion, idx) => {
+            suggestions.slice(0, 5).forEach((suggestion, idx) => {
               enrichedContext += `   ${idx + 1}. "${suggestion}"\n`;
             });
-            enrichedContext += '\nPuedes sugerir al usuario que pruebe con estos términos.\n';
+            enrichedContext += '\nPuedes sugerir al usuario que pruebe con estos términos de forma amigable.\n';
+          }
+          
+          // Buscar productos similares por categorías relacionadas
+          enrichedContext += '\n🔍 BÚSQUEDA AUTOMÁTICA DE PRODUCTOS SIMILARES:\n';
+          enrichedContext += 'Intenta buscar productos en categorías relacionadas o con términos similares.\n';
+          
+          // Buscar categorías relacionadas
+          try {
+            const { data: categories } = await supabase
+              .from('products')
+              .select('category')
+              .not('category', 'is', null)
+              .limit(20);
+            
+            if (categories && categories.length > 0) {
+              const uniqueCategories = [...new Set(categories.map((c: any) => c.category))];
+              const normalizedQuery = normalizeText(functionArgs.query);
+              
+              // Buscar categorías que contengan palabras de la búsqueda
+              const relatedCategories = uniqueCategories.filter((cat: string) => {
+                const normalizedCat = normalizeText(cat);
+                return normalizedCat.includes(normalizedQuery) || 
+                       normalizedQuery.split(' ').some(word => normalizedCat.includes(word));
+              });
+              
+              if (relatedCategories.length > 0) {
+                enrichedContext += `\nCategorías relacionadas encontradas: ${relatedCategories.slice(0, 3).join(', ')}\n`;
+                enrichedContext += 'Puedes sugerir al usuario que busque en estas categorías.\n';
+              }
+            }
+          } catch (error) {
+            console.error('Error buscando categorías relacionadas:', error);
           }
         }
+        
+        // Instrucción para generar respuesta con OpenAI cuando no hay resultados
+        enrichedContext += '\n\n⚠️ IMPORTANTE: Como no hay resultados, genera una respuesta empática y útil usando OpenAI.\n';
+        enrichedContext += 'No uses respuestas genéricas. Sé específico y ofrece alternativas concretas.\n';
       }
       
       // Formatear productos para mejor presentación
@@ -1265,8 +1319,78 @@ async function generateSearchSuggestions(supabase: any, originalQuery: string): 
   }
 }
 
-// Función para calcular score de relevancia de un producto
-function calculateRelevanceScore(product: any, searchTerm: string): number {
+// Tabla de sinónimos técnicos y equivalencias
+const TECHNICAL_SYNONYMS: { [key: string]: string[] } = {
+  'cierre': ['cierra', 'cerrar', 'sellador', 'sella', 'sellado'],
+  'cierra': ['cierre', 'cerrar', 'sellador', 'sella', 'sellado'],
+  'cerrar': ['cierre', 'cierra', 'sellador', 'sella', 'sellado'],
+  'sellador': ['cierre', 'cierra', 'cerrar', 'sella', 'sellado'],
+  'sella': ['cierre', 'cierra', 'cerrar', 'sellador', 'sellado'],
+  'sellado': ['cierre', 'cierra', 'cerrar', 'sellador', 'sella'],
+  'abre': ['abrir', 'abridor', 'abre'],
+  'abrir': ['abre', 'abridor', 'abrir'],
+  'abridor': ['abre', 'abrir', 'abridor'],
+  'cortador': ['corta', 'cortar', 'cortador'],
+  'corta': ['cortador', 'cortar', 'corta'],
+  'cortar': ['cortador', 'corta', 'cortar'],
+  'pelador': ['pela', 'pelar', 'pelador'],
+  'pela': ['pelador', 'pelar', 'pela'],
+  'pelar': ['pelador', 'pela', 'pelar'],
+  'rallador': ['ralla', 'rallar', 'rallador'],
+  'ralla': ['rallador', 'rallar', 'ralla'],
+  'rallar': ['rallador', 'ralla', 'rallar'],
+  'pajita': ['pajitas', 'straw', 'straws', 'caña', 'cañas'],
+  'pajitas': ['pajita', 'straw', 'straws', 'caña', 'cañas'],
+  'cartón': ['carton', 'cardboard', 'papel', 'papel cartón'],
+  'carton': ['cartón', 'cardboard', 'papel', 'papel cartón'],
+  'plato': ['platos', 'plate', 'plates', 'fuente', 'fuentes'],
+  'platos': ['plato', 'plate', 'plates', 'fuente', 'fuentes'],
+  'vaso': ['vasos', 'cup', 'cups', 'taza', 'tazas'],
+  'vasos': ['vaso', 'cup', 'cups', 'taza', 'tazas'],
+};
+
+// Función para verificar sinónimos técnicos
+function checkTechnicalSynonyms(word: string, productText: string): boolean {
+  const normalizedWord = normalizeText(word);
+  const normalizedProductText = normalizeText(productText);
+  
+  // Verificar si la palabra es un sinónimo conocido
+  if (TECHNICAL_SYNONYMS[normalizedWord]) {
+    const synonyms = TECHNICAL_SYNONYMS[normalizedWord];
+    return synonyms.some(synonym => normalizedProductText.includes(synonym));
+  }
+  
+  // Verificar si alguna palabra en el texto del producto es sinónimo de la palabra buscada
+  for (const [key, synonyms] of Object.entries(TECHNICAL_SYNONYMS)) {
+    if (synonyms.includes(normalizedWord) && normalizedProductText.includes(key)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// Función para calcular densidad de coincidencia (porcentaje de palabras que coinciden)
+function calculateMatchDensity(searchWords: string[], productText: string): number {
+  if (searchWords.length === 0) return 0;
+  
+  let matchingWords = 0;
+  searchWords.forEach(word => {
+    if (productText.includes(word) || checkTechnicalSynonyms(word, productText)) {
+      matchingWords++;
+    }
+  });
+  
+  return matchingWords / searchWords.length;
+}
+
+// Función para calcular score de relevancia de un producto (MEJORADA - FASE 1)
+function calculateRelevanceScore(
+  product: any, 
+  searchTerm: string, 
+  userIntent?: { intent: string; urgency: string },
+  searchCategory?: string
+): number {
   if (!searchTerm) return 0;
   
   let score = 0;
@@ -1274,66 +1398,212 @@ function calculateRelevanceScore(product: any, searchTerm: string): number {
   const productName = normalizeText(product.name || '');
   const description = normalizeText(product.description || '');
   const category = normalizeText(product.category || '');
+  const subcategory = normalizeText(product.subcategory || '');
   
-  // Coincidencia exacta en nombre (máximo peso)
+  // Dividir término de búsqueda en palabras
+  const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 2);
+  
+  // 1. Coincidencia exacta en nombre (máximo peso)
   if (productName === normalizedSearch) {
     score += 200;
   } else if (productName.includes(normalizedSearch)) {
     score += 100;
-    // Bonus si está al inicio
+    // Bonus por posición en nombre (más relevante si está al inicio)
     const index = productName.indexOf(normalizedSearch);
-    if (index !== -1 && index < 5) {
-      score += 50;
+    if (index !== -1) {
+      if (index < 5) {
+        score += 50; // Al inicio
+      } else if (index < 15) {
+        score += 25; // En la primera mitad
+      }
     }
   }
   
-  // Coincidencia de palabras individuales
-  const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 2);
+  // 2. Coincidencia de palabras individuales con bonus por posición
   searchWords.forEach(word => {
-    if (productName.includes(word)) score += 30;
-    if (description.includes(word)) score += 10;
-    if (category.includes(word)) score += 20;
+    // En nombre
+    if (productName.includes(word)) {
+      score += 30;
+      const index = productName.indexOf(word);
+      if (index !== -1 && index < 10) {
+        score += 15; // Bonus por posición temprana
+      }
+    }
+    // En descripción
+    if (description.includes(word)) {
+      score += 10;
+    }
+    // En categoría (más peso)
+    if (category.includes(word)) {
+      score += 20;
+    }
+    // En subcategoría
+    if (subcategory.includes(word)) {
+      score += 15;
+    }
   });
   
-  // Coincidencia en SKU (si contiene)
+  // 3. Bonus por sinónimos técnicos
+  searchWords.forEach(word => {
+    if (checkTechnicalSynonyms(word, productName)) {
+      score += 25; // Bonus por sinónimo en nombre
+    }
+    if (checkTechnicalSynonyms(word, description)) {
+      score += 8; // Bonus por sinónimo en descripción
+    }
+    if (checkTechnicalSynonyms(word, category)) {
+      score += 15; // Bonus por sinónimo en categoría
+    }
+  });
+  
+  // 4. Bonus por intención + categoría
+  if (userIntent && searchCategory) {
+    const normalizedSearchCategory = normalizeText(searchCategory);
+    if (category.includes(normalizedSearchCategory) || normalizedSearchCategory.includes(category)) {
+      if (userIntent.intent === 'buy') {
+        score += 30; // Bonus alto para intención de compra con categoría coincidente
+      } else if (userIntent.intent === 'compare') {
+        score += 20; // Bonus medio para comparación
+      } else {
+        score += 15; // Bonus base para otras intenciones
+      }
+    }
+  }
+  
+  // 5. Coincidencia en SKU (si contiene)
   if (product.sku && normalizeText(product.sku).includes(normalizedSearch)) {
     score += 40;
   }
   
-  return score;
+  // 6. Penalización por baja densidad de coincidencia
+  const allProductText = `${productName} ${description} ${category} ${subcategory}`;
+  const matchDensity = calculateMatchDensity(searchWords, allProductText);
+  
+  if (matchDensity < 0.3) {
+    // Si menos del 30% de las palabras coinciden, penalizar
+    score = Math.floor(score * 0.5); // Reducir score a la mitad
+  } else if (matchDensity < 0.5) {
+    // Si menos del 50% pero más del 30%, penalizar ligeramente
+    score = Math.floor(score * 0.75); // Reducir score al 75%
+  } else if (matchDensity >= 0.8) {
+    // Si más del 80% de las palabras coinciden, bonus
+    score = Math.floor(score * 1.1); // Aumentar score un 10%
+  }
+  
+  return Math.max(0, score); // Asegurar que el score no sea negativo
 }
 
-// Función para formatear productos para el prompt de OpenAI (mejorada)
+// Función para formatear productos para el prompt de OpenAI (MEJORADA - FASE 1)
 function formatProductsForPrompt(products: any[], limit: number = 5): string {
   if (!products || products.length === 0) {
     return 'No se encontraron productos.';
   }
   
   const limited = products.slice(0, limit);
-  const formatted = limited.map((p, i) => {
+  
+  // FASE 1: Agrupación enriquecida
+  let formatted = '';
+  
+  if (limited.length === 1) {
+    // Un solo producto: presentarlo como recomendado
+    const p = limited[0];
     const description = (p.description || '').trim();
     const descriptionPreview = description.length > 200 
       ? description.substring(0, 200) + '...' 
       : description || 'Sin descripción disponible';
     
-    let productInfo = `**${p.name}**\n`;
-    productInfo += `💰 Precio: ${p.price || 'No disponible'}\n`;
+    formatted += `🏆 **RECOMENDADO**\n\n`;
+    formatted += `**${p.name}**\n`;
+    formatted += `💰 Precio: ${p.price || 'No disponible'}\n`;
     if (p.category) {
-      productInfo += `📦 Categoría: ${p.category}\n`;
+      formatted += `📦 Categoría: ${p.category}\n`;
     }
     if (p.sku) {
-      productInfo += `🏷️ SKU: ${p.sku}\n`;
+      formatted += `🏷️ SKU: ${p.sku}\n`;
     }
-    productInfo += `📝 ${descriptionPreview}\n`;
+    formatted += `📝 ${descriptionPreview}\n`;
     if (p.product_url) {
-      productInfo += `🔗 URL: ${p.product_url}`;
+      formatted += `🔗 URL: ${p.product_url}`;
+    }
+  } else {
+    // Múltiples productos: agrupar
+    const recommended = limited[0];
+    const alternatives = limited.slice(1, Math.min(4, limited.length));
+    const additional = limited.slice(4);
+    
+    // 🏆 RECOMENDADO
+    if (recommended) {
+      const description = (recommended.description || '').trim();
+      const descriptionPreview = description.length > 200 
+        ? description.substring(0, 200) + '...' 
+        : description || 'Sin descripción disponible';
+      
+      formatted += `🏆 **RECOMENDADO**\n\n`;
+      formatted += `**${recommended.name}**\n`;
+      formatted += `💰 Precio: ${recommended.price || 'No disponible'}\n`;
+      if (recommended.category) {
+        formatted += `📦 Categoría: ${recommended.category}\n`;
+      }
+      if (recommended.sku) {
+        formatted += `🏷️ SKU: ${recommended.sku}\n`;
+      }
+      formatted += `📝 ${descriptionPreview}\n`;
+      if (recommended.product_url) {
+        formatted += `🔗 URL: ${recommended.product_url}`;
+      }
+      formatted += '\n\n';
     }
     
-    return productInfo;
-  }).join('\n\n---\n\n');
-  
-  if (products.length > limit) {
-    return formatted + `\n\n📊 Total encontrado: ${products.length} productos (mostrando los ${limit} más relevantes)`;
+    // 🔁 ALTERNATIVAS
+    if (alternatives.length > 0) {
+      formatted += `🔁 **ALTERNATIVAS**\n\n`;
+      alternatives.forEach((p, i) => {
+        const description = (p.description || '').trim();
+        const descriptionPreview = description.length > 150 
+          ? description.substring(0, 150) + '...' 
+          : description || 'Sin descripción disponible';
+        
+        formatted += `${i + 1}. **${p.name}**\n`;
+        formatted += `   💰 Precio: ${p.price || 'No disponible'}\n`;
+        if (p.category) {
+          formatted += `   📦 Categoría: ${p.category}\n`;
+        }
+        formatted += `   📝 ${descriptionPreview}\n`;
+        if (p.product_url) {
+          formatted += `   🔗 URL: ${p.product_url}`;
+        }
+        formatted += '\n\n';
+      });
+    }
+    
+    // 💡 PUEDE INTERESARTE
+    if (additional.length > 0) {
+      formatted += `💡 **PUEDE INTERESARTE**\n\n`;
+      additional.forEach((p, i) => {
+        const description = (p.description || '').trim();
+        const descriptionPreview = description.length > 100 
+          ? description.substring(0, 100) + '...' 
+          : description || 'Sin descripción disponible';
+        
+        formatted += `${i + 1}. **${p.name}**\n`;
+        formatted += `   💰 Precio: ${p.price || 'No disponible'}\n`;
+        if (p.category) {
+          formatted += `   📦 Categoría: ${p.category}\n`;
+        }
+        formatted += `   📝 ${descriptionPreview}\n`;
+        if (p.product_url) {
+          formatted += `   🔗 URL: ${p.product_url}`;
+        }
+        formatted += '\n\n';
+      });
+    }
+    
+    // Resumen del conjunto de productos
+    formatted += `\n📊 **RESUMEN**: Se encontraron ${products.length} producto(s) relacionado(s). `;
+    if (products.length > limit) {
+      formatted += `Mostrando los ${limit} más relevantes. `;
+    }
+    formatted += `Los productos están ordenados por relevancia, siendo el primero el más recomendado.\n`;
   }
   
   return formatted;
@@ -1551,10 +1821,14 @@ async function searchProducts(supabase: any, params: any) {
 
   // Calcular scores de relevancia y ordenar si hay término de búsqueda
   if (params.query && typeof params.query === 'string' && sortedData.length > 0) {
+    // Obtener userIntent y searchCategory de params si están disponibles
+    const userIntent = params.userIntent;
+    const searchCategory = params.category || params.subcategory;
+    
     sortedData = sortedData
       .map((product: any) => ({
         ...product,
-        relevanceScore: calculateRelevanceScore(product, params.query)
+        relevanceScore: calculateRelevanceScore(product, params.query, userIntent, searchCategory)
       }))
       .sort((a: any, b: any) => {
         // Primero por relevancia si hay búsqueda
