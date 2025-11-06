@@ -269,17 +269,12 @@ async function mapProduct(
     };
   };
   
-  // Función para extraer todas las categorías asociadas del producto
+  // Función para extraer todas las categorías asociadas del producto (EXACTAMENTE como en PHP)
+  // El PHP primero busca en associations, y solo usa id_category_default si no hay categorías
   const extractAllCategoryIds = (product: any): number[] => {
     const categoryIds: number[] = [];
-    const defaultCategoryId = product.id_category_default ? parseInt(product.id_category_default) : null;
     
-    // Agregar categoría por defecto si es válida
-    if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0) {
-      categoryIds.push(defaultCategoryId);
-    }
-    
-    // Extraer categorías de associations
+    // Primero extraer todas las categorías de associations (como en PHP)
     if (product.associations && product.associations.categories) {
       let associatedCategories: any[] = [];
       
@@ -297,7 +292,7 @@ async function mapProduct(
         }
       }
       
-      // Extraer IDs de categorías asociadas
+      // Extraer IDs de categorías asociadas (excluyendo ID 2 "Inicio")
       for (const cat of associatedCategories) {
         let catId: number | null = null;
         
@@ -307,10 +302,18 @@ async function mapProduct(
           catId = parseInt(String(cat));
         }
         
-        // Agregar si es válida y no está duplicada
-        if (catId && catId !== 1 && catId !== 0 && !categoryIds.includes(catId)) {
+        // Excluir categoría "Inicio" (ID 2) y raíz (1, 0)
+        if (catId && catId !== 1 && catId !== 0 && catId !== 2 && !categoryIds.includes(catId)) {
           categoryIds.push(catId);
         }
+      }
+    }
+    
+    // Si no hay categorías en associations, usar la categoría por defecto (excepto si es "Inicio")
+    if (categoryIds.length === 0 && product.id_category_default && product.id_category_default != 2) {
+      const defaultCategoryId = parseInt(product.id_category_default);
+      if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0 && defaultCategoryId !== 2) {
+        categoryIds.push(defaultCategoryId);
       }
     }
     
