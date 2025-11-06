@@ -115,8 +115,8 @@ export default async function handler(
       variables: activePrompts.prompt_variables || []
     });
 
-    // 3. Limitar historial de conversación (últimos 10 mensajes para evitar tokens innecesarios)
-    const limitedHistory = conversationHistory.slice(-10);
+    // 3. Limitar historial de conversación (últimos 5 mensajes para mayor velocidad)
+    const limitedHistory = conversationHistory.slice(-5);
 
     // 4. Definir funciones disponibles para Function Calling
     const functions = [
@@ -402,10 +402,10 @@ export default async function handler(
       { role: 'user', content: message }
     ];
 
-    // 7. Configuración de OpenAI
+    // 7. Configuración de OpenAI (OPTIMIZADO PARA VELOCIDAD)
     const model = config.model || 'gpt-3.5-turbo'; // Por defecto más rápido
     const temperature = config.temperature !== undefined ? config.temperature : 0.7;
-    const maxTokens = config.max_tokens || 1500; // Reducido para respuestas más rápidas
+    const maxTokens = config.max_tokens || 1000; // Reducido de 1500 a 1000 para respuestas más rápidas
 
     // 8. Llamar a OpenAI (con timeout para evitar errores de Vercel)
     // Si es una pregunta sobre productos, forzar el uso de herramientas
@@ -445,7 +445,7 @@ export default async function handler(
           tool_choice: toolChoice
         }),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('OpenAI request timeout')), 20000) // Reducido de 25s a 20s
+          setTimeout(() => reject(new Error('OpenAI request timeout')), 15000) // Reducido a 15s para mayor velocidad
         )
       ]) as any;
     } catch (openaiError) {
@@ -706,10 +706,10 @@ export default async function handler(
         enrichedContext += 'No uses respuestas genéricas. Sé específico y ofrece alternativas concretas.\n';
       }
       
-      // Formatear productos para mejor presentación
+      // Formatear productos para mejor presentación (OPTIMIZADO - menos productos)
       if (functionResult.products && functionResult.products.length > 0) {
         enrichedContext += '\n\n📦 PRODUCTOS ENCONTRADOS (formateados para mejor presentación):\n';
-        enrichedContext += formatProductsForPrompt(functionResult.products, 5);
+        enrichedContext += formatProductsForPrompt(functionResult.products, 3); // Reducido de 5 a 3 para mayor velocidad
         enrichedContext += '\n\nUsa esta información formateada para crear una respuesta clara y estructurada.\n';
       }
       
@@ -767,10 +767,10 @@ export default async function handler(
       */
 
       // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
-      // Limitar el tamaño del contexto enriquecido para evitar problemas
-      const maxContextLength = 3000; // Limitar a 3000 caracteres
+      // Limitar el tamaño del contexto enriquecido para mayor velocidad (OPTIMIZADO)
+      const maxContextLength = 2000; // Reducido de 3000 a 2000 caracteres para mayor velocidad
       const limitedEnrichedContext = enrichedContext.length > maxContextLength 
-        ? enrichedContext.substring(0, maxContextLength) + '\n\n[Contexto truncado para evitar exceder límites]'
+        ? enrichedContext.substring(0, maxContextLength) + '\n\n[Contexto truncado para optimizar velocidad]'
         : enrichedContext;
       
       const systemPromptWithContext = systemPrompt + limitedEnrichedContext;
@@ -803,30 +803,37 @@ export default async function handler(
       let secondCallTokens = 0;
       
       try {
-        // Limitar el tamaño de functionResult para evitar problemas de tokens
+        // Limitar el tamaño de functionResult para mayor velocidad (OPTIMIZADO)
         let limitedFunctionResult = functionResult;
         if (functionResult.products && Array.isArray(functionResult.products)) {
-          // Limitar a máximo 10 productos para no exceder tokens
+          // Limitar a máximo 5 productos (reducido de 10) para mayor velocidad
           limitedFunctionResult = {
             ...functionResult,
-            products: functionResult.products.slice(0, 10),
-            total: functionResult.products.length,
-            limited: functionResult.products.length > 10
-          };
-        }
-        
-        // Limitar tamaño del JSON stringificado
-        const functionResultStr = JSON.stringify(limitedFunctionResult);
-        if (functionResultStr.length > 5000) {
-          // Si es muy grande, crear una versión resumida
-          limitedFunctionResult = {
-            ...functionResult,
-            products: functionResult.products ? functionResult.products.slice(0, 5).map((p: any) => ({
+            products: functionResult.products.slice(0, 5).map((p: any) => ({
               id: p.id,
               name: p.name,
               price: p.price,
               category: p.category,
-              sku: p.sku
+              sku: p.sku,
+              // Excluir description para reducir tokens
+              description: p.description ? p.description.substring(0, 100) + '...' : undefined
+            })),
+            total: functionResult.products.length,
+            limited: functionResult.products.length > 5
+          };
+        }
+        
+        // Limitar tamaño del JSON stringificado (más agresivo)
+        const functionResultStr = JSON.stringify(limitedFunctionResult);
+        if (functionResultStr.length > 3000) { // Reducido de 5000 a 3000
+          // Si es muy grande, crear una versión aún más resumida
+          limitedFunctionResult = {
+            ...functionResult,
+            products: functionResult.products ? functionResult.products.slice(0, 3).map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              price: p.price,
+              category: p.category
             })) : undefined,
             summary: 'Resultados limitados para mostrar. Total encontrado: ' + (functionResult.total || functionResult.products?.length || 0)
           };
@@ -861,7 +868,7 @@ export default async function handler(
             tool_choice: 'auto'
           }),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OpenAI request timeout')), 25000) // Reducido de 30s a 25s
+            setTimeout(() => reject(new Error('OpenAI request timeout')), 20000) // Reducido a 20s para mayor velocidad
           )
         ]) as any;
         
@@ -1620,11 +1627,11 @@ function formatProductsForPrompt(products: any[], limit: number = 5): string {
   let formatted = '';
   
   if (limited.length === 1) {
-    // Un solo producto: presentarlo como recomendado
+    // Un solo producto: presentarlo como recomendado (OPTIMIZADO - descripción más corta)
     const p = limited[0];
     const description = (p.description || '').trim();
-    const descriptionPreview = description.length > 200 
-      ? description.substring(0, 200) + '...' 
+    const descriptionPreview = description.length > 120 
+      ? description.substring(0, 120) + '...' 
       : description || 'Sin descripción disponible';
     
     formatted += `🏆 **RECOMENDADO**\n\n`;
@@ -1646,11 +1653,11 @@ function formatProductsForPrompt(products: any[], limit: number = 5): string {
     const alternatives = limited.slice(1, Math.min(4, limited.length));
     const additional = limited.slice(4);
     
-    // 🏆 RECOMENDADO
+    // 🏆 RECOMENDADO (OPTIMIZADO - descripción más corta)
     if (recommended) {
       const description = (recommended.description || '').trim();
-      const descriptionPreview = description.length > 200 
-        ? description.substring(0, 200) + '...' 
+      const descriptionPreview = description.length > 120 
+        ? description.substring(0, 120) + '...' 
         : description || 'Sin descripción disponible';
       
       formatted += `🏆 **RECOMENDADO**\n\n`;
@@ -1674,8 +1681,8 @@ function formatProductsForPrompt(products: any[], limit: number = 5): string {
       formatted += `🔁 **ALTERNATIVAS**\n\n`;
       alternatives.forEach((p, i) => {
         const description = (p.description || '').trim();
-        const descriptionPreview = description.length > 150 
-          ? description.substring(0, 150) + '...' 
+        const descriptionPreview = description.length > 80 
+          ? description.substring(0, 80) + '...' 
           : description || 'Sin descripción disponible';
         
         formatted += `${i + 1}. **${p.name}**\n`;
@@ -1696,8 +1703,8 @@ function formatProductsForPrompt(products: any[], limit: number = 5): string {
       formatted += `💡 **PUEDE INTERESARTE**\n\n`;
       additional.forEach((p, i) => {
         const description = (p.description || '').trim();
-        const descriptionPreview = description.length > 100 
-          ? description.substring(0, 100) + '...' 
+        const descriptionPreview = description.length > 60 
+          ? description.substring(0, 60) + '...' 
           : description || 'Sin descripción disponible';
         
         formatted += `${i + 1}. **${p.name}**\n`;
@@ -1852,14 +1859,13 @@ async function searchProducts(supabase: any, params: any) {
     query = query.order('name', { ascending: true });
   }
 
-  // Límite aumentado para búsquedas con múltiples palabras
-  // Esto ayuda a capturar más resultados antes del filtrado en memoria
+  // Límite optimizado para velocidad (OPTIMIZADO)
   const baseLimit = params.limit || 15;
-  const maxLimit = 50; // Aumentado de 30 a 50 para búsquedas complejas
+  const maxLimit = 30; // Reducido de 50 a 30 para mayor velocidad
   const searchTerm = params.query && typeof params.query === 'string' ? params.query.trim() : '';
   const words = searchTerm.split(/\s+/).filter(w => w.length > 0);
   const hasMultipleWords = words.length > 1;
-  const limit = Math.min(hasMultipleWords ? baseLimit * 3 : baseLimit, maxLimit); // Más resultados si hay múltiples palabras
+  const limit = Math.min(hasMultipleWords ? baseLimit * 2 : baseLimit, maxLimit); // Reducido de *3 a *2 para mayor velocidad
   query = query.limit(limit);
 
   // Offset
