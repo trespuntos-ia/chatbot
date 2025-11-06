@@ -235,10 +235,13 @@ export default async function handler(
     } = req.query;
 
     console.log('get-products called with params:', { test_product_id, limit, offset, category, search });
+    console.log('req.query:', req.query);
 
     // Si se proporciona test_product_id, usar el endpoint de prueba
-    if (test_product_id) {
-      console.log('Test product mode activated for product_id:', test_product_id);
+    // Verificar tanto test_product_id como testProductId (por si viene en camelCase)
+    const testId = test_product_id || (req.query as any).testProductId;
+    if (testId) {
+      console.log('Test product mode activated for product_id:', testId);
       // Redirigir a la lógica de test-single-product
       const supabaseUrl = process.env.SUPABASE_URL;
       const supabaseKey = process.env.SUPABASE_ANON_KEY;
@@ -261,7 +264,7 @@ export default async function handler(
       }
 
       const connection = connections[0];
-      const productId = typeof test_product_id === 'string' ? parseInt(test_product_id) : test_product_id;
+      const productId = typeof testId === 'string' ? parseInt(testId) : testId;
 
       // Llamar a PrestaShop API directamente
       const queryParams = new URLSearchParams({
