@@ -472,6 +472,17 @@ export default async function handler(
     }
 
     const responseMessage = completion.choices[0].message;
+    
+    // Capturar tokens de la primera llamada
+    let firstCallTokens = 0;
+    if (completion.usage) {
+      firstCallTokens = completion.usage.total_tokens || 0;
+      console.log('[Tokens] Primera llamada:', {
+        prompt_tokens: completion.usage.prompt_tokens || 0,
+        completion_tokens: completion.usage.completion_tokens || 0,
+        total_tokens: firstCallTokens
+      });
+    }
 
     // 8. Si OpenAI llamó a una función
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
@@ -769,6 +780,9 @@ export default async function handler(
         JSON.stringify(functionResult).length, 'bytes');
       console.log(`Enriched context length: ${enrichedContext.length} chars (limited to ${limitedEnrichedContext.length})`);
       
+      // Inicializar totalTokens con los tokens de la primera llamada
+      let totalTokens = firstCallTokens;
+      
       const messagesWithContext = [
         { role: 'system', content: systemPromptWithContext },
         ...limitedHistory,
@@ -849,6 +863,20 @@ export default async function handler(
           )
         ]) as any;
         
+        // Capturar tokens de la segunda llamada
+        let secondCallTokens = 0;
+        if (secondCompletion?.usage) {
+          secondCallTokens = secondCompletion.usage.total_tokens || 0;
+          console.log('[Tokens] Segunda llamada:', {
+            prompt_tokens: secondCompletion.usage.prompt_tokens || 0,
+            completion_tokens: secondCompletion.usage.completion_tokens || 0,
+            total_tokens: secondCallTokens
+          });
+        }
+        
+        totalTokens = firstCallTokens + secondCallTokens;
+        console.log('[Tokens] Total para esta conversación:', totalTokens);
+        
         console.log('OpenAI second completion received:', {
           hasContent: !!secondCompletion?.choices?.[0]?.message?.content,
           contentLength: secondCompletion?.choices?.[0]?.message?.content?.length || 0
@@ -927,32 +955,57 @@ export default async function handler(
 
       const finalMessage = secondCompletion.choices[0].message?.content || '';
       
-      // Si el mensaje está vacío, generar uno de fallback
+      // Si el mensaje está vacío, generar uno de fallback MEJORADO
       if (!finalMessage || finalMessage.trim().length === 0) {
         console.warn('OpenAI returned empty message, using fallback');
+        
+        // Generar mensaje de fallback más completo
+        let fallbackMessage = '';
+        
         if (functionResult.products && functionResult.products.length > 0) {
-          const productNames = functionResult.products.slice(0, 5).map((p: any) => p.name).join(', ');
-          const fallbackMessage = `Encontré ${functionResult.products.length} producto(s): ${productNames}${functionResult.products.length > 5 ? ' y más...' : ''}. ¿Te gustaría más información sobre alguno de estos productos?`;
+          const products = functionResult.products.slice(0, 5);
+          const productList = products.map((p: any, idx: number) => {
+            return `${idx + 1}. **${p.name}**${p.price ? ` - ${p.price}` : ''}${p.category ? ` (${p.category})` : ''}`;
+          }).join('\n');
           
-          res.status(200).json({
-            success: true,
-            message: fallbackMessage,
-            function_called: functionName,
-            function_result: functionResult,
-            fallback: true,
-            conversation_history: [
-              ...conversationHistory,
-              { role: 'user', content: message },
-              {
-                role: 'assistant',
-                content: fallbackMessage,
-                function_calls: [toolCall],
-                sources: ['products_db']
-              }
-            ]
-          });
-          return;
+          fallbackMessage = `He encontrado ${functionResult.products.length} producto(s) relacionado(s) con tu búsqueda:\n\n${productList}`;
+          
+          if (functionResult.products.length > 5) {
+            fallbackMessage += `\n\nY ${functionResult.products.length - 5} producto(s) más disponible(s).`;
+          }
+          
+          fallbackMessage += '\n\n¿Te gustaría más información sobre alguno de estos productos?';
+        } else if (functionResult.product && functionResult.found) {
+          const p = functionResult.product;
+          fallbackMessage = `He encontrado el siguiente producto:\n\n**${p.name}**${p.price ? ` - ${p.price}` : ''}${p.category ? `\nCategoría: ${p.category}` : ''}${p.description ? `\n\n${p.description.substring(0, 200)}...` : ''}`;
+        } else {
+          // Si no hay productos, generar mensaje genérico útil
+          fallbackMessage = 'He consultado la base de datos pero no encontré resultados específicos para tu búsqueda. ¿Podrías ser más específico? Por ejemplo, menciona la categoría o características que buscas.';
         }
+        
+        // Asegurar que el mensaje no esté vacío
+        if (!fallbackMessage || fallbackMessage.trim().length === 0) {
+          fallbackMessage = 'He procesado tu consulta. ¿Hay algo más específico que te gustaría saber?';
+        }
+        
+        res.status(200).json({
+          success: true,
+          message: fallbackMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          fallback: true,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content: fallbackMessage,
+              function_calls: [toolCall],
+              sources: ['products_db']
+            }
+          ]
+        });
+        return;
       }
 
       // Determinar fuentes de información
@@ -978,10 +1031,17 @@ export default async function handler(
         sources.push('web');
       }
 
+      // Asegurar que finalMessage no esté vacío antes de crear el mensaje
+      const safeFinalMessage = finalMessage && finalMessage.trim().length > 0 
+        ? finalMessage 
+        : (functionResult.products && functionResult.products.length > 0
+          ? `He encontrado ${functionResult.products.length} producto(s). ¿Te gustaría más información?`
+          : 'He procesado tu consulta. ¿Hay algo más específico que te gustaría saber?');
+      
       // Preparar mensaje del asistente con productos y fuentes
       const assistantMessage: any = {
         role: 'assistant',
-        content: finalMessage,
+        content: safeFinalMessage,
         function_calls: [toolCall],
         sources: sources.length > 0 ? sources : ['general']
       };
@@ -992,17 +1052,21 @@ export default async function handler(
         supabase,
         sessionId || 'default',
         message,
-        finalMessage,
+        safeFinalMessage, // Usar safeFinalMessage en lugar de finalMessage
         functionName,
         functionResult.products || (functionResult.product ? [functionResult.product] : undefined),
         functionArgs.category || functionArgs.subcategory,
         model,
-        responseTime
+        responseTime,
+        totalTokens // Pasar tokens totales
       );
 
+      // Asegurar que el mensaje en la respuesta también esté presente
+      const responseMessage = safeFinalMessage || finalMessage || 'He procesado tu consulta.';
+      
       res.status(200).json({
         success: true,
-        message: finalMessage,
+        message: responseMessage,
         function_called: functionName,
         function_result: functionResult,
         conversation_id: conversationId,
@@ -1034,7 +1098,8 @@ export default async function handler(
         undefined, // No hay productos
         undefined, // No hay categoría
         model,
-        responseTime
+        responseTime,
+        firstCallTokens // Solo primera llamada cuando no hay función
       );
 
       res.status(200).json({
@@ -2502,7 +2567,8 @@ async function saveConversationToAnalytics(
   productsConsulted?: any[],
   categoryConsulted?: string,
   modelUsed?: string,
-  responseTimeMs?: number
+  responseTimeMs?: number,
+  tokensUsed?: number
 ): Promise<string | null> {
   try {
     console.log('[Analytics] Intentando guardar conversación:', {
@@ -2540,6 +2606,7 @@ async function saveConversationToAnalytics(
       category_consulted: detectedCategory || null,
       model_used: modelUsed || 'gpt-3.5-turbo',
       response_time_ms: responseTimeMs || null,
+      tokens_used: tokensUsed || null,
     };
 
     const { data, error } = await supabase
