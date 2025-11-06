@@ -166,10 +166,13 @@ async function getCategoryInfo(
       break;
     }
     
-    hierarchy.unshift(basicInfo.name);
+    // Excluir "Inicio" de la jerarquía
+    if (basicInfo.name && basicInfo.name.toLowerCase() !== 'inicio') {
+      hierarchy.unshift(basicInfo.name);
+    }
     
-    // Si no tiene padre o el padre es la raíz, terminamos
-    if (!basicInfo.parentId || basicInfo.parentId === 1 || basicInfo.parentId === 0) {
+    // Si no tiene padre o el padre es la raíz o "Inicio", terminamos
+    if (!basicInfo.parentId || basicInfo.parentId === 1 || basicInfo.parentId === 0 || basicInfo.parentId === 2) {
       break;
     }
     
@@ -244,10 +247,17 @@ async function mapProduct(
       return null;
     }
     
-    // Extraer niveles de jerarquía
-    const level1 = hierarchy[0] || '';
-    const level2 = hierarchy[1] || null;
-    const level3 = hierarchy[2] || null;
+    // Filtrar "Inicio" de la jerarquía
+    const filteredHierarchy = hierarchy.filter(name => name && name.toLowerCase() !== 'inicio');
+    
+    if (filteredHierarchy.length === 0) {
+      return null;
+    }
+    
+    // Extraer niveles de jerarquía (después de filtrar "Inicio")
+    const level1 = filteredHierarchy[0] || '';
+    const level2 = filteredHierarchy[1] || null;
+    const level3 = filteredHierarchy[2] || null;
     
     // Para compatibilidad: category y subcategory (categoría principal)
     if (isPrimary) {
@@ -263,7 +273,7 @@ async function mapProduct(
       category: level1,
       subcategory: level2,
       subsubcategory: level3 || null,
-      hierarchy: hierarchy,
+      hierarchy: filteredHierarchy, // Usar la jerarquía filtrada
       category_id: categoryId,
       is_primary: isPrimary
     };
