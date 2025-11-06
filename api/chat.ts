@@ -967,10 +967,27 @@ export default async function handler(
           return;
         }
         
-        res.status(500).json({
-          success: false,
-          error: 'Respuesta inválida de OpenAI',
-          details: 'La respuesta de OpenAI no tiene la estructura esperada'
+        // En lugar de error 500, devolver fallback útil
+        const errorFallbackMessage = functionResult.products && functionResult.products.length > 0
+          ? `He encontrado ${functionResult.products.length} producto(s) pero hubo un problema al generar la respuesta. Por favor, intenta de nuevo.`
+          : 'He consultado la base de datos pero no encontré resultados específicos. ¿Podrías ser más específico en tu búsqueda?';
+        
+        res.status(200).json({
+          success: true,
+          message: errorFallbackMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          fallback: true,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content: errorFallbackMessage,
+              function_calls: [toolCall],
+              sources: ['products_db']
+            }
+          ]
         });
         return;
       }
