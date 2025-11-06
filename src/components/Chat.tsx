@@ -119,6 +119,16 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
         const lastMessage = response.conversation_history[response.conversation_history.length - 1];
         let products: Product[] = [];
 
+        // Debug: Log para ver qué está llegando
+        console.log('Chat response:', {
+          success: response.success,
+          message: response.message,
+          lastMessageContent: lastMessage?.content,
+          lastMessageRole: lastMessage?.role,
+          functionResult: response.function_result,
+          conversationHistoryLength: response.conversation_history.length
+        });
+
         // Si hay function_result con productos
         if (response.function_result) {
           if (response.function_result.products && Array.isArray(response.function_result.products)) {
@@ -137,6 +147,11 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
             }
           }
           lastMessage.products = products;
+        }
+
+        // Si el último mensaje está vacío pero hay un mensaje en response.message, usarlo
+        if (lastMessage && (!lastMessage.content || lastMessage.content.trim().length === 0) && response.message) {
+          lastMessage.content = response.message;
         }
 
         // Añadir conversation_id al último mensaje del asistente
@@ -245,7 +260,8 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                 {textParts.map((part, partIndex) => {
                   const textContent = part.content as string;
                   
-                  if (!textContent || textContent.trim().length < 10) {
+                  // Mostrar mensaje incluso si es corto (pero no vacío)
+                  if (!textContent || textContent.trim().length === 0) {
                     return null;
                   }
                   
@@ -267,6 +283,20 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                     </div>
                   );
                 })}
+                
+                {/* Si no hay texto pero hay productos, mostrar mensaje por defecto */}
+                {textParts.length === 0 && productParts.length > 0 && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 text-gray-300">
+                      <p className="text-sm">He encontrado estos productos para ti:</p>
+                      {message.function_calls && (
+                        <div className="mt-3 text-xs text-gray-500">
+                          🔍 Consultó la base de datos
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 
                 {/* Tarjetas de productos */}
                 {productParts.length > 0 && (
@@ -322,6 +352,11 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
           }
 
           // Mensaje normal (usuario o asistente sin productos)
+          // Si el mensaje del asistente está vacío pero hay function_calls, mostrar mensaje por defecto
+          const displayContent = message.role === 'assistant' && (!message.content || message.content.trim().length === 0) && message.function_calls
+            ? 'He consultado la base de datos. Por favor, espera mientras genero la respuesta...'
+            : message.content || '';
+          
           return (
             <div key={index}>
               <div
@@ -336,7 +371,9 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                       : 'bg-[#2a2a2a] border border-gray-700/50 text-gray-300'
                   }`}
                 >
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</div>
+                  {displayContent && (
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{displayContent}</div>
+                  )}
                   {message.function_calls && (
                     <div className="mt-3 text-xs text-gray-500">
                       🔍 Consultó la base de datos
