@@ -172,8 +172,8 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                 </svg>
               </button>
 
-              {/* Logo y descripción de ChefCopilot - alineado a la derecha */}
-              <div className="flex-1 text-right">
+              {/* Logo y descripción de ChefCopilot - alineado a la izquierda */}
+              <div className="flex-1 text-left ml-4">
                 <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
                 <p className="text-xs text-gray-400">Tu asesor experto en cocina profesional</p>
               </div>
@@ -245,7 +245,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
             </div>
             
             {/* Segunda fila: texto descriptivo */}
-            <div className="text-center">
+            <div className="text-left">
               <p className="text-xs text-gray-400">
                 Explora productos, técnicas, accesorios o platos con un asistente que habla tu idioma culinario.
               </p>
