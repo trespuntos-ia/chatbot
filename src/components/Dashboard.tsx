@@ -99,45 +99,53 @@ export function Dashboard() {
         </div>
 
         {/* Tabs Mobile (horizontal scroll mejorado) */}
-        <div className="lg:hidden mb-4 sm:mb-6">
-          <div className="border-b-2 border-slate-200 bg-white sticky top-0 z-30 shadow-sm">
-            <div className="relative overflow-hidden">
-              {/* Scroll container */}
+        <div className="lg:hidden mb-4 sm:mb-6 -mx-4 sm:-mx-6 lg:mx-0">
+          <div className="bg-white border-b-2 border-slate-300 sticky top-0 z-30 shadow-lg">
+            <div className="relative">
               <nav 
-                className="flex overflow-x-auto scrollbar-hide scroll-smooth" 
+                className="mobile-nav-scroll scrollbar-hide"
                 style={{ 
                   WebkitOverflowScrolling: 'touch',
                   scrollbarWidth: 'none',
-                  msOverflowStyle: 'none'
+                  msOverflowStyle: 'none',
+                  scrollBehavior: 'smooth',
+                  display: 'flex',
+                  overflowX: 'auto',
+                  overflowY: 'hidden'
                 }}
               >
-                <div className="flex">
-                  {tabs.map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => {
-                        setActiveTab(tab.id);
-                        // Scroll suave al elemento activo
-                        const element = document.querySelector(`[data-tab="${tab.id}"]`);
-                        element?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-                      }}
-                      data-tab={tab.id}
-                      className={`py-4 px-6 border-b-3 font-semibold text-base whitespace-nowrap transition-all duration-200 flex items-center gap-3 flex-shrink-0 ${
-                        activeTab === tab.id
-                          ? 'border-indigo-600 text-indigo-700 bg-indigo-50/80'
-                          : 'border-transparent text-slate-700 hover:text-slate-900 hover:bg-slate-50'
-                      }`}
-                      style={{ borderBottomWidth: '3px' }}
-                    >
-                      <span className="flex items-center justify-center flex-shrink-0">{tab.icon}</span>
-                      <span className="font-medium">{tab.label}</span>
-                    </button>
-                  ))}
-                </div>
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      // Scroll al elemento activo
+                      setTimeout(() => {
+                        const element = document.querySelector(`[data-tab-id="${tab.id}"]`);
+                        if (element) {
+                          element.scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'nearest', 
+                            inline: 'center' 
+                          });
+                        }
+                      }, 50);
+                    }}
+                    data-tab-id={tab.id}
+                    className={`py-5 px-7 border-b-4 font-bold text-lg whitespace-nowrap transition-all duration-200 flex items-center gap-3 flex-shrink-0 min-w-max ${
+                      activeTab === tab.id
+                        ? 'border-indigo-600 text-indigo-700 bg-indigo-100 shadow-sm'
+                        : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="flex-shrink-0 text-xl">{tab.icon}</span>
+                    <span className="font-bold">{tab.label}</span>
+                  </button>
+                ))}
               </nav>
-              {/* Gradientes en los bordes para indicar scroll */}
-              <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-white via-white/80 to-transparent pointer-events-none z-10" />
-              <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-white via-white/80 to-transparent pointer-events-none z-10" />
+              {/* Indicadores de scroll más visibles */}
+              <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-white via-white to-transparent pointer-events-none z-20" />
+              <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-white via-white to-transparent pointer-events-none z-20" />
             </div>
           </div>
         </div>

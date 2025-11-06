@@ -17,6 +17,9 @@
   
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+    width: 0;
+    height: 0;
+    background: transparent;
   }
   
   /* Mejorar scroll en móvil */
@@ -28,6 +31,22 @@
   /* Asegurar que los elementos no se compriman */
   .min-w-fit {
     min-width: fit-content;
+  }
+  
+  /* Forzar scroll horizontal en móvil */
+  @media (max-width: 1023px) {
+    .mobile-nav-scroll {
+      display: flex;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scroll-snap-type: x mandatory;
+    }
+    
+    .mobile-nav-scroll > * {
+      scroll-snap-align: start;
+      flex-shrink: 0;
+    }
   }
 }
 

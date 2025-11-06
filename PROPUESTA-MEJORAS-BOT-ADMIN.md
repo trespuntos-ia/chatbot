@@ -2883,6 +2883,1197 @@ Medir la efectividad del bot en términos de conversión a ventas.
 
 ---
 
+### 2.3.1 Tracking de Compras desde el Chat (NUEVA FUNCIONALIDAD)
+
+**Descripción:**
+Sistema completo para trackear las compras que se realizan a través del chat. Cuando el bot recomienda un producto y el usuario hace clic y acaba comprando, el sistema registra esta conversión para poder analizarla en el admin.
+
+**Objetivo:**
+- Saber qué productos recomendados en el chat resultan en compras
+- Medir la efectividad del bot en términos de conversión
+- Identificar qué tipos de recomendaciones funcionan mejor
+- Calcular el ROI del chatbot
+
+**Flujo Completo:**
+1. **Bot recomienda producto** → Se guarda recomendación con tracking ID único
+2. **Usuario hace clic en producto** → Se registra el evento de clic
+3. **Usuario navega/compara** → Se trackean interacciones intermedias
+4. **Usuario completa compra** → Se vincula la compra con la recomendación del chat
+
+---
+
+#### 2.3.1.1 Implementación Técnica
+
+**1. Base de Datos - Nuevas Tablas**
+
+```sql
+-- Tabla para trackear productos recomendados en conversaciones
+CREATE TABLE IF NOT EXISTS chat_product_recommendations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+  message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+  product_id TEXT NOT NULL, -- ID del producto en la base de datos
+  product_sku TEXT,
+  product_name TEXT,
+  product_url TEXT,
+  tracking_token TEXT UNIQUE NOT NULL, -- Token único para tracking (ej: "chat_abc123xyz")
+  recommended_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  clicked_at TIMESTAMP WITH TIME ZONE, -- Cuando el usuario hace clic
+  added_to_cart_at TIMESTAMP WITH TIME ZONE, -- Cuando se añade al carrito
+  purchased_at TIMESTAMP WITH TIME ZONE, -- Cuando se completa la compra
+  order_id TEXT, -- ID de la orden en PrestaShop (si está disponible)
+  order_total DECIMAL(10, 2), -- Total de la compra
+  session_id TEXT, -- ID de sesión del usuario
+  user_id TEXT, -- ID del usuario (si está autenticado)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_chat_product_recommendations_conversation ON chat_product_recommendations(conversation_id);
+CREATE INDEX idx_chat_product_recommendations_tracking_token ON chat_product_recommendations(tracking_token);
+CREATE INDEX idx_chat_product_recommendations_purchased ON chat_product_recommendations(purchased_at) WHERE purchased_at IS NOT NULL;
+CREATE INDEX idx_chat_product_recommendations_session ON chat_product_recommendations(session_id);
+
+-- Tabla para trackear eventos de interacción con productos
+CREATE TABLE IF NOT EXISTS chat_product_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  recommendation_id UUID REFERENCES chat_product_recommendations(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL, -- 'click', 'view', 'add_to_cart', 'remove_from_cart', 'purchase'
+  event_data JSONB, -- Datos adicionales del evento (URL, timestamp, etc.)
+  session_id TEXT,
+  user_id TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_chat_product_events_recommendation ON chat_product_events(recommendation_id);
+CREATE INDEX idx_chat_product_events_type ON chat_product_events(event_type);
+CREATE INDEX idx_chat_product_events_created ON chat_product_events(created_at);
+```
+
+**2. Modificar API de Chat para Guardar Recomendaciones**
+
+Cuando el bot recomienda productos, guardarlos en `chat_product_recommendations`:
+
+```typescript
+// En api/chat.ts, después de obtener productos recomendados
+async function saveProductRecommendations(
+  supabase: any,
+  conversationId: string,
+  messageId: string,
+  products: any[],
+  sessionId: string
+) {
+  const recommendations = [];
+  
+  for (const product of products) {
+    // Generar token único de tracking
+    const trackingToken = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Añadir parámetro de tracking a la URL del producto
+    const productUrl = new URL(product.product_url);
+    productUrl.searchParams.set('chat_ref', trackingToken);
+    productUrl.searchParams.set('utm_source', 'chatbot');
+    productUrl.searchParams.set('utm_medium', 'chat');
+    productUrl.searchParams.set('utm_campaign', 'product_recommendation');
+    
+    const recommendation = {
+      conversation_id: conversationId,
+      message_id: messageId,
+      product_id: product.id?.toString() || '',
+      product_sku: product.sku || '',
+      product_name: product.name || '',
+      product_url: productUrl.toString(), // URL con parámetros de tracking
+      tracking_token: trackingToken,
+      session_id: sessionId,
+    };
+    
+    recommendations.push(recommendation);
+  }
+  
+  // Guardar todas las recomendaciones
+  const { data, error } = await supabase
+    .from('chat_product_recommendations')
+    .insert(recommendations)
+    .select();
+  
+  if (error) {
+    console.error('Error saving product recommendations:', error);
+    return null;
+  }
+  
+  return data;
+}
+```
+
+**3. API para Registrar Clics en Productos**
+
+```typescript
+// api/track-product-click.ts
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    const { tracking_token, session_id, user_id } = req.body;
+
+    if (!tracking_token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tracking token requerido',
+      });
+    }
+
+    // Actualizar recomendación con timestamp de clic
+    const { data: recommendation, error: updateError } = await supabase
+      .from('chat_product_recommendations')
+      .update({
+        clicked_at: new Date().toISOString(),
+        session_id: session_id || null,
+        user_id: user_id || null,
+      })
+      .eq('tracking_token', tracking_token)
+      .select()
+      .single();
+
+    if (updateError || !recommendation) {
+      return res.status(404).json({
+        success: false,
+        error: 'Recomendación no encontrada',
+      });
+    }
+
+    // Guardar evento de clic
+    await supabase.from('chat_product_events').insert({
+      recommendation_id: recommendation.id,
+      event_type: 'click',
+      session_id: session_id || null,
+      user_id: user_id || null,
+      event_data: {
+        url: recommendation.product_url,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      recommendation_id: recommendation.id,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    });
+  }
+}
+```
+
+**4. Script de Tracking en PrestaShop (JavaScript)**
+
+Script que se añade a las páginas de PrestaShop para detectar cuando se añade al carrito o se completa una compra:
+
+```javascript
+// Script para añadir en PrestaShop (en el footer o header)
+(function() {
+  // Obtener parámetro de tracking de la URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const chatRef = urlParams.get('chat_ref');
+  
+  if (!chatRef) return; // No hay tracking del chat
+  
+  // Guardar en localStorage para mantenerlo durante la sesión
+  if (chatRef) {
+    localStorage.setItem('chat_tracking_token', chatRef);
+    localStorage.setItem('chat_tracking_source', 'chatbot');
+  }
+  
+  // Detectar cuando se añade al carrito
+  document.addEventListener('DOMContentLoaded', function() {
+    // PrestaShop usa AJAX para añadir al carrito
+    // Interceptar llamadas AJAX o escuchar eventos del carrito
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+      const url = args[0];
+      
+      // Detectar llamada de añadir al carrito
+      if (typeof url === 'string' && url.includes('controller=cart') && url.includes('action=add')) {
+        const trackingToken = localStorage.getItem('chat_tracking_token');
+        
+        if (trackingToken) {
+          // Notificar a nuestro backend
+          fetch('https://tu-dominio.com/api/track-product-cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tracking_token: trackingToken,
+              event_type: 'add_to_cart',
+            }),
+          }).catch(console.error);
+        }
+      }
+      
+      return originalFetch.apply(this, args);
+    };
+  });
+  
+  // Detectar cuando se completa una compra (en la página de confirmación)
+  if (window.location.pathname.includes('order-confirmation') || 
+      window.location.pathname.includes('order-confirmation')) {
+    const trackingToken = localStorage.getItem('chat_tracking_token');
+    
+    if (trackingToken) {
+      // Obtener información de la orden (si está disponible en el DOM)
+      const orderId = document.querySelector('[data-order-id]')?.getAttribute('data-order-id') || 
+                      new URLSearchParams(window.location.search).get('id_order');
+      
+      const orderTotal = document.querySelector('.order-total')?.textContent || 
+                         document.querySelector('[data-order-total]')?.getAttribute('data-order-total');
+      
+      // Notificar compra completada
+      fetch('https://tu-dominio.com/api/track-product-purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tracking_token: trackingToken,
+          order_id: orderId,
+          order_total: orderTotal,
+        }),
+      }).catch(console.error);
+      
+      // Limpiar tracking token después de la compra
+      localStorage.removeItem('chat_tracking_token');
+    }
+  }
+})();
+```
+
+**5. API para Registrar Añadir al Carrito**
+
+```typescript
+// api/track-product-cart.ts
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    const { tracking_token, event_type = 'add_to_cart' } = req.body;
+
+    if (!tracking_token) {
+      return res.status(400).json({ success: false, error: 'Tracking token requerido' });
+    }
+
+    // Buscar recomendación
+    const { data: recommendation } = await supabase
+      .from('chat_product_recommendations')
+      .select('id')
+      .eq('tracking_token', tracking_token)
+      .single();
+
+    if (!recommendation) {
+      return res.status(404).json({ success: false, error: 'Recomendación no encontrada' });
+    }
+
+    // Actualizar timestamp de añadir al carrito
+    await supabase
+      .from('chat_product_recommendations')
+      .update({ added_to_cart_at: new Date().toISOString() })
+      .eq('id', recommendation.id);
+
+    // Guardar evento
+    await supabase.from('chat_product_events').insert({
+      recommendation_id: recommendation.id,
+      event_type: event_type,
+      event_data: { timestamp: new Date().toISOString() },
+    });
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    });
+  }
+}
+```
+
+**6. API para Registrar Compra Completada**
+
+```typescript
+// api/track-product-purchase.ts
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    const { tracking_token, order_id, order_total } = req.body;
+
+    if (!tracking_token) {
+      return res.status(400).json({ success: false, error: 'Tracking token requerido' });
+    }
+
+    // Buscar recomendación
+    const { data: recommendation, error: findError } = await supabase
+      .from('chat_product_recommendations')
+      .select('id')
+      .eq('tracking_token', tracking_token)
+      .single();
+
+    if (findError || !recommendation) {
+      return res.status(404).json({ success: false, error: 'Recomendación no encontrada' });
+    }
+
+    // Actualizar con información de compra
+    const { error: updateError } = await supabase
+      .from('chat_product_recommendations')
+      .update({
+        purchased_at: new Date().toISOString(),
+        order_id: order_id || null,
+        order_total: order_total ? parseFloat(order_total.toString().replace(/[^\d.,]/g, '').replace(',', '.')) : null,
+      })
+      .eq('id', recommendation.id);
+
+    if (updateError) throw updateError;
+
+    // Guardar evento de compra
+    await supabase.from('chat_product_events').insert({
+      recommendation_id: recommendation.id,
+      event_type: 'purchase',
+      event_data: {
+        order_id: order_id,
+        order_total: order_total,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    });
+  }
+}
+```
+
+**7. Modificar Componente de Tarjeta de Producto (Frontend)**
+
+Añadir tracking cuando el usuario hace clic:
+
+```typescript
+// En el componente de tarjeta de producto
+function ProductCard({ product, trackingToken }: { product: any; trackingToken?: string }) {
+  const handleProductClick = async () => {
+    if (trackingToken) {
+      // Registrar clic (no bloqueante)
+      fetch('/api/track-product-click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tracking_token: trackingToken,
+          session_id: getSessionId(), // Función para obtener session ID
+        }),
+      }).catch(console.error);
+    }
+    
+    // Abrir producto en nueva pestaña
+    window.open(product.product_url, '_blank');
+  };
+
+  return (
+    <div className="product-card">
+      {/* ... contenido de la tarjeta ... */}
+      <button onClick={handleProductClick}>
+        Ver Producto
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+#### 2.3.1.1.1 Ejemplo Práctico: Flujo Completo de Tracking
+
+Vamos a ver cómo funciona el sistema con un ejemplo real paso a paso:
+
+**Escenario:**
+María está buscando un "abrelatas" en la tienda online. El chatbot le recomienda un producto y ella acaba comprándolo.
+
+---
+
+**PASO 1: Usuario pregunta en el chat**
+
+```
+María: "¿Tienes abrelatas?"
+```
+
+**Qué pasa detrás:**
+- El chat API (`api/chat.ts`) recibe el mensaje
+- OpenAI busca productos relacionados con "abrelatas"
+- Encuentra el producto: "Abrelatas Manual Premium" (ID: 123, SKU: ABR-001)
+
+---
+
+**PASO 2: Bot responde con producto recomendado**
+
+```
+Bot: "¡Sí! Te recomiendo este abrelatas premium:"
+[Mostrar tarjeta con imagen, precio €12.99, botón "Ver Producto"]
+```
+
+**Qué pasa detrás:**
+1. El sistema genera un **token único de tracking**: `chat_1704123456_abc123xyz`
+2. Se guarda en la base de datos:
+
+```sql
+INSERT INTO chat_product_recommendations (
+  conversation_id: 'conv_789',
+  message_id: 'msg_456',
+  product_id: '123',
+  product_sku: 'ABR-001',
+  product_name: 'Abrelatas Manual Premium',
+  product_url: 'https://tienda.com/es/123-abrelatas-premium.html?chat_ref=chat_1704123456_abc123xyz&utm_source=chatbot',
+  tracking_token: 'chat_1704123456_abc123xyz',
+  session_id: 'sess_maria_001',
+  recommended_at: '2024-01-01 10:30:00'
+);
+```
+
+3. La URL del producto se modifica para incluir el tracking:
+   - URL original: `https://tienda.com/es/123-abrelatas-premium.html`
+   - URL con tracking: `https://tienda.com/es/123-abrelatas-premium.html?chat_ref=chat_1704123456_abc123xyz&utm_source=chatbot`
+
+---
+
+**PASO 3: Usuario hace clic en "Ver Producto"**
+
+María hace clic en el botón de la tarjeta del producto.
+
+**Qué pasa detrás:**
+1. El componente React detecta el clic y llama a la API:
+
+```typescript
+// En el componente ProductCard
+const handleClick = async () => {
+  // Registrar el clic (no bloquea la navegación)
+  fetch('/api/track-product-click', {
+    method: 'POST',
+    body: JSON.stringify({
+      tracking_token: 'chat_1704123456_abc123xyz',
+      session_id: 'sess_maria_001'
+    })
+  });
+  
+  // Abrir producto en nueva pestaña
+  window.open(productUrl, '_blank');
+};
+```
+
+2. La API actualiza la base de datos:
+
+```sql
+UPDATE chat_product_recommendations 
+SET clicked_at = '2024-01-01 10:31:15'
+WHERE tracking_token = 'chat_1704123456_abc123xyz';
+
+INSERT INTO chat_product_events (
+  recommendation_id: 'rec_001',
+  event_type: 'click',
+  event_data: { url: 'https://tienda.com/...', timestamp: '2024-01-01 10:31:15' }
+);
+```
+
+3. María es redirigida a la página del producto con el parámetro `chat_ref` en la URL
+
+---
+
+**PASO 4: Usuario navega por la página del producto**
+
+María ve el producto, lee la descripción, mira las fotos. El script de tracking en PrestaShop detecta que hay un `chat_ref` en la URL.
+
+**Qué pasa detrás:**
+1. El script JavaScript en PrestaShop se ejecuta:
+
+```javascript
+// Script en PrestaShop (footer o header)
+const urlParams = new URLSearchParams(window.location.search);
+const chatRef = urlParams.get('chat_ref'); // 'chat_1704123456_abc123xyz'
+
+if (chatRef) {
+  // Guardar en localStorage para mantenerlo durante toda la sesión
+  localStorage.setItem('chat_tracking_token', chatRef);
+  localStorage.setItem('chat_tracking_source', 'chatbot');
+}
+```
+
+2. El token queda guardado en el navegador de María (localStorage)
+
+---
+
+**PASO 5: Usuario añade producto al carrito**
+
+María decide comprar y hace clic en "Añadir al carrito".
+
+**Qué pasa detrás:**
+1. PrestaShop procesa la acción de añadir al carrito (normal)
+2. El script intercepta la acción:
+
+```javascript
+// El script intercepta las llamadas AJAX de PrestaShop
+const originalFetch = window.fetch;
+window.fetch = function(...args) {
+  const url = args[0];
+  
+  // Detectar llamada de añadir al carrito
+  if (url.includes('controller=cart') && url.includes('action=add')) {
+    const trackingToken = localStorage.getItem('chat_tracking_token');
+    
+    if (trackingToken) {
+      // Notificar a nuestro backend (no bloquea la acción)
+      fetch('https://tu-dominio.com/api/track-product-cart', {
+        method: 'POST',
+        body: JSON.stringify({
+          tracking_token: trackingToken,
+          event_type: 'add_to_cart'
+        })
+      });
+    }
+  }
+  
+  return originalFetch.apply(this, args);
+};
+```
+
+3. La API actualiza la base de datos:
+
+```sql
+UPDATE chat_product_recommendations 
+SET added_to_cart_at = '2024-01-01 10:35:42'
+WHERE tracking_token = 'chat_1704123456_abc123xyz';
+
+INSERT INTO chat_product_events (
+  recommendation_id: 'rec_001',
+  event_type: 'add_to_cart',
+  event_data: { timestamp: '2024-01-01 10:35:42' }
+);
+```
+
+---
+
+**PASO 6: Usuario completa la compra**
+
+María va al checkout, completa el pago y llega a la página de confirmación.
+
+**Qué pasa detrás:**
+1. El script detecta que está en la página de confirmación:
+
+```javascript
+// En la página de confirmación de PrestaShop
+if (window.location.pathname.includes('order-confirmation')) {
+  const trackingToken = localStorage.getItem('chat_tracking_token');
+  
+  if (trackingToken) {
+    // Obtener información de la orden del DOM
+    const orderId = document.querySelector('[data-order-id]')?.textContent; // "ORD-12345"
+    const orderTotal = document.querySelector('.order-total')?.textContent; // "€12.99"
+    
+    // Notificar compra completada
+    fetch('https://tu-dominio.com/api/track-product-purchase', {
+      method: 'POST',
+      body: JSON.stringify({
+        tracking_token: trackingToken,
+        order_id: orderId,
+        order_total: orderTotal
+      })
+    });
+    
+    // Limpiar el token (ya no es necesario)
+    localStorage.removeItem('chat_tracking_token');
+  }
+}
+```
+
+2. La API actualiza la base de datos con la compra:
+
+```sql
+UPDATE chat_product_recommendations 
+SET 
+  purchased_at = '2024-01-01 10:42:18',
+  order_id = 'ORD-12345',
+  order_total = 12.99
+WHERE tracking_token = 'chat_1704123456_abc123xyz';
+
+INSERT INTO chat_product_events (
+  recommendation_id: 'rec_001',
+  event_type: 'purchase',
+  event_data: {
+    order_id: 'ORD-12345',
+    order_total: 12.99,
+    timestamp: '2024-01-01 10:42:18'
+  }
+);
+```
+
+---
+
+**RESULTADO FINAL: En el Panel Admin**
+
+El admin puede ver en el panel de tracking:
+
+**Métricas:**
+- ✅ 1 recomendación realizada
+- ✅ 1 clic registrado
+- ✅ 1 producto añadido al carrito
+- ✅ 1 compra completada
+- 💰 Ingresos: €12.99
+- 📊 Tasa de conversión: 100% (1 compra de 1 recomendación)
+
+**Tabla de Compras:**
+| Fecha Recomendación | Producto | Fecha Clic | Fecha Compra | Valor | Tiempo hasta Compra |
+|---------------------|----------|------------|--------------|-------|---------------------|
+| 01/01/2024 10:30:00 | Abrelatas Premium | 01/01/2024 10:31:15 | 01/01/2024 10:42:18 | €12.99 | 12 minutos 18 segundos |
+
+**Funnel de Conversión:**
+```
+Recomendación (1)
+    ↓
+Clic (1) - 100%
+    ↓
+Añadido al Carrito (1) - 100%
+    ↓
+Compra (1) - 100%
+```
+
+---
+
+**Puntos Clave del Sistema:**
+
+1. **Token único**: Cada recomendación tiene un token único que se mantiene durante todo el proceso
+2. **No bloqueante**: Todas las llamadas de tracking son asíncronas y no afectan la experiencia del usuario
+3. **Persistencia**: El token se guarda en localStorage para sobrevivir navegación entre páginas
+4. **Trazabilidad completa**: Se registra cada paso del proceso (recomendación → clic → carrito → compra)
+5. **Datos en tiempo real**: El admin puede ver las métricas actualizadas en el panel
+
+---
+
+#### 2.3.1.2 Panel en Admin - Visualización de Compras
+
+**Descripción:**
+Panel en el admin para ver todas las compras realizadas a través del chat.
+
+**Vista Principal:**
+
+```typescript
+// src/components/ChatPurchaseTracking.tsx
+export function ChatPurchaseTracking() {
+  const [purchases, setPurchases] = useState([]);
+  const [stats, setStats] = useState({
+    total_recommendations: 0,
+    total_clicks: 0,
+    total_cart_adds: 0,
+    total_purchases: 0,
+    conversion_rate: 0,
+    total_revenue: 0,
+  });
+
+  // Métricas principales:
+  // - Total de recomendaciones
+  // - Total de clics
+  // - Total de añadidos al carrito
+  // - Total de compras
+  // - Tasa de conversión (compras / recomendaciones)
+  // - Ingresos totales generados
+
+  return (
+    <div>
+      {/* Cards de métricas */}
+      <div className="grid grid-cols-4 gap-4">
+        <MetricCard title="Recomendaciones" value={stats.total_recommendations} />
+        <MetricCard title="Clics" value={stats.total_clicks} />
+        <MetricCard title="Añadidos al Carrito" value={stats.total_cart_adds} />
+        <MetricCard title="Compras" value={stats.total_purchases} />
+      </div>
+
+      {/* Gráfico de conversión */}
+      <ConversionFunnel
+        recommendations={stats.total_recommendations}
+        clicks={stats.total_clicks}
+        cartAdds={stats.total_cart_adds}
+        purchases={stats.total_purchases}
+      />
+
+      {/* Tabla de compras */}
+      <PurchasesTable purchases={purchases} />
+    </div>
+  );
+}
+```
+
+**Métricas Mostradas:**
+- **Total de recomendaciones**: Productos recomendados en el chat
+- **Total de clics**: Usuarios que hicieron clic en productos
+- **Total añadidos al carrito**: Productos añadidos al carrito
+- **Total de compras**: Compras completadas
+- **Tasa de conversión**: % de recomendaciones que resultan en compra
+- **Ingresos generados**: Suma total de compras realizadas
+- **Tiempo promedio hasta compra**: Tiempo desde recomendación hasta compra
+- **Productos más vendidos**: Top productos recomendados que se compraron
+
+**Filtros:**
+- Por rango de fechas
+- Por producto/categoría
+- Por conversación
+- Por estado (solo compras, solo clics, etc.)
+
+**Tabla de Compras:**
+- Fecha de recomendación
+- Producto recomendado
+- Fecha de clic
+- Fecha de compra
+- Valor de compra
+- Conversación asociada
+- Tiempo hasta compra
+
+---
+
+#### 2.3.1.3 ¿Qué Necesitamos de PrestaShop? Dependencias y Alternativas
+
+**Pregunta clave:** ¿Necesitamos modificar algo en PrestaShop o podemos hacerlo todo desde nuestro lado?
+
+---
+
+##### Opción A: Implementación Mínima (Solo Nuestro Lado) ✅ RECOMENDADA
+
+**Lo que SÍ podemos hacer sin tocar PrestaShop:**
+
+1. ✅ **Generar tokens de tracking** - Lo hacemos nosotros
+2. ✅ **Añadir parámetros a URLs** - Lo hacemos nosotros al generar los enlaces
+3. ✅ **Registrar clics** - Lo hacemos nosotros cuando el usuario hace clic en el chat
+4. ✅ **Guardar recomendaciones en BD** - Lo hacemos nosotros
+5. ✅ **Panel admin** - Lo tenemos nosotros
+
+**Lo que NO podemos hacer sin PrestaShop:**
+
+❌ **Detectar cuando se añade al carrito** - Necesita script en PrestaShop
+❌ **Detectar cuando se completa la compra** - Necesita script en PrestaShop o webhook
+
+**Solución: Tracking Parcial (Solo Clics y Recomendaciones)**
+
+Si no podemos modificar PrestaShop, podemos trackear:
+- ✅ Recomendaciones realizadas
+- ✅ Clics en productos
+- ❌ Añadidos al carrito (no se puede sin script)
+- ❌ Compras completadas (no se puede sin script/webhook)
+
+**Implementación sin PrestaShop:**
+
+```typescript
+// Solo trackeamos hasta el clic
+// Cuando el usuario hace clic, registramos:
+1. Recomendación guardada ✅
+2. Clic registrado ✅
+3. URL con parámetros de tracking ✅
+
+// No podemos detectar:
+- Si añadió al carrito (necesita script en PrestaShop)
+- Si compró (necesita script/webhook en PrestaShop)
+```
+
+**Ventajas:**
+- ✅ No requiere acceso a PrestaShop
+- ✅ Funciona inmediatamente
+- ✅ Fácil de implementar
+
+**Desventajas:**
+- ❌ No sabemos si realmente compró
+- ❌ No podemos calcular ROI completo
+- ❌ Métricas incompletas
+
+---
+
+##### Opción B: Implementación Completa (Requiere Acceso a PrestaShop)
+
+**Lo que necesitamos de PrestaShop:**
+
+1. **Añadir script JavaScript** en las páginas de PrestaShop
+   - Ubicación: Footer o Header del tema
+   - Acceso necesario: Admin de PrestaShop → Temas → Editar templates
+   - O: Usar un módulo/plugin de PrestaShop
+
+2. **Opcional: Webhook de PrestaShop**
+   - Para detectar compras automáticamente
+   - Requiere: Módulo de PrestaShop o acceso a configuración avanzada
+
+**¿Qué acceso necesitamos?**
+
+**Nivel 1 - Mínimo (Solo Script):**
+- Acceso al admin de PrestaShop
+- Permisos para editar templates o añadir código JavaScript
+- Tiempo estimado: 5-10 minutos
+
+**Nivel 2 - Intermedio (Script + Webhook):**
+- Todo lo anterior +
+- Acceso para configurar webhooks o crear módulo básico
+- Tiempo estimado: 30-60 minutos
+
+**Nivel 3 - Completo (Módulo Custom):**
+- Desarrollo de módulo de PrestaShop
+- Acceso completo al servidor/código
+- Tiempo estimado: 1-2 días
+
+---
+
+##### Opción C: Usando API de PrestaShop (RECOMENDADA si ya tienes acceso) ⭐
+
+**Si ya tienes acceso a la API de PrestaShop (como es tu caso), esta es la mejor opción:**
+
+1. **Tracking básico** (nuestro lado):
+   - Recomendaciones ✅
+   - Clics ✅
+   - URLs con parámetros ✅
+
+2. **Tracking de compras** (vía API):
+   - Consultar órdenes nuevas periódicamente (Cron Job)
+   - Buscar productos en las órdenes que coincidan con recomendaciones
+   - Vincular orden con recomendación
+
+**Ventajas:**
+- ✅ No requiere modificar PrestaShop
+- ✅ Funciona con tu API existente
+- ✅ Tracking completo de compras
+- ✅ No necesitas scripts en PrestaShop
+- ✅ Datos precisos de la API
+
+**Desventajas:**
+- ⚠️ No es en tiempo real (delay de 5-10 minutos)
+- ⚠️ Requiere cron job configurado
+
+**Implementación Completa:**
+
+```typescript
+// api/sync-prestashop-purchases.ts (Cron Job cada 5-10 minutos)
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createClient } from '@supabase/supabase-js';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  try {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+
+    // 1. Obtener recomendaciones pendientes de tracking (sin purchased_at)
+    const { data: pendingRecommendations, error: recError } = await supabase
+      .from('chat_product_recommendations')
+      .select('*')
+      .is('purchased_at', null)
+      .not('clicked_at', 'is', null); // Solo las que tuvieron clic
+
+    if (recError) throw recError;
+
+    if (!pendingRecommendations || pendingRecommendations.length === 0) {
+      return res.status(200).json({ 
+        success: true, 
+        message: 'No hay recomendaciones pendientes',
+        processed: 0 
+      });
+    }
+
+    // 2. Obtener órdenes nuevas de PrestaShop (últimas 24 horas)
+    const prestaShopUrl = process.env.PRESTASHOP_URL;
+    const prestaShopApiKey = process.env.PRESTASHOP_API_KEY;
+    
+    const ordersUrl = `${prestaShopUrl}/orders?ws_key=${prestaShopApiKey}&output_format=JSON&date_add=[${getDateFilter()}]`;
+    
+    const ordersResponse = await fetch(ordersUrl, {
+      headers: {
+        'Authorization': `Basic ${btoa(prestaShopApiKey + ':')}`,
+      },
+    });
+
+    if (!ordersResponse.ok) {
+      throw new Error(`PrestaShop API error: ${ordersResponse.statusText}`);
+    }
+
+    const ordersData = await ordersResponse.json();
+    const orders = Array.isArray(ordersData.orders?.order) 
+      ? ordersData.orders.order 
+      : ordersData.orders?.order 
+        ? [ordersData.orders.order] 
+        : [];
+
+    let processed = 0;
+    let matched = 0;
+
+    // 3. Para cada recomendación pendiente, buscar si hay una orden que coincida
+    for (const recommendation of pendingRecommendations) {
+      // Buscar órdenes que contengan el producto recomendado
+      for (const order of orders) {
+        // Obtener detalles de la orden para ver productos
+        const orderDetailsUrl = `${prestaShopUrl}/orders/${order.id}?ws_key=${prestaShopApiKey}&output_format=JSON`;
+        const orderDetailsResponse = await fetch(orderDetailsUrl, {
+          headers: {
+            'Authorization': `Basic ${btoa(prestaShopApiKey + ':')}`,
+          },
+        });
+
+        if (!orderDetailsResponse.ok) continue;
+
+        const orderDetails = await orderDetailsResponse.json();
+        const orderData = orderDetails.order;
+
+        // Verificar si la orden contiene el producto recomendado
+        const orderProducts = orderData.associations?.order_rows?.order_row || [];
+        const orderProductsArray = Array.isArray(orderProducts) ? orderProducts : [orderProducts];
+
+        // Buscar si algún producto de la orden coincide con la recomendación
+        const matchingProduct = orderProductsArray.find((op: any) => {
+          // Comparar por SKU o ID de producto
+          const productId = op.product_id?.toString() || op.id_product?.toString();
+          const productReference = op.product_reference || op.product_reference;
+          
+          return (
+            productId === recommendation.product_id ||
+            productReference === recommendation.product_sku ||
+            op.product_name?.toLowerCase().includes(recommendation.product_name?.toLowerCase() || '')
+          );
+        });
+
+        if (matchingProduct) {
+          // 4. Vincular compra con recomendación
+          const orderTotal = parseFloat(orderData.total_paid_tax_incl || orderData.total_paid || '0');
+          const orderDate = orderData.date_add || new Date().toISOString();
+
+          const { error: updateError } = await supabase
+            .from('chat_product_recommendations')
+            .update({
+              purchased_at: orderDate,
+              order_id: order.id.toString(),
+              order_total: orderTotal,
+            })
+            .eq('id', recommendation.id);
+
+          if (!updateError) {
+            // Guardar evento de compra
+            await supabase.from('chat_product_events').insert({
+              recommendation_id: recommendation.id,
+              event_type: 'purchase',
+              event_data: {
+                order_id: order.id.toString(),
+                order_total: orderTotal,
+                timestamp: orderDate,
+              },
+            });
+
+            matched++;
+            break; // Ya encontramos la orden para esta recomendación
+          }
+        }
+      }
+
+      processed++;
+    }
+
+    res.status(200).json({
+      success: true,
+      processed,
+      matched,
+      message: `Procesadas ${processed} recomendaciones, ${matched} compras encontradas`,
+    });
+  } catch (error) {
+    console.error('Error syncing purchases:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    });
+  }
+}
+
+// Función auxiliar para obtener filtro de fecha (últimas 24 horas)
+function getDateFilter(): string {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const today = new Date();
+  
+  // Formato PrestaShop: YYYY-MM-DD HH:MM:SS
+  const formatDate = (date: Date) => {
+    return date.toISOString().replace('T', ' ').substring(0, 19);
+  };
+  
+  return `${formatDate(yesterday)};${formatDate(today)}`;
+}
+```
+
+**Configuración del Cron Job en Vercel:**
+
+```json
+// vercel.json
+{
+  "crons": [
+    {
+      "path": "/api/sync-prestashop-purchases",
+      "schedule": "*/10 * * * *"  // Cada 10 minutos
+    }
+  ]
+}
+```
+
+**Método Alternativo: Por Referrer (si PrestaShop lo guarda)**
+
+Si PrestaShop guarda el referrer (página de origen) en las órdenes, puedes usar este método más preciso:
+
+```typescript
+// Método alternativo: buscar por referrer
+for (const order of orders) {
+  const referrer = order.referer || order.referrer || '';
+  
+  if (referrer.includes('chat_ref=')) {
+    const chatRefMatch = referrer.match(/chat_ref=([^&]+)/);
+    if (chatRefMatch) {
+      const chatRef = chatRefMatch[1];
+      
+      // Buscar recomendación con ese token
+      const { data: recommendation } = await supabase
+        .from('chat_product_recommendations')
+        .select('*')
+        .eq('tracking_token', chatRef)
+        .is('purchased_at', null)
+        .single();
+      
+      if (recommendation) {
+        // Vincular compra
+        await supabase
+          .from('chat_product_recommendations')
+          .update({
+            purchased_at: order.date_add,
+            order_id: order.id.toString(),
+            order_total: parseFloat(order.total_paid_tax_incl || '0'),
+          })
+          .eq('id', recommendation.id);
+      }
+    }
+  }
+}
+```
+
+---
+
+##### Opción D: Híbrida (Recomendada si hay Limitaciones)
+
+**Combinación de métodos:**
+
+1. **Tracking básico** (nuestro lado):
+   - Recomendaciones ✅
+   - Clics ✅
+   - URLs con parámetros ✅
+
+2. **Tracking de compras** (si es posible):
+   - Opción A: Script en PrestaShop (mejor)
+   - Opción B: Cron job consultando API (alternativa)
+   - Opción C: Webhook de PrestaShop (si está disponible)
+
+**Implementación por fases:**
+
+**Fase 1 - MVP (Sin PrestaShop):**
+- Implementar tracking de recomendaciones y clics
+- Mostrar métricas parciales en admin
+- Tiempo: 2-3 días
+
+**Fase 2 - Completo (Con PrestaShop):**
+- Añadir script en PrestaShop
+- Completar tracking de compras
+- Métricas completas
+- Tiempo: +1-2 días
+
+---
+
+#### 2.3.1.4 Opciones de Implementación Alternativas
+
+**Opción A: Tracking con Parámetros URL (Recomendada)**
+- ✅ Más simple de implementar
+- ✅ Funciona sin modificar PrestaShop
+- ✅ Fácil de debuggear
+- ⚠️ Requiere script en PrestaShop para detectar compras
+
+**Opción B: Webhook de PrestaShop**
+- ✅ Más preciso
+- ✅ Detecta compras automáticamente
+- ⚠️ Requiere configuración en PrestaShop
+- ⚠️ Necesita módulo o plugin de PrestaShop
+
+**Opción C: Integración con API de PrestaShop**
+- ✅ Control total
+- ✅ Datos precisos
+- ⚠️ Requiere consultas periódicas (cron)
+- ⚠️ Más complejo de mantener
+
+**Opción D: Cookies + LocalStorage (Híbrida)**
+- ✅ Funciona bien para sesiones
+- ✅ No requiere modificar URLs
+- ⚠️ Puede perderse si el usuario limpia cookies
+- ⚠️ No funciona entre dispositivos
+
+---
+
+#### 2.3.1.4 Consideraciones Importantes
+
+**Privacidad:**
+- Cumplir con GDPR/privacidad
+- No almacenar datos personales sin consentimiento
+- Permitir opt-out del tracking
+
+**Precisión:**
+- El tracking puede no ser 100% preciso (usuarios que limpian cookies, múltiples dispositivos, etc.)
+- Considerar márgenes de error en las métricas
+
+**Rendimiento:**
+- Las llamadas de tracking deben ser asíncronas y no bloqueantes
+- Usar batch processing si hay muchos eventos
+
+**Seguridad:**
+- Validar tokens de tracking
+- Prevenir manipulación de datos
+- Rate limiting en APIs de tracking
+
+---
+
+#### 2.3.1.5 Resumen de Funcionalidad
+
+| Aspecto | Detalle |
+|---------|---------|
+| **Dificultad** | 🟡 **Media-Alta** |
+| **Prioridad** | 🔥🔥🔥🔥🔥 **Muy Alta** |
+| **Valor** | 🔥🔥🔥🔥🔥 **Muy Alto** - Esencial para medir ROI del chatbot |
+| **Tiempo estimado** | 5-7 días |
+| **Dependencias** | Script en PrestaShop, APIs de tracking |
+
+---
+
 ### 2.4 Editor Visual de Respuestas
 
 **Descripción:**
@@ -2930,6 +4121,7 @@ Panel de configuración para personalizar el comportamiento del bot:
 | 11 | **Panel de nivel de conocimiento** | Admin - Analytics | 🟠 Alta | 🔴 Alta | ❌ No implementado | Dashboard con métricas de conocimiento |
 | 12 | **Panel de preguntas repetidas** | Admin - Analytics | 🟠 Alta | 🔴 Alta | ❌ No implementado | Top preguntas con filtros y análisis |
 | 13 | **Panel de conversiones** | Admin - Analytics | 🟠 Alta | 🔴 Alta | ❌ No implementado | Tracking de respuestas → compra |
+| 13.1 | **Tracking de compras desde chat** | Admin - Analytics | 🟡 Media-Alta | 🔴 Alta | ❌ No implementado | Sistema completo para trackear compras realizadas a través del chat |
 | 14 | **Editor visual de respuestas** | Admin - Configuración | 🟠 Alta | 🟡 Media | ❌ No implementado | Editor WYSIWYG para personalizar respuestas |
 | 15 | **Configuración de comportamiento** | Admin - Configuración | 🟡 Media | 🟡 Media | ❌ No implementado | Panel para configurar comportamiento del bot |
 
