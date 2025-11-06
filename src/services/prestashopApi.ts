@@ -250,17 +250,20 @@ async function mapProduct(
     const categoryInfo = await getCategoryFullInfo(catId, fullCategoryCache, config);
     const hierarchy = categoryInfo.hierarchy || [];
     
-    if (hierarchy.length === 0) continue;
+    // Filtrar "Inicio" de la jerarquía
+    const filteredHierarchy = hierarchy.filter(name => name && name.toLowerCase() !== 'inicio');
     
-    const level1 = hierarchy[0] || '';
-    const level2 = hierarchy[1] || null;
-    const level3 = hierarchy[2] || null;
+    if (filteredHierarchy.length === 0) continue;
+    
+    const level1 = filteredHierarchy[0] || '';
+    const level2 = filteredHierarchy[1] || null;
+    const level3 = filteredHierarchy[2] || null;
     
     allCategories.push({
       category: level1,
       subcategory: level2,
       subsubcategory: level3 || null,
-      hierarchy: hierarchy,
+      hierarchy: filteredHierarchy, // Usar la jerarquía filtrada
       category_id: catId,
       is_primary: i === 0
     });
