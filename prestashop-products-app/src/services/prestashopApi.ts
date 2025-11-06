@@ -100,7 +100,10 @@ async function getCategoryFullInfo(
     // Verificar cache
     if (cache.has(currentId)) {
       const cached: { name: string; parent: number | null } = cache.get(currentId)!;
-      hierarchy.unshift(cached.name);
+      // Excluir "Inicio" de la jerarquía
+      if (cached.name && cached.name.toLowerCase() !== 'inicio') {
+        hierarchy.unshift(cached.name);
+      }
       currentId = cached.parent;
       continue;
     }

@@ -156,7 +156,9 @@ async function getCategoryInfo(
     // Verificar si está en cache primero
     if (cache.has(currentId)) {
       const cached = cache.get(currentId)!;
-      hierarchy.unshift(...cached.hierarchy);
+      // Filtrar "Inicio" de la jerarquía del cache
+      const filteredCachedHierarchy = cached.hierarchy.filter(name => name && name.toLowerCase() !== 'inicio');
+      hierarchy.unshift(...filteredCachedHierarchy);
       break;
     }
     
