@@ -780,8 +780,8 @@ export default async function handler(
         JSON.stringify(functionResult).length, 'bytes');
       console.log(`Enriched context length: ${enrichedContext.length} chars (limited to ${limitedEnrichedContext.length})`);
       
-      // Inicializar totalTokens con los tokens de la primera llamada
-      let totalTokens = firstCallTokens;
+      // Inicializar totalTokens con los tokens de la primera llamada (asegurar que esté definido)
+      let totalTokens: number = firstCallTokens || 0;
       
       const messagesWithContext = [
         { role: 'system', content: systemPromptWithContext },
@@ -799,7 +799,9 @@ export default async function handler(
         functionResult.products ? `${functionResult.products.length} products` : 'other data');
 
       // Segunda llamada a OpenAI también con timeout
-      let secondCompletion;
+      let secondCompletion: any = null;
+      let secondCallTokens = 0;
+      
       try {
         // Limitar el tamaño de functionResult para evitar problemas de tokens
         let limitedFunctionResult = functionResult;
@@ -864,7 +866,6 @@ export default async function handler(
         ]) as any;
         
         // Capturar tokens de la segunda llamada
-        let secondCallTokens = 0;
         if (secondCompletion?.usage) {
           secondCallTokens = secondCompletion.usage.total_tokens || 0;
           console.log('[Tokens] Segunda llamada:', {
@@ -874,7 +875,7 @@ export default async function handler(
           });
         }
         
-        totalTokens = firstCallTokens + secondCallTokens;
+        totalTokens = (firstCallTokens || 0) + secondCallTokens;
         console.log('[Tokens] Total para esta conversación:', totalTokens);
         
         console.log('OpenAI second completion received:', {
@@ -883,10 +884,17 @@ export default async function handler(
         });
       } catch (openaiError) {
         console.error('OpenAI second completion error:', openaiError);
+        // Asegurar que totalTokens esté definido incluso si falla
+        totalTokens = firstCallTokens || 0;
+        
         // Si falla, intentar generar una respuesta básica con los datos
         if (functionResult.products && functionResult.products.length > 0) {
-          const productNames = functionResult.products.slice(0, 5).map((p: any) => p.name).join(', ');
-          const fallbackMessage = `Encontré ${functionResult.products.length} producto(s). ${productNames}${functionResult.products.length > 5 ? ' y más...' : ''}. ¿Te gustaría más información sobre alguno de estos productos?`;
+          const products = functionResult.products.slice(0, 5);
+          const productList = products.map((p: any, idx: number) => {
+            return `${idx + 1}. **${p.name}**${p.price ? ` - ${p.price}` : ''}${p.category ? ` (${p.category})` : ''}`;
+          }).join('\n');
+          
+          const fallbackMessage = `He encontrado ${functionResult.products.length} producto(s) relacionado(s) con tu búsqueda:\n\n${productList}${functionResult.products.length > 5 ? `\n\nY ${functionResult.products.length - 5} producto(s) más disponible(s).` : ''}\n\n¿Te gustaría más información sobre alguno de estos productos?`;
           
           res.status(200).json({
             success: true,
@@ -908,11 +916,25 @@ export default async function handler(
           return;
         }
         
-        res.status(500).json({
-          success: false,
-          error: 'Error al generar respuesta final',
-          message: openaiError instanceof Error ? openaiError.message : 'Timeout o error desconocido',
-          details: 'Por favor, intenta de nuevo en un momento'
+        // Si no hay productos, generar mensaje de error más útil
+        const errorFallbackMessage = 'He consultado la base de datos pero no encontré resultados específicos. ¿Podrías ser más específico en tu búsqueda? Por ejemplo, menciona la categoría o características que buscas.';
+        
+        res.status(200).json({
+          success: true,
+          message: errorFallbackMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          fallback: true,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content: errorFallbackMessage,
+              function_calls: [toolCall],
+              sources: ['products_db']
+            }
+          ]
         });
         return;
       }
@@ -1062,11 +1084,12 @@ export default async function handler(
       );
 
       // Asegurar que el mensaje en la respuesta también esté presente
-      const responseMessage = safeFinalMessage || finalMessage || 'He procesado tu consulta.';
+      // Usar nombre diferente para evitar conflicto con responseMessage de la línea 474
+      const finalResponseMessage = safeFinalMessage || finalMessage || 'He procesado tu consulta.';
       
       res.status(200).json({
         success: true,
-        message: responseMessage,
+        message: finalResponseMessage,
         function_called: functionName,
         function_result: functionResult,
         conversation_id: conversationId,
