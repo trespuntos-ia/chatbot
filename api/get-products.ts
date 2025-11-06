@@ -234,8 +234,11 @@ export default async function handler(
       test_product_id // Nuevo parámetro para probar un solo producto
     } = req.query;
 
+    console.log('get-products called with params:', { test_product_id, limit, offset, category, search });
+
     // Si se proporciona test_product_id, usar el endpoint de prueba
     if (test_product_id) {
+      console.log('Test product mode activated for product_id:', test_product_id);
       // Redirigir a la lógica de test-single-product
       const supabaseUrl = process.env.SUPABASE_URL;
       const supabaseKey = process.env.SUPABASE_ANON_KEY;
