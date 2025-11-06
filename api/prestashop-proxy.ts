@@ -43,11 +43,22 @@ export default async function handler(
     }
 
     // Construir query string
-    const query = new URLSearchParams({
-      ws_key: apiKey as string,
-      output_format: 'JSON',
-      ...(queryParams as Record<string, string>),
-    });
+    // El parámetro 'display' puede venir con corchetes, necesitamos manejarlo correctamente
+    const query = new URLSearchParams();
+    query.set('ws_key', apiKey as string);
+    query.set('output_format', 'JSON');
+    
+    // Agregar todos los demás parámetros
+    for (const [key, value] of Object.entries(queryParams)) {
+      if (key !== 'prestashop_url' && key !== 'ws_key' && key !== 'endpoint') {
+        // Si el valor es un string con corchetes (display), mantenerlo como está
+        if (typeof value === 'string') {
+          query.set(key, value);
+        } else {
+          query.set(key, String(value));
+        }
+      }
+    }
 
     const url = `${prestashopUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}?${query.toString()}`;
 
