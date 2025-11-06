@@ -481,7 +481,7 @@ async function fetchAllProducts(
     const query = {
       language: String(config.langCode || 1),
       limit: `${offset},${chunkSize}`,
-      display: '[id,id_default_image,name,price,price_tax_excl,wholesale_price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
+      display: '[id,id_default_image,name,price,wholesale_price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
       sort: 'id_ASC',
     };
     try {
@@ -696,7 +696,7 @@ export default async function handler(
         const query = {
           language: String(apiConfig.langCode || 1),
           limit: `${offset},${chunkSize}`,
-          display: '[id,id_default_image,name,price,price_tax_excl,wholesale_price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
+          display: '[id,id_default_image,name,price,wholesale_price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
           sort: 'id_ASC',
         };
         
