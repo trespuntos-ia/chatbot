@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { Product } from '../types';
 import { exportToCSV, exportToJSON } from '../utils/export';
 
@@ -12,6 +12,20 @@ export function ProductTable({ products }: ProductTableProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
   const itemsPerPage = 25;
+
+  // Log para depuración: verificar si los productos tienen all_categories
+  React.useEffect(() => {
+    if (products.length > 0) {
+      const withAllCategories = products.filter(p => p.all_categories && Array.isArray(p.all_categories) && p.all_categories.length > 0);
+      console.log(`ProductTable: ${products.length} productos totales, ${withAllCategories.length} con all_categories`);
+      if (withAllCategories.length > 0) {
+        console.log('Ejemplo de producto con all_categories:', withAllCategories[0]);
+      } else if (products.length > 0) {
+        console.log('Ejemplo de producto sin all_categories:', products[0]);
+        console.log('Estructura del producto:', Object.keys(products[0]));
+      }
+    }
+  }, [products]);
 
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -227,9 +241,18 @@ export function ProductTable({ products }: ProductTableProps) {
                 <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
                   Precio
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  Categoría
-                </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Todas las Categorías
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Categoría Nivel 1
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Categoría Nivel 2
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Categoría Nivel 3
+                    </th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
                   Descripción
                 </th>
@@ -244,7 +267,7 @@ export function ProductTable({ products }: ProductTableProps) {
             <tbody className="divide-y divide-slate-200">
               {paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
                     No se encontraron productos
                   </td>
                 </tr>
@@ -277,9 +300,126 @@ export function ProductTable({ products }: ProductTableProps) {
                       {product.price ? `${product.price} €` : '-'}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                        {product.category || '-'}
-                      </span>
+                      {(() => {
+                        // Mostrar TODAS las categorías separadas por comas (como en tabla_productos_categorias.php)
+                        // Si tiene all_categories, extraer todos los nombres únicos de todos los niveles
+                        if (product.all_categories && Array.isArray(product.all_categories) && product.all_categories.length > 0) {
+                          const allCategoryNames = new Set<string>();
+                          
+                          // Recopilar todos los nombres de categorías de todos los niveles
+                          product.all_categories.forEach(cat => {
+                            if (cat.category) allCategoryNames.add(cat.category);
+                            if (cat.subcategory) allCategoryNames.add(cat.subcategory);
+                            if (cat.subsubcategory) allCategoryNames.add(cat.subsubcategory);
+                          });
+                          
+                          const categoryList = Array.from(allCategoryNames);
+                          
+                          if (categoryList.length > 0) {
+                            return (
+                              <div className="text-sm text-slate-700">
+                                {categoryList.join(', ')}
+                              </div>
+                            );
+                          }
+                        }
+                        
+                        // Fallback: usar el campo category que ya contiene todas las categorías separadas por comas
+                        return product.category ? (
+                          <div className="text-sm text-slate-700">
+                            {product.category}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        // Mostrar categorías de nivel 1
+                        if (product.all_categories && Array.isArray(product.all_categories) && product.all_categories.length > 0) {
+                          const level1Categories = product.all_categories
+                            .map(cat => cat.category)
+                            .filter((cat, index, self) => self.indexOf(cat) === index); // únicos
+                          
+                          return level1Categories.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {level1Categories.map((cat, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-700"
+                                >
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          );
+                        }
+                        return <span className="text-slate-400">-</span>;
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        // Mostrar categorías de nivel 2
+                        if (product.all_categories && Array.isArray(product.all_categories) && product.all_categories.length > 0) {
+                          const level2Categories = product.all_categories
+                            .map(cat => cat.subcategory)
+                            .filter((cat): cat is string => !!cat && cat !== null)
+                            .filter((cat, index, self) => self.indexOf(cat) === index); // únicos
+                          
+                          return level2Categories.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {level2Categories.map((cat, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                >
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          );
+                        }
+                        // Si tiene subcategory en el formato antiguo (category > subcategory)
+                        if (product.subcategory) {
+                          return (
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {product.subcategory}
+                            </span>
+                          );
+                        }
+                        return <span className="text-slate-400">-</span>;
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        if (product.all_categories && Array.isArray(product.all_categories) && product.all_categories.length > 0) {
+                          const level3Categories = product.all_categories
+                            .map(cat => cat.subsubcategory)
+                            .filter((cat): cat is string => !!cat && cat !== null)
+                            .filter((cat, index, self) => self.indexOf(cat) === index); // únicos
+                          
+                          return level3Categories.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {level3Categories.map((cat, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200"
+                                >
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          );
+                        }
+                        return <span className="text-slate-400">-</span>;
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-slate-600 max-w-xs">
                       <div className="line-clamp-2 text-sm">

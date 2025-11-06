@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react';
 
+interface CategoryInfo {
+  category: string;
+  subcategory: string | null;
+  subsubcategory?: string | null;
+  hierarchy: string[];
+  category_id: number;
+  is_primary: boolean;
+}
+
 interface ProductFromDB {
   id: number;
   name: string;
@@ -12,6 +21,7 @@ interface ProductFromDB {
   date_add: string | null;
   created_at: string;
   updated_at: string;
+  all_categories?: CategoryInfo[] | null;
 }
 
 interface ProductStats {
@@ -35,6 +45,20 @@ export function ProductsReport() {
   useEffect(() => {
     fetchProducts();
   }, [currentPage, searchTerm, selectedCategory]);
+
+  // Log para depuración: verificar si los productos tienen all_categories
+  useEffect(() => {
+    if (products.length > 0) {
+      const withAllCategories = products.filter(p => p.all_categories && Array.isArray(p.all_categories) && p.all_categories.length > 0);
+      console.log(`ProductsReport: ${products.length} productos en página, ${withAllCategories.length} con all_categories`);
+      if (withAllCategories.length > 0) {
+        console.log('Ejemplo de producto con all_categories:', withAllCategories[0]);
+      } else if (products.length > 0) {
+        console.log('Ejemplo de producto sin all_categories:', products[0]);
+        console.log('Estructura del producto:', Object.keys(products[0]));
+      }
+    }
+  }, [products]);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -97,13 +121,59 @@ export function ProductsReport() {
   }, [products]);
 
   const totalPages = stats ? Math.ceil(stats.total / itemsPerPage) : 1;
-  // Extraer todas las categorías únicas (pueden estar separadas por comas)
-  const allCategories = products
-    .map(p => p.category)
-    .filter(Boolean)
-    .flatMap(cat => cat.split(',').map(c => c.trim()))
-    .filter(Boolean);
-  const categories = Array.from(new Set(allCategories));
+  
+  // Obtener todas las categorías únicas de TODOS los productos (no solo de la página actual)
+  // Necesitamos hacer una llamada separada para obtener todas las categorías
+  const [allCategoriesList, setAllCategoriesList] = useState<string[]>([]);
+  
+  useEffect(() => {
+    // Obtener todas las categorías únicas de la base de datos
+    const fetchAllCategories = async () => {
+      try {
+        // Hacer una llamada para obtener todas las categorías únicas
+        // Usamos un límite alto para obtener todas las categorías
+        const response = await fetch('/api/get-products?limit=10000&offset=0');
+        const data = await response.json();
+        
+        if (data.products && Array.isArray(data.products)) {
+          const categoriesSet = new Set<string>();
+          
+          // Extraer categorías de all_categories (nuevo formato)
+          data.products.forEach((p: ProductFromDB) => {
+            if (p.all_categories && Array.isArray(p.all_categories)) {
+              p.all_categories.forEach((cat: CategoryInfo) => {
+                if (cat.category) categoriesSet.add(cat.category);
+                if (cat.subcategory) categoriesSet.add(cat.subcategory);
+                if (cat.subsubcategory) categoriesSet.add(cat.subsubcategory);
+              });
+            }
+            // También incluir categorías del formato antiguo
+            if (p.category) {
+              p.category.split(',').forEach(c => {
+                const trimmed = c.trim();
+                if (trimmed) categoriesSet.add(trimmed);
+              });
+            }
+          });
+          
+          setAllCategoriesList(Array.from(categoriesSet).sort());
+        }
+      } catch (err) {
+        console.error('Error obteniendo todas las categorías:', err);
+      }
+    };
+    
+    fetchAllCategories();
+  }, [stats?.total]); // Re-ejecutar cuando cambie el total de productos
+  
+  // Para el filtro, usar todas las categorías obtenidas
+  const categories = allCategoriesList.length > 0 ? allCategoriesList : 
+    // Fallback: usar categorías de la página actual si no se han cargado todas
+    Array.from(new Set(products
+      .map(p => p.category)
+      .filter(Boolean)
+      .flatMap(cat => cat.split(',').map(c => c.trim()))
+      .filter(Boolean)));
 
   return (
     <div className="space-y-6">
@@ -315,7 +385,13 @@ export function ProductsReport() {
                       Precio
                     </th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                      Categoría
+                      Categoría Nivel 1
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Categoría Nivel 2
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Categoría Nivel 3
                     </th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">
                       SKU
@@ -354,30 +430,109 @@ export function ProductsReport() {
                         {product.price || '-'}
                       </td>
                       <td className="px-4 py-3">
-                        {product.category ? (
-                          <div className="flex flex-wrap gap-1">
-                            {product.category.split(',').map((cat: string, idx: number) => {
-                              const trimmedCat = cat.trim();
-                              if (!trimmedCat) return null;
-                              // Detectar si es subcategoría (generalmente más larga o contiene ">")
-                              const isSubcategory = trimmedCat.includes('>') || trimmedCat.length > 20;
+                        {(() => {
+                          // Si tiene all_categories, mostrar todas las categorías nivel 1
+                          if (product.all_categories && Array.isArray(product.all_categories) && product.all_categories.length > 0) {
+                            const level1Categories = product.all_categories
+                              .map(cat => cat.category)
+                              .filter((cat, index, self) => self.indexOf(cat) === index); // únicos
+                            
+                            return (
+                              <div className="flex flex-wrap gap-1">
+                                {level1Categories.map((cat, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-700"
+                                  >
+                                    {cat}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          }
+                          // Fallback a category si no hay all_categories
+                          return product.category ? (
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-700">
+                              {product.category}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          if (product.all_categories && Array.isArray(product.all_categories) && product.all_categories.length > 0) {
+                            const level2Categories = product.all_categories
+                              .map(cat => cat.subcategory)
+                              .filter((cat): cat is string => !!cat && cat !== null)
+                              .filter((cat, index, self) => self.indexOf(cat) === index); // únicos
+                            
+                            return level2Categories.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {level2Categories.map((cat, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                  >
+                                    {cat}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            );
+                          }
+                          // Si tiene subcategory en el formato antiguo (category > subcategory)
+                          if (product.category && product.category.includes('>')) {
+                            const parts = product.category.split('>');
+                            if (parts.length >= 2) {
                               return (
-                                <span
-                                  key={idx}
-                                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                                    isSubcategory
-                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                      : 'bg-slate-100 text-slate-700'
-                                  }`}
-                                >
-                                  {trimmedCat}
+                                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  {parts[1].trim()}
                                 </span>
                               );
-                            })}
-                          </div>
-                        ) : (
-                          <span className="text-slate-400">-</span>
-                        )}
+                            }
+                          }
+                          return <span className="text-slate-400">-</span>;
+                        })()}
+                      </td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          if (product.all_categories && Array.isArray(product.all_categories) && product.all_categories.length > 0) {
+                            const level3Categories = product.all_categories
+                              .map(cat => cat.subsubcategory)
+                              .filter((cat): cat is string => !!cat && cat !== null)
+                              .filter((cat, index, self) => self.indexOf(cat) === index); // únicos
+                            
+                            return level3Categories.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {level3Categories.map((cat, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200"
+                                  >
+                                    {cat}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            );
+                          }
+                          // Si tiene subcategory en el formato antiguo con 3 niveles (cat > sub > subsub)
+                          if (product.category && product.category.includes('>')) {
+                            const parts = product.category.split('>');
+                            if (parts.length >= 3) {
+                              return (
+                                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                                  {parts[2].trim()}
+                                </span>
+                              );
+                            }
+                          }
+                          return <span className="text-slate-400">-</span>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-slate-600 font-mono text-sm">
                         {product.sku || '-'}

@@ -17,6 +17,14 @@ interface Product {
   sku: string;
   image: string;
   product_url: string;
+  all_categories?: Array<{
+    category: string;
+    subcategory: string | null;
+    subsubcategory?: string | null;
+    hierarchy: string[];
+    category_id: number;
+    is_primary: boolean;
+  }>;
 }
 
 // ============================================
@@ -207,48 +215,75 @@ async function mapProduct(
   
   let category = '';
   let subcategory: string | null = null;
+  const allCategories: Array<{
+    category: string;
+    subcategory: string | null;
+    subsubcategory?: string | null;
+    hierarchy: string[];
+    category_id: number;
+    is_primary: boolean;
+  }> = [];
   
-  // Función auxiliar para procesar una categoría
-  const processCategory = async (categoryId: number): Promise<{ category: string; subcategory: string | null }> => {
+  // Función auxiliar para procesar una categoría completa
+  const processCategoryFull = async (categoryId: number, isPrimary: boolean = false): Promise<{
+    category: string;
+    subcategory: string | null;
+    subsubcategory: string | null;
+    hierarchy: string[];
+    category_id: number;
+    is_primary: boolean;
+  } | null> => {
+    if (!categoryId || categoryId === 1 || categoryId === 0) {
+      return null;
+    }
+    
     const categoryInfo = await getCategoryInfo(categoryId, categoryCache, config);
     const hierarchy = categoryInfo.hierarchy || [];
     
-    // Manejar jerarquía de hasta 3 niveles:
-    // hierarchy[0] = Nivel 1 (categoría principal/raíz)
-    // hierarchy[1] = Nivel 2 (subcategoría)
-    // hierarchy[2] = Nivel 3 (sub-subcategoría, la más específica del producto)
-    
-    if (hierarchy.length === 1) {
-      // Solo 1 nivel: categoría principal sin subcategorías
-      return { category: hierarchy[0], subcategory: null };
-    } else if (hierarchy.length === 2) {
-      // 2 niveles: categoría principal y subcategoría
-      return { category: hierarchy[0], subcategory: hierarchy[1] };
-    } else if (hierarchy.length >= 3) {
-      // 3 niveles: categoría, subcategoría y sub-subcategoría
-      // Guardamos: category = nivel 1, subcategory = nivel 2 > nivel 3
-      return { category: hierarchy[0], subcategory: `${hierarchy[1]} > ${hierarchy[2]}` };
-    } else {
-      // Sin jerarquía (fallback)
-      return { category: categoryInfo.name || '', subcategory: null };
+    if (hierarchy.length === 0) {
+      return null;
     }
+    
+    // Extraer niveles de jerarquía
+    const level1 = hierarchy[0] || '';
+    const level2 = hierarchy[1] || null;
+    const level3 = hierarchy[2] || null;
+    
+    // Para compatibilidad: category y subcategory (categoría principal)
+    if (isPrimary) {
+      category = level1;
+      if (level2 && level3) {
+        subcategory = `${level2} > ${level3}`;
+      } else if (level2) {
+        subcategory = level2;
+      }
+    }
+    
+    return {
+      category: level1,
+      subcategory: level2,
+      subsubcategory: level3 || null,
+      hierarchy: hierarchy,
+      category_id: categoryId,
+      is_primary: isPrimary
+    };
   };
   
-  // Obtener categoría del producto
-  let categoryIdToUse: number | null = null;
-  
-  if (product.id_category_default) {
-    const defaultCategoryId = parseInt(product.id_category_default);
+  // Función para extraer todas las categorías asociadas del producto
+  const extractAllCategoryIds = (product: any): number[] => {
+    const categoryIds: number[] = [];
+    const defaultCategoryId = product.id_category_default ? parseInt(product.id_category_default) : null;
     
-    // Si la categoría predeterminada es 1 (raíz "Inicio"), buscar en las asociaciones
-    if (defaultCategoryId === 1 && product.associations && product.associations.categories) {
-      // PrestaShop puede devolver asociaciones en diferentes formatos:
-      // 1. { categories: [{ id: "2" }, { id: "3" }] }
-      // 2. { categories: { category: [{ id: "2" }, { id: "3" }] } }
-      // 3. { categories: { category: { id: "2" } } } (un solo objeto)
-      
+    // Agregar categoría por defecto si es válida
+    if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0) {
+      categoryIds.push(defaultCategoryId);
+    }
+    
+    // Extraer categorías de associations
+    if (product.associations && product.associations.categories) {
       let associatedCategories: any[] = [];
       
+      // PrestaShop puede devolver asociaciones en diferentes formatos:
       if (Array.isArray(product.associations.categories)) {
         // Formato 1: array directo
         associatedCategories = product.associations.categories;
@@ -262,48 +297,93 @@ async function mapProduct(
         }
       }
       
-      // Encontrar la primera categoría válida (no es 1 ni 0)
+      // Extraer IDs de categorías asociadas
       for (const cat of associatedCategories) {
         let catId: number | null = null;
         
         if (typeof cat === 'object' && cat !== null) {
-          // Puede ser { id: "2" } o { id: 2 }
-          catId = parseInt(cat.id || cat.id.value || '0');
+          catId = parseInt(cat.id || cat.id?.value || '0');
         } else if (typeof cat === 'string' || typeof cat === 'number') {
           catId = parseInt(String(cat));
         }
         
-        if (catId && catId !== 1 && catId !== 0) {
-          categoryIdToUse = catId;
-          break;
+        // Agregar si es válida y no está duplicada
+        if (catId && catId !== 1 && catId !== 0 && !categoryIds.includes(catId)) {
+          categoryIds.push(catId);
         }
       }
-      
-      // Si no encontramos ninguna categoría válida en asociaciones, dejar vacío (no usar "Inicio")
-      if (!categoryIdToUse) {
-        console.warn(`Product ${product.name || 'Unknown'} has id_category_default=1 but no valid associated categories`);
-        categoryIdToUse = null; // No usar categoría raíz
+    }
+    
+    return categoryIds;
+  };
+  
+  // Obtener TODAS las categorías del producto
+  const allCategoryIds = extractAllCategoryIds(product);
+  
+  if (allCategoryIds.length > 0) {
+    // Procesar todas las categorías en paralelo para mayor eficiencia
+    const categoryPromises = allCategoryIds.map((catId, index) => 
+      processCategoryFull(catId, index === 0) // Primera categoría es la principal
+    );
+    
+    const categoryResults = await Promise.all(categoryPromises);
+    
+    // Filtrar nulos y agregar a allCategories
+    categoryResults.forEach((catInfo) => {
+      if (catInfo) {
+        allCategories.push(catInfo);
       }
-    } else if (defaultCategoryId !== 1 && defaultCategoryId !== 0) {
-      // Usar la categoría predeterminada si no es la raíz
-      categoryIdToUse = defaultCategoryId;
+    });
+    
+    // Si no se procesó ninguna categoría pero hay IDs, intentar con la primera
+    if (allCategories.length === 0 && allCategoryIds.length > 0) {
+      const firstCategory = await processCategoryFull(allCategoryIds[0], true);
+      if (firstCategory) {
+        allCategories.push(firstCategory);
+      }
+    }
+    
+    // Debug: Log para verificar categorías (solo algunos productos para no saturar)
+    if (Math.random() < 0.01) {
+      console.log(`Product categories debug: ${product.name || 'Unknown'} - Found ${allCategoryIds.length} category IDs, processed ${allCategories.length} categories`);
+    }
+  } else {
+    console.warn(`Product ${product.name || 'Unknown'} has no valid categories (id_category_default: ${product.id_category_default})`);
+  }
+  
+  // Generar lista plana de todas las categorías (EXACTAMENTE como en tabla_productos_categorias.php)
+  // El PHP obtiene solo el nombre directo de cada categoría asociada, NO la jerarquía completa
+  const allCategoryNames: string[] = [];
+  
+  // Recorrer todas las categorías y obtener solo el nombre directo de cada una
+  for (const catId of allCategoryIds) {
+    // Obtener solo el nombre de la categoría (no la jerarquía completa)
+    const catInfo = await getCategoryInfo(catId, categoryCache, config);
+    if (catInfo && catInfo.hierarchy.length > 0) {
+      // Tomar solo el nombre de la categoría (el último nivel, que es la categoría misma)
+      const categoryName = catInfo.hierarchy[catInfo.hierarchy.length - 1];
+      if (categoryName && categoryName.toLowerCase() !== 'inicio') {
+        // Solo agregar si no está ya en la lista (evitar duplicados)
+        if (!allCategoryNames.includes(categoryName)) {
+          allCategoryNames.push(categoryName);
+        }
+      }
     }
   }
   
-  // Procesar la categoría seleccionada
-  if (categoryIdToUse && categoryIdToUse !== 1 && categoryIdToUse !== 0) {
-    const result = await processCategory(categoryIdToUse);
-    category = result.category;
-    subcategory = result.subcategory;
-    
-    // Debug: Log para verificar categorías (solo algunos productos para no saturar)
-    if (Math.random() < 0.01) { // Log 1% de los productos aleatoriamente
-      console.log(`Product category debug: ${product.name || 'Unknown'} - id_category_default: ${product.id_category_default}, using: ${categoryIdToUse}, category: "${category}", subcategory: "${subcategory}"`);
+  // Si no hay categorías, intentar obtener la categoría por defecto
+  if (allCategoryNames.length === 0 && product.id_category_default) {
+    const defaultCatInfo = await getCategoryInfo(parseInt(product.id_category_default), categoryCache, config);
+    if (defaultCatInfo && defaultCatInfo.hierarchy.length > 0) {
+      const defaultCatName = defaultCatInfo.hierarchy[defaultCatInfo.hierarchy.length - 1];
+      if (defaultCatName && defaultCatName.toLowerCase() !== 'inicio') {
+        allCategoryNames.push(defaultCatName);
+      }
     }
-  } else {
-    // Si no hay categoría válida, dejar vacío
-    console.warn(`Product ${product.name || 'Unknown'} has no valid category (id_category_default: ${product.id_category_default})`);
   }
+  
+  // Concatenar todas las categorías con comas (como en el PHP: implode(', ', $categorias))
+  category = allCategoryNames.join(', ');
   const linkRewrite = extractMultilanguageValue(product.link_rewrite);
   const imageId = product.id_default_image || '';
   let imageUrl = '';
@@ -311,12 +391,32 @@ async function mapProduct(
     const baseUrl = config.baseUrl || config.prestashopUrl.replace('/api/', '/');
     imageUrl = `${baseUrl}${imageId}-medium_default/${linkRewrite}.jpg`;
   }
-  const priceValue = product.price
-    ? parseFloat(product.price).toLocaleString('es-ES', {
+  // En PrestaShop, el campo 'price' puede venir con impuestos incluidos o sin ellos
+  // Priorizamos el precio sin impuestos si está disponible
+  let priceValue = '';
+  
+  if (product.price) {
+    const priceRaw = parseFloat(product.price);
+    
+    // 1. Prioridad: precio sin impuestos explícito
+    if (product.price_tax_excl !== undefined && product.price_tax_excl !== null) {
+      priceValue = parseFloat(product.price_tax_excl).toLocaleString('es-ES', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      })
-    : '';
+      });
+    } 
+    // 2. Si el precio parece ser con impuestos (común en PrestaShop), calcular sin impuestos
+    // PrestaShop normalmente devuelve el precio CON impuestos en el campo 'price'
+    // Calculamos el precio sin IVA asumiendo 21% (estándar en España)
+    else {
+      // Dividir por 1.21 para obtener precio sin IVA
+      const priceWithoutTax = priceRaw / 1.21;
+      priceValue = priceWithoutTax.toLocaleString('es-ES', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+  }
   let productUrl = '';
   if (linkRewrite) {
     const baseUrl = config.baseUrl || config.prestashopUrl.replace('/api/', '/');
@@ -335,6 +435,7 @@ async function mapProduct(
     sku: product.reference || product.ean13 || '',
     image: imageUrl,
     product_url: productUrl,
+    all_categories: allCategories.length > 0 ? allCategories : undefined,
   };
 }
 
@@ -377,7 +478,7 @@ async function fetchAllProducts(
     const query = {
       language: String(config.langCode || 1),
       limit: `${offset},${chunkSize}`,
-      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
+      display: '[id,id_default_image,name,price,price_tax_excl,wholesale_price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
       sort: 'id_ASC',
     };
     try {
@@ -521,6 +622,10 @@ export default async function handler(
       });
     };
 
+    // Contadores para productos importados y actualizados (declarados fuera del try para estar disponibles en catch)
+    let imported: number = 0;
+    let updated: number = 0;
+
     try {
       addLog(`Conexión: ${connection.prestashop_url}`, 'info');
 
@@ -537,7 +642,7 @@ export default async function handler(
       addLog('Obteniendo productos existentes de la base de datos...', 'info');
       const { data: existingProducts, error: existingError } = await supabase
         .from('products')
-        .select('sku, name, price, category, subcategory, description, image_url, product_url');
+        .select('sku, name, price, category, subcategory, description, image_url, product_url, all_categories');
       
       if (existingError) {
         addLog(`Error obteniendo productos existentes: ${existingError.message}`, 'error');
@@ -588,7 +693,7 @@ export default async function handler(
         const query = {
           language: String(apiConfig.langCode || 1),
           limit: `${offset},${chunkSize}`,
-          display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
+          display: '[id,id_default_image,name,price,price_tax_excl,wholesale_price,reference,link_rewrite,ean13,id_category_default,description_short,associations]',
           sort: 'id_ASC',
         };
         
@@ -599,9 +704,41 @@ export default async function handler(
           }
           
           response.products.forEach((product: any) => {
+            // Agregar categoría por defecto
             if (product.id_category_default) {
-              categoryIdsSet.add(parseInt(product.id_category_default));
+              const defaultCatId = parseInt(product.id_category_default);
+              if (defaultCatId !== 1 && defaultCatId !== 0) {
+                categoryIdsSet.add(defaultCatId);
+              }
             }
+            
+            // Agregar todas las categorías asociadas
+            if (product.associations && product.associations.categories) {
+              let associatedCategories: any[] = [];
+              
+              if (Array.isArray(product.associations.categories)) {
+                associatedCategories = product.associations.categories;
+              } else if (product.associations.categories.category) {
+                if (Array.isArray(product.associations.categories.category)) {
+                  associatedCategories = product.associations.categories.category;
+                } else {
+                  associatedCategories = [product.associations.categories.category];
+                }
+              }
+              
+              associatedCategories.forEach((cat: any) => {
+                let catId: number | null = null;
+                if (typeof cat === 'object' && cat !== null) {
+                  catId = parseInt(cat.id || cat.id?.value || '0');
+                } else if (typeof cat === 'string' || typeof cat === 'number') {
+                  catId = parseInt(String(cat));
+                }
+                if (catId && catId !== 1 && catId !== 0) {
+                  categoryIdsSet.add(catId);
+                }
+              });
+            }
+            
             rawProducts.push(product);
           });
           
@@ -672,6 +809,10 @@ export default async function handler(
         }
 
         if (existing) {
+          // Comparar all_categories (JSONB)
+          const existingCategoriesJson = JSON.stringify(existing.all_categories || []);
+          const newCategoriesJson = JSON.stringify(product.all_categories || []);
+          
           // Producto existe: verificar si necesita actualización
           const needsUpdate = 
             (product.name?.trim() || '') !== (existing.name?.trim() || '') ||
@@ -680,7 +821,8 @@ export default async function handler(
             (product.subcategory || null) !== (existing.subcategory || null) ||
             (product.description?.trim() || '') !== (existing.description?.trim() || '') ||
             (product.image?.trim() || '') !== (existing.image_url?.trim() || '') ||
-            (product.product_url?.trim() || '') !== (existing.product_url?.trim() || '');
+            (product.product_url?.trim() || '') !== (existing.product_url?.trim() || '') ||
+            existingCategoriesJson !== newCategoriesJson;
 
           if (needsUpdate) {
             productsToUpdate.push({ product, existing });
@@ -701,11 +843,10 @@ export default async function handler(
       addLog(`Productos que necesitan actualización: ${productsToUpdate.length}`, 'info');
       addLog(`Productos realmente nuevos: ${trulyNewProducts.length}`, 'info');
 
-      let imported = 0;
-      let updated = 0;
+      // Reinicializar contadores para esta sincronización
+      imported = 0;
+      updated = 0;
       const errors: Array<{ sku?: string; error: string; batch?: number }> = [];
-
-      try {
 
       // Actualizar productos existentes
       if (productsToUpdate.length > 0) {
@@ -722,6 +863,7 @@ export default async function handler(
             description: product.description || '',
             image_url: product.image || '',
             product_url: product.product_url || '',
+            all_categories: product.all_categories || [],
             updated_at: new Date().toISOString(),
             // Usar SKU o nombre para identificar el producto
             ...(product.sku?.trim() ? { sku: product.sku.trim() } : {})
@@ -746,6 +888,7 @@ export default async function handler(
                   description: update.description,
                   image_url: update.image_url,
                   product_url: update.product_url,
+                  all_categories: update.all_categories,
                   updated_at: update.updated_at
                 })
                 .eq('sku', sku);
@@ -754,7 +897,8 @@ export default async function handler(
                 errors.push({ error: updateError.message, sku });
                 addLog(`Error actualizando producto SKU ${sku}: ${updateError.message}`, 'error');
               } else {
-                updated++;
+                // Incrementar contador de productos actualizados
+                updated = updated + 1;
               }
             }
           }
@@ -771,6 +915,7 @@ export default async function handler(
                   description: update.description,
                   image_url: update.image_url,
                   product_url: update.product_url,
+                  all_categories: update.all_categories,
                   updated_at: update.updated_at
                 })
                 .eq('name', update.name);
@@ -779,7 +924,8 @@ export default async function handler(
                 errors.push({ error: updateError.message });
                 addLog(`Error actualizando producto ${update.name}: ${updateError.message}`, 'error');
               } else {
-                updated++;
+                // Incrementar contador de productos actualizados
+                updated = updated + 1;
               }
             }
           }
@@ -827,6 +973,7 @@ export default async function handler(
             sku: finalSku,
             image_url: product.image || '',
             product_url: product.product_url || '',
+            all_categories: product.all_categories || [],
             updated_at: new Date().toISOString(),
           });
         }
@@ -903,31 +1050,31 @@ export default async function handler(
         errors: errors.length > 0 ? errors : undefined
       });
 
-      } catch (error) {
-        // Actualizar registro como fallido
-        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-        addLog(`Error en sincronización: ${errorMessage}`, 'error');
-        console.error('Sync error:', error);
-        
-        // Intentar actualizar el estado (puede fallar si hay problema de conexión)
-        try {
-          await supabase
-            .from('product_sync_history')
-            .update({
-              sync_completed_at: new Date().toISOString(),
-              status: 'failed',
-              errors: [{ error: errorMessage }],
-              log_messages: logMessages,
-              products_updated: updated || 0,
-              products_imported: imported || 0
-            })
-            .eq('id', syncId);
-        } catch (updateError) {
-          console.error('Error updating sync status:', updateError);
-        }
-
-        throw error;
+    } catch (error) {
+      // Actualizar registro como fallido
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      addLog(`Error en sincronización: ${errorMessage}`, 'error');
+      console.error('Sync error:', error);
+      
+      // Intentar actualizar el estado (puede fallar si hay problema de conexión)
+      try {
+        await supabase
+          .from('product_sync_history')
+          .update({
+            sync_completed_at: new Date().toISOString(),
+            status: 'failed',
+            errors: [{ error: errorMessage }],
+            log_messages: logMessages,
+            products_updated: updated || 0,
+            products_imported: imported || 0
+          })
+          .eq('id', syncId);
+      } catch (updateError) {
+        console.error('Error updating sync status:', updateError);
       }
+
+      throw error;
+    }
 
   } catch (error) {
     console.error('Sync products error:', error);
