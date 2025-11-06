@@ -242,10 +242,13 @@ async function mapProduct(
   }
 
   // Si no hay categorías, intentar obtener la categoría por defecto
-  if (allCategoryNames.length === 0 && defaultCategoryId) {
-    const defaultCatName = await getCategoryName(defaultCategoryId, categoryCache, config);
-    if (defaultCatName && defaultCatName.toLowerCase() !== 'inicio') {
-      allCategoryNames.push(defaultCatName);
+  if (allCategoryNames.length === 0 && product.id_category_default && product.id_category_default != 2) {
+    const defaultCategoryId = parseInt(product.id_category_default);
+    if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0 && defaultCategoryId !== 2) {
+      const defaultCatName = await getCategoryName(defaultCategoryId, categoryCache, config);
+      if (defaultCatName && defaultCatName.toLowerCase() !== 'inicio') {
+        allCategoryNames.push(defaultCatName);
+      }
     }
   }
 
