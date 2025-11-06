@@ -445,7 +445,7 @@ export default async function handler(
           tool_choice: toolChoice
         }),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('OpenAI request timeout')), 25000)
+          setTimeout(() => reject(new Error('OpenAI request timeout')), 20000) // Reducido de 25s a 20s
         )
       ]) as any;
     } catch (openaiError) {
@@ -647,27 +647,36 @@ export default async function handler(
             enrichedContext += '\nPuedes sugerir al usuario que pruebe con estos términos de forma amigable.\n';
           }
           
-          // Buscar productos similares por categorías relacionadas
+          // Buscar productos similares por categorías relacionadas (OPTIMIZADO - más rápido)
           enrichedContext += '\n🔍 BÚSQUEDA AUTOMÁTICA DE PRODUCTOS SIMILARES:\n';
           enrichedContext += 'Intenta buscar productos en categorías relacionadas o con términos similares.\n';
           
-          // Buscar categorías relacionadas
+          // Buscar categorías relacionadas de forma más eficiente (con timeout para no bloquear)
+          // Hacer esto en paralelo con otras operaciones si es posible, o con timeout corto
           try {
-            const { data: categories } = await supabase
+            // Usar Promise.race para limitar el tiempo de búsqueda a máximo 2 segundos
+            const categoriesQuery = supabase
               .from('products')
               .select('category')
               .not('category', 'is', null)
-              .limit(20);
+              .limit(10); // Reducir límite para ser más rápido
             
-            if (categories && categories.length > 0) {
-              const uniqueCategories = [...new Set(categories.map((c: any) => c.category))];
+            const categoriesResult = await Promise.race([
+              categoriesQuery,
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout')), 2000)
+              )
+            ]).catch(() => ({ data: null }));
+            
+            if (categoriesResult && categoriesResult.data && categoriesResult.data.length > 0) {
+              const uniqueCategories = [...new Set(categoriesResult.data.map((c: any) => c.category))];
               const normalizedQuery = normalizeText(functionArgs.query);
               
-              // Buscar categorías que contengan palabras de la búsqueda
+              // Buscar categorías que contengan palabras de la búsqueda (más rápido)
+              const queryWords = normalizedQuery.split(' ').filter(w => w.length > 3);
               const relatedCategories = uniqueCategories.filter((cat: string) => {
                 const normalizedCat = normalizeText(cat);
-                return normalizedCat.includes(normalizedQuery) || 
-                       normalizedQuery.split(' ').some(word => normalizedCat.includes(word));
+                return queryWords.some(word => normalizedCat.includes(word));
               });
               
               if (relatedCategories.length > 0) {
@@ -676,7 +685,8 @@ export default async function handler(
               }
             }
           } catch (error) {
-            console.error('Error buscando categorías relacionadas:', error);
+            // Silenciar errores de timeout - no es crítico
+            // No bloquear la respuesta si esto falla
           }
         }
         
@@ -835,7 +845,7 @@ export default async function handler(
             tool_choice: 'auto'
           }),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OpenAI request timeout')), 30000)
+            setTimeout(() => reject(new Error('OpenAI request timeout')), 25000) // Reducido de 30s a 25s
           )
         ]) as any;
         
