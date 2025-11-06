@@ -122,7 +122,7 @@ export default async function handler(
     const functions = [
       {
         name: 'search_products',
-        description: 'Busca productos en la base de datos. IMPORTANTE: Usa esta función SIEMPRE antes de afirmar que tienes un producto. La búsqueda es flexible y encuentra variaciones de palabras (ej: "cierre" encuentra "cierra", "abre" encuentra "abridor"). Si el usuario pregunta por un producto específico, busca primero con esta función usando palabras clave del producto. Si hay múltiples resultados similares, presenta las opciones al usuario y pregunta cuál es el correcto. Si no hay coincidencia, intenta buscar con diferentes palabras clave o pregunta por más detalles.',
+        description: 'OBLIGATORIO: Debes usar esta función SIEMPRE que el usuario pregunte por productos, mencione un producto, o pregunte si tienes algo. NUNCA respondas sobre disponibilidad de productos sin usar esta función primero. La búsqueda es flexible y encuentra variaciones de palabras (ej: "cierre" encuentra "cierra", "pajitas" encuentra "pajita", "cartón" encuentra "carton"). Si el usuario pregunta "¿tienes X?" o "busca X" o "productos de X", DEBES llamar a esta función con query=X. Si no encuentras resultados, entonces puedes decir que no hay productos. Pero NUNCA digas que no hay productos sin haber buscado primero con esta función.',
         parameters: {
           type: 'object',
           properties: {
@@ -386,21 +386,52 @@ export default async function handler(
       }
     ];
 
-    // 5. Preparar mensajes para OpenAI (con historial limitado)
+    // 5. Detectar si el mensaje es sobre productos para forzar búsqueda
+    const isProductQuery = detectProductQuery(message);
+    
+    // 6. Preparar mensajes para OpenAI (con historial limitado)
+    // Añadir instrucción adicional al system prompt si es una pregunta sobre productos
+    let enhancedSystemPrompt = systemPrompt;
+    if (isProductQuery) {
+      enhancedSystemPrompt += '\n\n⚠️ ATENCIÓN: El usuario está preguntando sobre productos. DEBES usar la función search_products ANTES de responder. NO respondas directamente sin buscar en la base de datos.';
+    }
+    
     const messages: any[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: enhancedSystemPrompt },
       ...limitedHistory,
       { role: 'user', content: message }
     ];
 
-    // 6. Configuración de OpenAI
+    // 7. Configuración de OpenAI
     const model = config.model || 'gpt-3.5-turbo'; // Por defecto más rápido
     const temperature = config.temperature !== undefined ? config.temperature : 0.7;
     const maxTokens = config.max_tokens || 1500; // Reducido para respuestas más rápidas
 
-    // 7. Llamar a OpenAI (con timeout para evitar errores de Vercel)
+    // 8. Llamar a OpenAI (con timeout para evitar errores de Vercel)
+    // Si es una pregunta sobre productos, forzar el uso de herramientas
     let completion;
     try {
+      // Si es una pregunta sobre productos, forzar búsqueda
+      let toolChoice: any = 'auto';
+      if (isProductQuery) {
+        // Extraer término de búsqueda del mensaje para añadirlo como contexto
+        const searchTerm = extractSearchTermFromMessage(message);
+        // Añadir el término de búsqueda al mensaje del usuario para que OpenAI lo use
+        if (searchTerm && searchTerm !== message.trim()) {
+          messages[messages.length - 1] = {
+            role: 'user',
+            content: `${message}\n\n[IMPORTANTE: Busca productos relacionados con "${searchTerm}" usando la función search_products]`
+          };
+        }
+        // Forzar el uso de search_products
+        toolChoice = { 
+          type: 'function' as const, 
+          function: { 
+            name: 'search_products'
+          } 
+        };
+      }
+      
       completion = await Promise.race([
         openai.chat.completions.create({
           model,
@@ -411,7 +442,7 @@ export default async function handler(
             type: 'function' as const,
             function: f
           })),
-          tool_choice: 'auto'
+          tool_choice: toolChoice
         }),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('OpenAI request timeout')), 25000)
@@ -511,26 +542,56 @@ export default async function handler(
           return;
       }
 
+      // Detectar intención del usuario
+      const userIntent = detectUserIntent(message);
+      
       // Preparar contexto enriquecido con instrucciones de validación
       let enrichedContext = '';
       
       // INSTRUCCIONES MEJORADAS PARA OPENAI
       enrichedContext += '\n\n📋 INSTRUCCIONES CRÍTICAS PARA RESPONDER:\n';
-      enrichedContext += '1. SIEMPRE presenta productos con esta estructura clara:\n';
-      enrichedContext += '   - Nombre completo del producto\n';
-      enrichedContext += '   - Precio (SIEMPRE lo mencionas si está disponible)\n';
-      enrichedContext += '   - Breve descripción (1-2 líneas)\n';
-      enrichedContext += '   - Link de compra (si está disponible)\n\n';
+      enrichedContext += '1. SIEMPRE presenta productos con esta estructura clara y profesional:\n';
+      enrichedContext += '   - **Nombre completo del producto** (en negrita)\n';
+      enrichedContext += '   - 💰 Precio: [precio] (SIEMPRE lo mencionas si está disponible)\n';
+      enrichedContext += '   - 📦 Categoría: [categoría] (si está disponible)\n';
+      enrichedContext += '   - 📝 Descripción breve (1-2 líneas destacando características principales)\n';
+      enrichedContext += '   - 🔗 [Ver producto](URL) (si está disponible)\n\n';
       enrichedContext += '2. Cuando haya múltiples productos:\n';
       enrichedContext += '   - Lista los TOP 3-5 más relevantes (ya están ordenados por relevancia)\n';
-      enrichedContext += '   - Usa formato de lista numerada o con viñetas\n';
+      enrichedContext += '   - Usa formato de lista numerada (1., 2., 3.) o con viñetas (•)\n';
       enrichedContext += '   - Incluye precio y link para cada uno\n';
-      enrichedContext += '   - Si hay más productos, menciona "y X más productos disponibles"\n\n';
+      enrichedContext += '   - Si hay más productos, menciona "y X más productos disponibles"\n';
+      enrichedContext += '   - Comienza con: "He encontrado X productos relacionados con [término de búsqueda]:"\n\n';
       enrichedContext += '3. SIEMPRE menciona el precio si está disponible en el producto\n\n';
-      enrichedContext += '4. Si un producto tiene categoría, menciónala brevemente\n\n';
-      enrichedContext += '5. Sé específico y detallado, NO uses respuestas genéricas como "tengo productos"\n\n';
-      enrichedContext += '6. Si el usuario pregunta por algo específico y lo encontraste, confirma que sí lo tienes\n\n';
-      enrichedContext += '7. Si no encuentras exactamente lo que busca, sugiere alternativas similares de los resultados\n\n';
+      enrichedContext += '4. Si un producto tiene categoría, menciónala brevemente para contexto\n\n';
+      enrichedContext += '5. Sé específico y detallado, NO uses respuestas genéricas como "tengo productos" o "aquí tienes algunos productos"\n';
+      enrichedContext += '   - En su lugar, di: "He encontrado [número] productos que coinciden con tu búsqueda"\n';
+      enrichedContext += '   - Menciona características específicas de cada producto\n\n';
+      enrichedContext += '6. Si el usuario pregunta por algo específico y lo encontraste, confirma claramente que sí lo tienes\n';
+      enrichedContext += '   - Ejemplo: "Sí, tenemos [nombre del producto]. Aquí están los detalles:"\n\n';
+      enrichedContext += '7. Si no encuentras exactamente lo que busca, sugiere alternativas similares de los resultados\n';
+      enrichedContext += '   - Di: "No encontré exactamente [término], pero tengo estos productos similares que podrían interesarte:"\n\n';
+      
+      // Añadir instrucciones según la intención detectada
+      if (userIntent.intent === 'buy') {
+        enrichedContext += '8. ⚠️ INTENCIÓN DETECTADA: El usuario quiere COMPRAR\n';
+        enrichedContext += '   - Destaca el precio de forma prominente\n';
+        enrichedContext += '   - Menciona disponibilidad si es relevante\n';
+        enrichedContext += '   - Facilita el acceso al link de compra\n';
+        enrichedContext += '   - Puedes mencionar: "Para comprar este producto, haz clic en el enlace"\n\n';
+      } else if (userIntent.intent === 'compare') {
+        enrichedContext += '8. ⚠️ INTENCIÓN DETECTADA: El usuario quiere COMPARAR productos\n';
+        enrichedContext += '   - Presenta los productos en formato comparativo\n';
+        enrichedContext += '   - Destaca diferencias clave (precio, características, categoría)\n';
+        enrichedContext += '   - Usa formato tabla o lista con columnas claras\n';
+        enrichedContext += '   - Puedes sugerir: "Para ayudarte a decidir, aquí están las diferencias principales:"\n\n';
+      } else if (userIntent.intent === 'info') {
+        enrichedContext += '8. ⚠️ INTENCIÓN DETECTADA: El usuario busca INFORMACIÓN\n';
+        enrichedContext += '   - Proporciona descripciones más detalladas\n';
+        enrichedContext += '   - Menciona características técnicas si están disponibles\n';
+        enrichedContext += '   - Explica para qué sirve cada producto\n';
+        enrichedContext += '   - Puedes usar: "Este producto es ideal para..." o "Características principales:"\n\n';
+      }
       
       // Añadir instrucciones específicas según el caso
       if (functionResult.products && functionResult.products.length > 1) {
@@ -551,7 +612,23 @@ export default async function handler(
         // Esto se hace después de la primera respuesta para no bloquear
         // Por ahora, el contenido web se busca directamente en la función search_web_content
       } else if (functionResult.products && functionResult.products.length === 0) {
-        enrichedContext += '\n⚠️ No se encontraron productos. Sugiere términos de búsqueda alternativos o pregunta por más detalles.\n';
+        enrichedContext += '\n⚠️ No se encontraron productos. Debes:\n';
+        enrichedContext += '   1. Ser empático: "Lo siento, no encontré productos que coincidan exactamente con tu búsqueda"\n';
+        enrichedContext += '   2. Sugerir términos alternativos o variaciones\n';
+        enrichedContext += '   3. Preguntar por más detalles: "¿Podrías ser más específico? Por ejemplo, menciona la categoría o características que buscas"\n';
+        enrichedContext += '   4. Ofrecer ayuda: "¿Te gustaría que busque productos similares o en otra categoría?"\n';
+        
+        // Generar sugerencias automáticas
+        if (functionArgs.query && typeof functionArgs.query === 'string') {
+          const suggestions = await generateSearchSuggestions(supabase, functionArgs.query);
+          if (suggestions.length > 0) {
+            enrichedContext += '\n💡 SUGERENCIAS DE BÚSQUEDA ALTERNATIVAS:\n';
+            suggestions.slice(0, 3).forEach((suggestion, idx) => {
+              enrichedContext += `   ${idx + 1}. "${suggestion}"\n`;
+            });
+            enrichedContext += '\nPuedes sugerir al usuario que pruebe con estos términos.\n';
+          }
+        }
       }
       
       // Formatear productos para mejor presentación
@@ -993,6 +1070,201 @@ function normalizeText(text: string): string {
     .trim();
 }
 
+// Función para detectar si el mensaje es una pregunta sobre productos
+function detectProductQuery(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  
+  // Palabras clave que indican pregunta sobre productos
+  const productKeywords = [
+    'tienes', 'tiene', 'tienen', 'dispones', 'dispone', 'tengo', 'tener',
+    'busca', 'buscar', 'buscas', 'búsqueda', 'busqueda',
+    'producto', 'productos', 'artículo', 'artículos', 'articulo', 'articulos',
+    'hay', 'existe', 'existen', 'disponible', 'disponibles',
+    'muestra', 'muéstrame', 'muestrame', 'muestra me',
+    'encuentra', 'encontrar', 'encuentras',
+    'pajitas', 'pajita', 'cartón', 'carton', 'straw', 'straws',
+    'precio', 'cuánto', 'cuanto', 'cuesta', 'cuestan'
+  ];
+  
+  // Patrones de preguntas sobre productos
+  const productPatterns = [
+    /tienes\s+\w+/i,
+    /busca\s+\w+/i,
+    /productos?\s+de\s+\w+/i,
+    /artículos?\s+de\s+\w+/i,
+    /hay\s+\w+/i,
+    /existe\s+\w+/i,
+    /muestra\s+\w+/i,
+    /muéstrame\s+\w+/i,
+    /encuentra\s+\w+/i,
+    /precio\s+de\s+\w+/i,
+    /cuánto\s+cuesta/i,
+    /cuanto\s+cuesta/i
+  ];
+  
+  // Verificar palabras clave
+  if (productKeywords.some(keyword => lowerMessage.includes(keyword))) {
+    return true;
+  }
+  
+  // Verificar patrones
+  if (productPatterns.some(pattern => pattern.test(message))) {
+    return true;
+  }
+  
+  return false;
+}
+
+// Función para extraer el término de búsqueda del mensaje
+function extractSearchTermFromMessage(message: string): string {
+  const lowerMessage = message.toLowerCase().trim();
+  
+  // Patrones para extraer términos de búsqueda
+  const patterns = [
+    /tienes\s+(.+?)(?:\?|$)/i,
+    /busca\s+(.+?)(?:\?|$)/i,
+    /productos?\s+de\s+(.+?)(?:\?|$)/i,
+    /artículos?\s+de\s+(.+?)(?:\?|$)/i,
+    /hay\s+(.+?)(?:\?|$)/i,
+    /existe\s+(.+?)(?:\?|$)/i,
+    /muestra\s+(.+?)(?:\?|$)/i,
+    /muéstrame\s+(.+?)(?:\?|$)/i,
+    /muestrame\s+(.+?)(?:\?|$)/i,
+    /encuentra\s+(.+?)(?:\?|$)/i,
+    /precio\s+de\s+(.+?)(?:\?|$)/i
+  ];
+  
+  // Intentar extraer con patrones
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[1]) {
+      let term = match[1].trim();
+      // Limpiar el término (quitar signos de interrogación, puntos, etc.)
+      term = term.replace(/[?¿!¡.,;:]+$/, '').trim();
+      if (term.length > 0) {
+        return term;
+      }
+    }
+  }
+  
+  // Si no se encontró con patrones, intentar extraer palabras clave
+  // Eliminar palabras comunes y dejar solo las relevantes
+  const words = message.split(/\s+/).filter(word => {
+    const lowerWord = word.toLowerCase().replace(/[?¿!¡.,;:]/g, '');
+    return lowerWord.length > 2 && 
+           !['tienes', 'tiene', 'tienen', 'busca', 'buscar', 'hay', 'existe', 
+             'muestra', 'muestrame', 'muéstrame', 'encuentra', 'producto', 
+             'productos', 'artículo', 'artículos', 'precio', 'cuánto', 'cuanto'].includes(lowerWord);
+  });
+  
+  if (words.length > 0) {
+    return words.join(' ');
+  }
+  
+  // Si todo falla, devolver el mensaje completo sin signos de interrogación
+  return message.replace(/[?¿!¡]/g, '').trim();
+}
+
+// Función para detectar intención del usuario
+function detectUserIntent(message: string): {
+  intent: 'buy' | 'compare' | 'info' | 'search';
+  urgency: 'high' | 'medium' | 'low';
+} {
+  const lowerMessage = message.toLowerCase();
+  
+  // Palabras clave de compra
+  const buyKeywords = [
+    'comprar', 'precio', 'cuánto cuesta', 'cuanto cuesta', 'disponible', 'stock',
+    'vender', 'venta', 'comprar ahora', 'añadir al carrito', 'carrito',
+    'pago', 'comprar', 'adquirir', 'coste', 'costo'
+  ];
+  
+  // Palabras clave de comparación
+  const compareKeywords = [
+    'comparar', 'diferencia', 'cuál es mejor', 'cual es mejor', 'vs', 'versus',
+    'mejor', 'diferencias', 'comparación', 'comparativa', 'elegir entre',
+    'cuál elegir', 'cual elegir', 'recomendación entre'
+  ];
+  
+  // Palabras clave de información
+  const infoKeywords = [
+    'qué es', 'que es', 'para qué sirve', 'para que sirve', 'cómo funciona', 'como funciona',
+    'características', 'caracteristicas', 'especificaciones', 'detalles', 'información',
+    'info', 'descripción', 'descripcion', 'qué hace', 'que hace'
+  ];
+  
+  // Detectar intención
+  if (buyKeywords.some(k => lowerMessage.includes(k))) {
+    return { intent: 'buy', urgency: 'high' };
+  }
+  if (compareKeywords.some(k => lowerMessage.includes(k))) {
+    return { intent: 'compare', urgency: 'medium' };
+  }
+  if (infoKeywords.some(k => lowerMessage.includes(k))) {
+    return { intent: 'info', urgency: 'low' };
+  }
+  
+  return { intent: 'search', urgency: 'medium' };
+}
+
+// Función para generar sugerencias de búsqueda cuando no hay resultados
+async function generateSearchSuggestions(supabase: any, originalQuery: string): Promise<string[]> {
+  try {
+    const suggestions: string[] = [];
+    const words = originalQuery.split(/\s+/).filter(w => w.length > 2);
+    
+    // Generar variaciones de palabras
+    words.forEach(word => {
+      const variations = generateWordVariations(word);
+      variations.forEach(variation => {
+        if (variation !== word && variation.length > 2) {
+          const newQuery = originalQuery.replace(word, variation);
+          if (newQuery !== originalQuery && !suggestions.includes(newQuery)) {
+            suggestions.push(newQuery);
+          }
+        }
+      });
+    });
+    
+    // Buscar categorías similares
+    const { data: categories } = await supabase
+      .from('products')
+      .select('category')
+      .not('category', 'is', null)
+      .limit(50);
+    
+    if (categories && categories.length > 0) {
+      const uniqueCategories = [...new Set(categories.map((c: any) => c.category))];
+      const normalizedQuery = normalizeText(originalQuery);
+      
+      // Buscar categorías que contengan palabras de la búsqueda
+      uniqueCategories.forEach((cat: string) => {
+        const normalizedCat = normalizeText(cat);
+        if (normalizedCat.includes(normalizedQuery) || normalizedQuery.includes(normalizedCat.split(' ')[0])) {
+          if (!suggestions.includes(cat)) {
+            suggestions.push(cat);
+          }
+        }
+      });
+    }
+    
+    // Si no hay suficientes sugerencias, crear búsquedas más amplias
+    if (suggestions.length < 3 && words.length > 1) {
+      words.forEach((_, index) => {
+        const shorterQuery = words.filter((_, i) => i !== index).join(' ');
+        if (shorterQuery.length > 0 && !suggestions.includes(shorterQuery)) {
+          suggestions.push(shorterQuery);
+        }
+      });
+    }
+    
+    return suggestions.slice(0, 5);
+  } catch (error) {
+    console.error('Error generating search suggestions:', error);
+    return [];
+  }
+}
+
 // Función para calcular score de relevancia de un producto
 function calculateRelevanceScore(product: any, searchTerm: string): number {
   if (!searchTerm) return 0;
@@ -1031,7 +1303,7 @@ function calculateRelevanceScore(product: any, searchTerm: string): number {
   return score;
 }
 
-// Función para formatear productos para el prompt de OpenAI
+// Función para formatear productos para el prompt de OpenAI (mejorada)
 function formatProductsForPrompt(products: any[], limit: number = 5): string {
   if (!products || products.length === 0) {
     return 'No se encontraron productos.';
@@ -1039,17 +1311,29 @@ function formatProductsForPrompt(products: any[], limit: number = 5): string {
   
   const limited = products.slice(0, limit);
   const formatted = limited.map((p, i) => {
-    return `Producto ${i + 1}:
-- Nombre: ${p.name}
-- Precio: ${p.price || 'No disponible'}
-- Categoría: ${p.category || 'N/A'}
-- SKU: ${p.sku || 'N/A'}
-- Descripción: ${(p.description || '').substring(0, 150)}${p.description && p.description.length > 150 ? '...' : ''}
-- URL: ${p.product_url || 'N/A'}`;
-  }).join('\n\n');
+    const description = (p.description || '').trim();
+    const descriptionPreview = description.length > 200 
+      ? description.substring(0, 200) + '...' 
+      : description || 'Sin descripción disponible';
+    
+    let productInfo = `**${p.name}**\n`;
+    productInfo += `💰 Precio: ${p.price || 'No disponible'}\n`;
+    if (p.category) {
+      productInfo += `📦 Categoría: ${p.category}\n`;
+    }
+    if (p.sku) {
+      productInfo += `🏷️ SKU: ${p.sku}\n`;
+    }
+    productInfo += `📝 ${descriptionPreview}\n`;
+    if (p.product_url) {
+      productInfo += `🔗 URL: ${p.product_url}`;
+    }
+    
+    return productInfo;
+  }).join('\n\n---\n\n');
   
   if (products.length > limit) {
-    return formatted + `\n\n(Se encontraron ${products.length} productos en total, mostrando los ${limit} más relevantes)`;
+    return formatted + `\n\n📊 Total encontrado: ${products.length} productos (mostrando los ${limit} más relevantes)`;
   }
   
   return formatted;
@@ -1129,6 +1413,11 @@ async function searchProducts(supabase: any, params: any) {
       const conditions: string[] = [];
       
       words.forEach(word => {
+        // Filtrar palabras muy cortas que no son relevantes para la búsqueda
+        if (word.length <= 2 && !['de', 'la', 'el'].includes(word.toLowerCase())) {
+          return; // Saltar artículos y preposiciones muy cortas
+        }
+        
         // Generar variaciones de la palabra
         const variations = generateWordVariations(word);
         const uniqueVariations = [...new Set(variations)];
@@ -1144,23 +1433,17 @@ async function searchProducts(supabase: any, params: any) {
         });
       });
       
-      if (conditions.length > 0) {
-        // También buscar la frase completa (para casos donde coincide exactamente)
+      // También buscar la frase completa sin variaciones (para coincidencias exactas)
+      if (searchTerm.length > 3) {
         conditions.push(`name.ilike.%${searchTerm}%`);
         conditions.push(`description.ilike.%${searchTerm}%`);
         conditions.push(`sku.ilike.%${searchTerm}%`);
-        
+      }
+      
+      if (conditions.length > 0) {
         // Usar OR para buscar cualquiera de las condiciones
-        // Si hay múltiples palabras, todas deben aparecer en algún campo
-        if (words.length > 1) {
-          // Para múltiples palabras, necesitamos que todas las palabras aparezcan
-          // Usamos una estrategia: buscamos productos que contengan al menos una palabra,
-          // y luego filtramos en memoria para asegurar que todas las palabras están presentes
-          query = query.or(conditions.join(','));
-        } else {
-          // Para una sola palabra, usar OR simple
-          query = query.or(conditions.join(','));
-        }
+        // El filtrado en memoria se encargará de refinar los resultados
+        query = query.or(conditions.join(','));
       }
     }
   }
@@ -1184,13 +1467,14 @@ async function searchProducts(supabase: any, params: any) {
     query = query.order('name', { ascending: true });
   }
 
-  // Límite reducido por defecto (más rápido)
-  // Si hay múltiples palabras, aumentar el límite para tener más opciones antes del filtrado
+  // Límite aumentado para búsquedas con múltiples palabras
+  // Esto ayuda a capturar más resultados antes del filtrado en memoria
   const baseLimit = params.limit || 15;
-  const maxLimit = 30;
+  const maxLimit = 50; // Aumentado de 30 a 50 para búsquedas complejas
   const searchTerm = params.query && typeof params.query === 'string' ? params.query.trim() : '';
-  const hasMultipleWords = searchTerm.split(/\s+/).filter(w => w.length > 0).length > 1;
-  const limit = Math.min(hasMultipleWords ? baseLimit * 2 : baseLimit, maxLimit); // Más resultados si hay múltiples palabras
+  const words = searchTerm.split(/\s+/).filter(w => w.length > 0);
+  const hasMultipleWords = words.length > 1;
+  const limit = Math.min(hasMultipleWords ? baseLimit * 3 : baseLimit, maxLimit); // Más resultados si hay múltiples palabras
   query = query.limit(limit);
 
   // Offset
@@ -1211,32 +1495,56 @@ async function searchProducts(supabase: any, params: any) {
     if (searchTerm.length > 0) {
       const words = searchTerm.split(/\s+/).filter(w => w.length > 0);
       
-      // Si hay múltiples palabras, filtrar para asegurar que todas aparezcan
+      // Si hay múltiples palabras, filtrar de forma más flexible
       if (words.length > 1) {
-        sortedData = sortedData.filter((product: any) => {
-          // Combinar todos los campos de texto donde buscar
-          const searchableText = [
-            product.name || '',
-            product.description || '',
-            product.sku || '',
-            product.category || '',
-            product.subcategory || ''
-          ].join(' ').toLowerCase();
+        // Filtrar palabras muy cortas (artículos, preposiciones) que no son relevantes
+        const relevantWords = words.filter(w => w.length > 2 && !['de', 'la', 'el', 'los', 'las', 'un', 'una', 'del', 'con', 'por', 'para'].includes(w.toLowerCase()));
+        
+        // Si después de filtrar solo queda una palabra relevante, no aplicar filtro estricto
+        if (relevantWords.length <= 1) {
+          // No filtrar estrictamente, dejar que el scoring de relevancia ordene
+        } else {
+          // Filtrar para asegurar que al menos las palabras relevantes aparezcan
+          // Usar un enfoque más flexible: al menos el 70% de las palabras relevantes deben aparecer
+          const minWordsRequired = Math.ceil(relevantWords.length * 0.7);
           
-          // Normalizar el texto de búsqueda
-          const normalizedSearchText = normalizeText(searchableText);
-          
-          // Verificar que todas las palabras (o sus variaciones) aparezcan
-          return words.every(word => {
-            const variations = generateWordVariations(word);
-            const normalizedVariations = variations.map(v => normalizeText(v));
+          sortedData = sortedData.filter((product: any) => {
+            // Combinar todos los campos de texto donde buscar
+            const searchableText = [
+              product.name || '',
+              product.description || '',
+              product.sku || '',
+              product.category || '',
+              product.subcategory || ''
+            ].join(' ').toLowerCase();
             
-            // Verificar si alguna variación aparece en el texto
-            return normalizedVariations.some(variation => 
-              normalizedSearchText.includes(variation)
-            );
+            // Normalizar el texto de búsqueda
+            const normalizedSearchText = normalizeText(searchableText);
+            
+            // Contar cuántas palabras relevantes aparecen
+            let matchingWords = 0;
+            relevantWords.forEach(word => {
+              const variations = generateWordVariations(word);
+              const normalizedVariations = variations.map(v => normalizeText(v));
+              
+              // Verificar si alguna variación aparece en el texto
+              if (normalizedVariations.some(variation => 
+                normalizedSearchText.includes(variation)
+              )) {
+                matchingWords++;
+              }
+            });
+            
+            // También verificar la frase completa (para casos como "pajitas de cartón")
+            const normalizedSearchTerm = normalizeText(searchTerm);
+            if (normalizedSearchText.includes(normalizedSearchTerm)) {
+              return true; // Si la frase completa aparece, incluir el producto
+            }
+            
+            // Incluir si al menos el mínimo requerido de palabras aparece
+            return matchingWords >= minWordsRequired;
           });
-        });
+        }
       }
     }
   }

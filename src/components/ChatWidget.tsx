@@ -259,7 +259,8 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
           {/* Contenido del chat */}
           <div className="flex-1 overflow-hidden">
             <Chat 
-              config={config} 
+              config={config}
+              isExpanded={isExpanded}
               onFirstMessage={() => {
                 if (!isExpanded && !hasAutoExpanded) {
                   setIsExpanded(true);

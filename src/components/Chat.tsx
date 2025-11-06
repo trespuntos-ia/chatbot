@@ -9,10 +9,11 @@ import type { ChatConfig, ChatMessage, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
+  isExpanded?: boolean;
   onFirstMessage?: () => void;
 }
 
-export function Chat({ config, onFirstMessage }: ChatProps) {
+export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) {
   const { messages, setMessages } = useChat();
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -269,7 +270,7 @@ export function Chat({ config, onFirstMessage }: ChatProps) {
                 
                 {/* Tarjetas de productos */}
                 {productParts.length > 0 && (
-                  <div className="w-full space-y-4">
+                  <div className={`w-full ${isExpanded ? 'grid grid-cols-2 gap-4' : 'space-y-4'}`}>
                     {productParts.map((part, productIndex) => (
                       <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
                     ))}
