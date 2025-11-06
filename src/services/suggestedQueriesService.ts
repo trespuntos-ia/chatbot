@@ -24,11 +24,20 @@ export async function getSuggestedQueries(): Promise<SuggestedQuery[]> {
   try {
     const response = await fetch(`${API_BASE}/suggested-queries`);
     
-    if (!response.ok) {
-      throw new Error(`Error fetching suggested queries: ${response.statusText}`);
+    const responseText = await response.text();
+    let data: SuggestedQueriesResponse;
+    
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Error parsing response:', responseText.substring(0, 200));
+      return [];
     }
-
-    const data: SuggestedQueriesResponse = await response.json();
+    
+    if (!response.ok) {
+      console.error('Error fetching suggested queries:', data.error || response.statusText);
+      return [];
+    }
     
     if (data.success && data.queries) {
       return data.queries;
@@ -48,11 +57,19 @@ export async function getAllSuggestedQueries(): Promise<SuggestedQuery[]> {
   try {
     const response = await fetch(`${API_BASE}/suggested-queries?all=true`);
     
-    if (!response.ok) {
-      throw new Error(`Error fetching suggested queries: ${response.statusText}`);
+    const responseText = await response.text();
+    let data: SuggestedQueriesResponse;
+    
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Error parsing response:', responseText.substring(0, 200));
+      throw new Error(`Error del servidor: ${response.status} ${response.statusText}`);
     }
-
-    const data: SuggestedQueriesResponse = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || `Error fetching suggested queries: ${response.statusText}`);
+    }
     
     if (data.success && data.queries) {
       return data.queries;
@@ -61,7 +78,7 @@ export async function getAllSuggestedQueries(): Promise<SuggestedQuery[]> {
     return [];
   } catch (error) {
     console.error('Error getting all suggested queries:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -121,12 +138,21 @@ export async function updateSuggestedQueries(
       }),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `Error updating suggested queries: ${response.statusText}`);
+    // Leer la respuesta como texto primero para poder manejarla
+    const responseText = await response.text();
+    
+    // Intentar parsear como JSON
+    let data: SuggestedQueriesResponse;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      // Si no es JSON, es un error HTML o texto plano
+      throw new Error(`Error del servidor (${response.status}): ${responseText.substring(0, 200)}`);
     }
 
-    const data: SuggestedQueriesResponse = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || `Error updating suggested queries: ${response.statusText}`);
+    }
     
     if (data.success && data.queries) {
       return data.queries;

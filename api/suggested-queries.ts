@@ -86,12 +86,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // Eliminar todas las sugerencias existentes
-      const { error: deleteError } = await supabase
+      // Primero obtener todas las IDs para eliminarlas
+      const { data: existingQueries, error: fetchError } = await supabase
         .from('suggested_queries')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+        .select('id');
 
-      if (deleteError) throw deleteError;
+      if (fetchError) {
+        // Si la tabla no existe, lanzar error
+        if (fetchError.message.includes('does not exist') || fetchError.message.includes('relation')) {
+          throw new Error('La tabla suggested_queries no existe. Por favor, ejecuta el script SQL en Supabase: supabase-suggested-queries-schema.sql');
+        }
+        throw fetchError;
+      }
+
+      // Si hay queries existentes, eliminarlas
+      if (existingQueries && existingQueries.length > 0) {
+        const idsToDelete = existingQueries.map(q => q.id);
+        const { error: deleteError } = await supabase
+          .from('suggested_queries')
+          .delete()
+          .in('id', idsToDelete);
+
+        if (deleteError) {
+          console.error('Error deleting existing queries:', deleteError);
+          throw deleteError;
+        }
+      }
 
       // Insertar las nuevas sugerencias
       if (queries.length > 0) {
@@ -152,9 +172,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (error) {
     console.error('Error en suggested-queries API:', error);
+    
+    // Asegurar que siempre devolvemos JSON
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : typeof error === 'string' 
+      ? error 
+      : 'Error desconocido';
+    
+    // Si el error menciona que la tabla no existe, dar un mensaje más claro
+    if (errorMessage.includes('relation') && errorMessage.includes('does not exist')) {
+      return res.status(500).json({
+        success: false,
+        error: 'La tabla suggested_queries no existe. Por favor, ejecuta el script SQL en Supabase: supabase-suggested-queries-schema.sql'
+      });
+    }
+    
     return res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Error desconocido'
+      error: errorMessage
     });
   }
 }
