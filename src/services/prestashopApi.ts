@@ -71,13 +71,19 @@ async function getCategoryFullInfo(
       const parentIdRaw = data.category.id_parent;
       const parentId = parentIdRaw ? (typeof parentIdRaw === 'string' ? parseInt(parentIdRaw) : parentIdRaw) : undefined;
       
-      const hierarchy: string[] = [name];
+      // Excluir "Inicio" de la jerarquía
+      const hierarchy: string[] = [];
+      if (name && name.toLowerCase() !== 'inicio') {
+        hierarchy.push(name);
+      }
       
       // Construir jerarquía completa subiendo por los padres
-      if (parentId && parentId !== 0 && parentId !== 1) {
+      if (parentId && parentId !== 0 && parentId !== 1 && parentId !== 2) {
         const parentInfo = await getCategoryFullInfo(parentId, cache, config);
         if (parentInfo.hierarchy.length > 0) {
-          hierarchy.unshift(...parentInfo.hierarchy);
+          // Filtrar "Inicio" de la jerarquía del padre
+          const filteredParentHierarchy = parentInfo.hierarchy.filter(n => n && n.toLowerCase() !== 'inicio');
+          hierarchy.unshift(...filteredParentHierarchy);
         }
       }
 

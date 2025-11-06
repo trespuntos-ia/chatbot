@@ -124,7 +124,10 @@ async function getCategoryFullInfo(
         const parentId = data.category.id_parent ? parseInt(data.category.id_parent) : null;
         
         cache.set(currentId, { name, parent: parentId });
-        hierarchy.unshift(name);
+        // Excluir "Inicio" de la jerarquía
+        if (name && name.toLowerCase() !== 'inicio') {
+          hierarchy.unshift(name);
+        }
         currentId = parentId;
       } else {
         break;
@@ -202,17 +205,20 @@ async function mapProduct(
     const categoryInfo = await getCategoryFullInfo(catId, fullCategoryCache, config);
     const hierarchy = categoryInfo.hierarchy || [];
 
-    if (hierarchy.length === 0) continue;
+    // Filtrar "Inicio" de la jerarquía
+    const filteredHierarchy = hierarchy.filter(name => name && name.toLowerCase() !== 'inicio');
+    
+    if (filteredHierarchy.length === 0) continue;
 
-    const level1 = hierarchy[0] || '';
-    const level2 = hierarchy[1] || null;
-    const level3 = hierarchy[2] || null;
+    const level1 = filteredHierarchy[0] || '';
+    const level2 = filteredHierarchy[1] || null;
+    const level3 = filteredHierarchy[2] || null;
 
     allCategories.push({
       category: level1,
       subcategory: level2,
       subsubcategory: level3 || null,
-      hierarchy: hierarchy,
+      hierarchy: filteredHierarchy, // Usar la jerarquía filtrada
       category_id: catId,
       is_primary: i === 0
     });
