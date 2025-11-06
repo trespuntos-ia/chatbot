@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import { Sparkles } from 'lucide-react';
 import { Chat } from './Chat';
 import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
 import { useChat } from '../contexts/ChatContext';
@@ -30,29 +32,101 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
   return (
     <>
-      {/* Botón reabrir - aparece cuando el modal está cerrado */}
+      {/* Botón animado "Abrir Asistente" - aparece cuando el modal está cerrado */}
       {!isOpen && (
-        <button
+        <motion.button
+          initial={{ scale: 0, rotate: -180 }}
+          animate={{ scale: 1, rotate: 0 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 bg-cyan-500 hover:bg-cyan-600 text-black font-semibold px-6 py-3 rounded-full shadow-xl flex items-center gap-2 transition-all duration-300 hover:scale-105 z-50"
-          aria-label="Abrir Búsqueda"
+          className="fixed bottom-6 right-6 group z-50"
+          aria-label="Abrir Asistente"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          {/* Capa 2: Halo Glow */}
+          <div className="absolute inset-0 rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 opacity-75 blur-xl group-hover:opacity-100 transition-opacity duration-300 animate-pulse" />
+
+          {/* Capa 3: Contenedor Principal */}
+          <div className="relative flex items-center gap-3 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-700 px-6 py-4 rounded-full shadow-2xl overflow-hidden">
+            {/* Capa 4: Efecto Shine */}
+            <motion.div
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+              animate={{ x: ['-100%', '200%'] }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                repeatDelay: 1,
+                ease: "easeInOut"
+              }}
             />
-          </svg>
-          Abrir Búsqueda
-        </button>
+
+            {/* Capa 5A: Icono con Rotación */}
+            <motion.div
+              animate={{ rotate: [0, 10, -10, 10, 0] }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                repeatDelay: 0.5,
+                ease: "easeInOut"
+              }}
+            >
+              <Sparkles className="w-5 h-5 text-white relative z-10" />
+            </motion.div>
+
+            {/* Capa 5B: Texto */}
+            <span className="text-white font-medium relative z-10 tracking-wide">
+              Abrir Asistente
+            </span>
+
+            {/* Capa 6: Partículas Flotantes */}
+            <div className="absolute inset-0 overflow-hidden rounded-full">
+              {/* Partícula 1 - Izquierda */}
+              <motion.div
+                className="absolute w-1 h-1 bg-white rounded-full"
+                style={{ left: '20%', top: '30%' }}
+                animate={{
+                  y: [-10, -20, -10],
+                  opacity: [0, 1, 0],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  delay: 0,
+                }}
+              />
+
+              {/* Partícula 2 - Centro */}
+              <motion.div
+                className="absolute w-1 h-1 bg-white rounded-full"
+                style={{ left: '60%', top: '40%' }}
+                animate={{
+                  y: [-10, -20, -10],
+                  opacity: [0, 1, 0],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  delay: 0.5,
+                }}
+              />
+
+              {/* Partícula 3 - Derecha */}
+              <motion.div
+                className="absolute w-1 h-1 bg-white rounded-full"
+                style={{ left: '80%', top: '50%' }}
+                animate={{
+                  y: [-10, -20, -10],
+                  opacity: [0, 1, 0],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  delay: 1,
+                }}
+              />
+            </div>
+          </div>
+        </motion.button>
       )}
 
       {/* Modal flotante - esquina superior derecha */}
@@ -96,8 +170,8 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
               </svg>
             </button>
 
-            {/* Logo y descripción de ChefCopilot */}
-            <div className="flex-1 text-center">
+            {/* Logo y descripción de ChefCopilot - alineado a la derecha */}
+            <div className="flex-1 text-right">
               <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
               <p className="text-xs text-gray-400">Asesor experto en cocina profesional</p>
             </div>
