@@ -144,40 +144,42 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
           isExpanded ? 'md:rounded-2xl' : 'rounded-2xl'
         }`}>
           {/* Header con botones de control */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700/50">
-            {/* Botón cerrar (X) - esquina superior izquierda */}
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                setIsExpanded(false);
-              }}
-              className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
-              aria-label="Cerrar"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+          <div className="px-6 py-4 border-b border-gray-700/50">
+            {/* Primera fila: botones y título */}
+            <div className="flex items-center justify-between mb-3">
+              {/* Botón cerrar (X) - esquina superior izquierda */}
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  setIsExpanded(false);
+                }}
+                className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
+                aria-label="Cerrar"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
 
-            {/* Logo y descripción de ChefCopilot - alineado a la derecha */}
-            <div className="flex-1 text-right">
-              <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
-              <p className="text-xs text-gray-400">Asesor experto en cocina profesional</p>
-            </div>
+              {/* Logo y descripción de ChefCopilot - alineado a la derecha */}
+              <div className="flex-1 text-right">
+                <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
+                <p className="text-xs text-gray-400">Tu asesor experto en cocina profesional</p>
+              </div>
 
-            {/* Botones de control - esquina superior derecha */}
-            <div className="flex items-center gap-2">
+              {/* Botones de control - esquina superior derecha */}
+              <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
                 className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
@@ -239,6 +241,14 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                   />
                 </svg>
               </button>
+              </div>
+            </div>
+            
+            {/* Segunda fila: texto descriptivo */}
+            <div className="text-center">
+              <p className="text-xs text-gray-400">
+                Explora productos, técnicas, accesorios o platos con un asistente que habla tu idioma culinario.
+              </p>
             </div>
           </div>
 

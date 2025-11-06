@@ -4,21 +4,13 @@ import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
 import { getSourcesDescription } from '../utils/sourceLabels';
 import { useChat } from '../contexts/ChatContext';
+import { getSuggestedQueries } from '../services/suggestedQueriesService';
 import type { ChatConfig, ChatMessage, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
   onFirstMessage?: () => void;
 }
-
-// Sugerencias de búsqueda específicas del contexto gastronómico
-const SUGGESTED_QUERIES = [
-  "Busco un ahumador portátil para showcooking en sala",
-  "¿Tenéis herramientas para trabajar con nitrógeno líquido?",
-  "Necesito una máquina para destilaciones en frío",
-  "¿Tenéis copas o vasos que funcionen con hielo seco?",
-  "Producto para infusionar aceites en frío"
-];
 
 export function Chat({ config, onFirstMessage }: ChatProps) {
   const { messages, setMessages } = useChat();
@@ -27,13 +19,35 @@ export function Chat({ config, onFirstMessage }: ChatProps) {
   const [loadingStage, setLoadingStage] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [sessionId, setSessionId] = useState<string>('');
-  const [isFocused, setIsFocused] = useState(false);
+  const [suggestedQueries, setSuggestedQueries] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const hasSentFirstMessage = useRef(false);
 
   // Determinar si estamos en estado inicial (sin mensajes)
   const isInitialState = messages.length === 0;
+
+  // Cargar sugerencias al montar
+  useEffect(() => {
+    loadSuggestedQueries();
+  }, []);
+
+  const loadSuggestedQueries = async () => {
+    try {
+      const queries = await getSuggestedQueries();
+      setSuggestedQueries(queries.map(q => q.query_text));
+    } catch (error) {
+      console.error('Error loading suggested queries:', error);
+      // Si falla, usar sugerencias por defecto
+      setSuggestedQueries([
+        "Busco un ahumador portátil para showcooking en sala",
+        "¿Tenéis herramientas para trabajar con nitrógeno líquido?",
+        "Necesito una máquina para destilaciones en frío",
+        "¿Tenéis copas o vasos que funcionen con hielo seco?",
+        "Producto para infusionar aceites en frío"
+      ]);
+    }
+  };
 
   // Generar o recuperar session_id desde localStorage
   useEffect(() => {
@@ -424,7 +438,7 @@ export function Chat({ config, onFirstMessage }: ChatProps) {
 
       {/* Input - Estado inicial vs conversacional */}
       {isInitialState ? (
-        // Estado inicial: textarea grande con sugerencias
+        // Estado inicial: textarea grande con sugerencias debajo
         <div className="border-t border-gray-700/50 pt-6 px-6 pb-6">
           <div className="relative">
             <textarea
@@ -432,33 +446,16 @@ export function Chat({ config, onFirstMessage }: ChatProps) {
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyPress={handleKeyPress}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setTimeout(() => setIsFocused(false), 200)}
-              placeholder="Escribe tu pregunta..."
+              placeholder="Pregunta cualquier cosa..."
               disabled={isLoading}
               rows={4}
               className="w-full min-h-[100px] px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500"
             />
-            
-            {/* Sugerencias de búsqueda - aparecen cuando el input tiene foco */}
-            {isFocused && isInitialState && (
-              <div className="absolute bottom-full left-0 right-0 mb-2 bg-[#2a2a2a] border border-gray-700/50 rounded-xl shadow-xl overflow-hidden z-10">
-                {SUGGESTED_QUERIES.map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className="w-full text-left px-6 py-3 text-sm text-gray-300 hover:bg-[#202020] transition-colors border-b border-gray-700/30 last:border-b-0"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            )}
 
-            {/* Botones en fila inferior */}
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-700/30">
+            {/* Botones en fila inferior dentro del textarea */}
+            <div className="absolute bottom-3 right-3 flex items-center gap-2">
               <button
-                className="p-3 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded-lg transition"
+                className="p-2 text-gray-400 hover:text-white hover:bg-[#202020] rounded-lg transition"
                 aria-label="Micrófono"
                 title="Micrófono (próximamente)"
               >
@@ -480,7 +477,7 @@ export function Chat({ config, onFirstMessage }: ChatProps) {
               <button
                 onClick={handleSendMessage}
                 disabled={isLoading || !inputMessage.trim()}
-                className={`px-6 py-3 rounded-lg font-medium transition ${
+                className={`p-2 rounded-lg transition ${
                   inputMessage.trim() && !isLoading
                     ? 'bg-cyan-500 text-black hover:bg-cyan-400'
                     : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -503,6 +500,33 @@ export function Chat({ config, onFirstMessage }: ChatProps) {
                 </svg>
               </button>
             </div>
+          </div>
+
+          {/* Sugerencias de búsqueda - siempre visibles debajo del input */}
+          <div className="mt-4 space-y-2">
+            {suggestedQueries.map((suggestion, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSuggestionClick(suggestion)}
+                className="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-[#2a2a2a] hover:text-white transition-colors rounded-lg flex items-center gap-3 group"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4 text-gray-400 group-hover:text-gray-300 flex-shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                <span className="flex-1">{suggestion}</span>
+              </button>
+            ))}
           </div>
         </div>
       ) : (

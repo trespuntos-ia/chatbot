@@ -8,6 +8,11 @@ import {
   processPrompt,
   extractVariablesFromPrompt
 } from '../services/promptService';
+import {
+  getAllSuggestedQueries,
+  updateSuggestedQueries,
+  type SuggestedQuery
+} from '../services/suggestedQueriesService';
 import type { SystemPrompt, PromptVariable } from '../types';
 
 export function PromptConfig() {
@@ -20,10 +25,17 @@ export function PromptConfig() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
+  
+  // Estado para sugerencias
+  const [suggestedQueries, setSuggestedQueries] = useState<SuggestedQuery[]>([]);
+  const [isLoadingQueries, setIsLoadingQueries] = useState(false);
+  const [queriesError, setQueriesError] = useState<string>('');
+  const [queriesSuccess, setQueriesSuccess] = useState<string>('');
 
-  // Cargar prompts al montar
+  // Cargar prompts y sugerencias al montar
   useEffect(() => {
     loadPrompts();
+    loadSuggestedQueries();
   }, []);
 
   // Cuando se selecciona un prompt, cargar sus datos
@@ -213,16 +225,101 @@ export function PromptConfig() {
     return processPrompt(tempPrompt);
   };
 
+  const loadSuggestedQueries = async () => {
+    try {
+      setIsLoadingQueries(true);
+      setQueriesError('');
+      const queries = await getAllSuggestedQueries();
+      // Ordenar por display_order
+      queries.sort((a, b) => a.display_order - b.display_order);
+      setSuggestedQueries(queries);
+    } catch (err) {
+      setQueriesError(err instanceof Error ? err.message : 'Error al cargar sugerencias');
+    } finally {
+      setIsLoadingQueries(false);
+    }
+  };
+
+  const handleSaveQueries = async () => {
+    try {
+      setIsLoadingQueries(true);
+      setQueriesError('');
+      setQueriesSuccess('');
+      
+      // Preparar queries para guardar (sin id, created_at, updated_at)
+      const queriesToSave = suggestedQueries.map((q, index) => ({
+        query_text: q.query_text,
+        display_order: index + 1,
+        is_active: q.is_active
+      }));
+
+      await updateSuggestedQueries(queriesToSave);
+      setQueriesSuccess('Sugerencias guardadas correctamente');
+      await loadSuggestedQueries();
+    } catch (err) {
+      setQueriesError(err instanceof Error ? err.message : 'Error al guardar sugerencias');
+    } finally {
+      setIsLoadingQueries(false);
+    }
+  };
+
+  const handleAddQuery = () => {
+    setSuggestedQueries([
+      ...suggestedQueries,
+      {
+        id: `temp-${Date.now()}`,
+        query_text: '',
+        display_order: suggestedQueries.length + 1,
+        is_active: true
+      }
+    ]);
+  };
+
+  const handleRemoveQuery = (index: number) => {
+    const newQueries = suggestedQueries.filter((_, i) => i !== index);
+    // Reordenar
+    newQueries.forEach((q, i) => {
+      q.display_order = i + 1;
+    });
+    setSuggestedQueries(newQueries);
+  };
+
+  const handleUpdateQuery = (index: number, updates: Partial<SuggestedQuery>) => {
+    const newQueries = [...suggestedQueries];
+    newQueries[index] = { ...newQueries[index], ...updates };
+    setSuggestedQueries(newQueries);
+  };
+
+  const handleMoveQuery = (index: number, direction: 'up' | 'down') => {
+    if (
+      (direction === 'up' && index === 0) ||
+      (direction === 'down' && index === suggestedQueries.length - 1)
+    ) {
+      return;
+    }
+
+    const newQueries = [...suggestedQueries];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    [newQueries[index], newQueries[targetIndex]] = [newQueries[targetIndex], newQueries[index]];
+    
+    // Actualizar display_order
+    newQueries.forEach((q, i) => {
+      q.display_order = i + 1;
+    });
+    
+    setSuggestedQueries(newQueries);
+  };
+
   const previewText = getPreviewText();
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-900 mb-2">
-          Configuración de Prompts
+          Configuración AI
         </h2>
         <p className="text-slate-600">
-          Crea y gestiona los prompts del sistema. Los prompts activos se usan en el chat.
+          Crea y gestiona los prompts del sistema y las sugerencias de búsqueda del chat.
         </p>
       </div>
 
@@ -427,6 +524,120 @@ export function PromptConfig() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Sección de Sugerencias de Búsqueda */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">
+            Sugerencias de Búsqueda
+          </h3>
+          <p className="text-sm text-slate-600">
+            Gestiona las sugerencias que aparecen debajo del input en el estado inicial del chat.
+          </p>
+        </div>
+
+        {/* Mensajes de error/éxito para sugerencias */}
+        {queriesError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800 mb-4">
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <span>{queriesError}</span>
+            </div>
+          </div>
+        )}
+
+        {queriesSuccess && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-green-800 mb-4">
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span>{queriesSuccess}</span>
+            </div>
+          </div>
+        )}
+
+        {isLoadingQueries && suggestedQueries.length === 0 ? (
+          <div className="text-center py-8 text-slate-500">Cargando sugerencias...</div>
+        ) : (
+          <div className="space-y-4">
+            {suggestedQueries.map((query, index) => (
+              <div key={query.id} className="flex items-center gap-3 p-4 border border-slate-200 rounded-lg">
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() => handleMoveQuery(index, 'up')}
+                    disabled={index === 0}
+                    className="p-1 text-slate-400 hover:text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Mover arriba"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => handleMoveQuery(index, 'down')}
+                    disabled={index === suggestedQueries.length - 1}
+                    className="p-1 text-slate-400 hover:text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Mover abajo"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    value={query.query_text}
+                    onChange={(e) => handleUpdateQuery(index, { query_text: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Texto de la sugerencia..."
+                  />
+                </div>
+
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={query.is_active}
+                    onChange={(e) => handleUpdateQuery(index, { is_active: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-slate-600">Activa</span>
+                </label>
+
+                <button
+                  onClick={() => handleRemoveQuery(index)}
+                  className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition"
+                  title="Eliminar"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleAddQuery}
+                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition text-sm font-medium"
+              >
+                + Añadir Sugerencia
+              </button>
+              <button
+                onClick={handleSaveQueries}
+                disabled={isLoadingQueries}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoadingQueries ? 'Guardando...' : 'Guardar Sugerencias'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
