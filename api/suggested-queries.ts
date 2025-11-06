@@ -1,11 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -20,6 +15,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).end();
     return;
   }
+
+  // Validar variables de entorno
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(500).json({
+      success: false,
+      error: 'Configuración de Supabase faltante. Por favor, configura SUPABASE_URL y SUPABASE_SERVICE_KEY en las variables de entorno de Vercel.'
+    });
+  }
+
+  // Crear cliente de Supabase dentro del handler
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
     // GET: Obtener sugerencias
@@ -37,7 +46,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       const { data, error } = await query.order('display_order', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        const errorMsg = error.message || String(error);
+        if (errorMsg.includes('does not exist') || errorMsg.includes('relation') || errorMsg.includes('42P01')) {
+          throw new Error('La tabla suggested_queries no existe. Por favor, ejecuta el script SQL en Supabase: supabase-suggested-queries-schema.sql');
+        }
+        throw error;
+      }
 
       return res.status(200).json({
         success: true,
@@ -92,16 +107,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('id');
 
       if (fetchError) {
-        // Si la tabla no existe, lanzar error
-        if (fetchError.message.includes('does not exist') || fetchError.message.includes('relation')) {
+        // Si la tabla no existe, lanzar error con mensaje claro
+        const errorMsg = fetchError.message || String(fetchError);
+        if (errorMsg.includes('does not exist') || errorMsg.includes('relation') || errorMsg.includes('42P01')) {
           throw new Error('La tabla suggested_queries no existe. Por favor, ejecuta el script SQL en Supabase: supabase-suggested-queries-schema.sql');
         }
-        throw fetchError;
+        console.error('Error fetching existing queries:', fetchError);
+        throw new Error(`Error al obtener sugerencias existentes: ${errorMsg}`);
       }
 
       // Si hay queries existentes, eliminarlas
       if (existingQueries && existingQueries.length > 0) {
-        const idsToDelete = existingQueries.map(q => q.id);
+        const idsToDelete = existingQueries.map((q: any) => q.id);
         const { error: deleteError } = await supabase
           .from('suggested_queries')
           .delete()
@@ -109,7 +126,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (deleteError) {
           console.error('Error deleting existing queries:', deleteError);
-          throw deleteError;
+          const errorMsg = deleteError.message || String(deleteError);
+          throw new Error(`Error al eliminar sugerencias existentes: ${errorMsg}`);
         }
       }
 
@@ -127,7 +145,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .insert(queriesToInsert)
             .select();
 
-          if (insertError) throw insertError;
+          if (insertError) {
+            console.error('Error inserting queries:', insertError);
+            const errorMsg = insertError.message || String(insertError);
+            if (errorMsg.includes('does not exist') || errorMsg.includes('relation') || errorMsg.includes('42P01')) {
+              throw new Error('La tabla suggested_queries no existe. Por favor, ejecuta el script SQL en Supabase: supabase-suggested-queries-schema.sql');
+            }
+            throw new Error(`Error al insertar sugerencias: ${errorMsg}`);
+          }
 
           return res.status(200).json({
             success: true,
@@ -174,14 +199,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('Error en suggested-queries API:', error);
     
     // Asegurar que siempre devolvemos JSON
-    const errorMessage = error instanceof Error 
-      ? error.message 
-      : typeof error === 'string' 
-      ? error 
-      : 'Error desconocido';
+    let errorMessage = 'Error desconocido';
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    } else if (error && typeof error === 'object') {
+      // Intentar extraer mensaje de error de Supabase
+      const errorObj = error as any;
+      errorMessage = errorObj.message || errorObj.error || JSON.stringify(error);
+    }
     
     // Si el error menciona que la tabla no existe, dar un mensaje más claro
-    if (errorMessage.includes('relation') && errorMessage.includes('does not exist')) {
+    if (errorMessage.includes('relation') || errorMessage.includes('does not exist') || errorMessage.includes('42P01') || errorMessage.includes('no existe')) {
       return res.status(500).json({
         success: false,
         error: 'La tabla suggested_queries no existe. Por favor, ejecuta el script SQL en Supabase: supabase-suggested-queries-schema.sql'
