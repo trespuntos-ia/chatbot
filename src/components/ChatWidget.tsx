@@ -11,7 +11,7 @@ interface ChatWidgetProps {
 }
 
 export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true); // Abierto por defecto
   const [isExpanded, setIsExpanded] = useState(false);
   const { messages, clearMessages } = useChat();
 
@@ -41,7 +41,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
           whileTap={{ scale: 0.95 }}
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 group z-50"
-          aria-label="Abrir Asistente"
+          aria-label="Asistente"
         >
           {/* Capa 2: Halo Glow */}
           <div className="absolute inset-0 rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 opacity-75 blur-xl group-hover:opacity-100 transition-opacity duration-300 animate-pulse" />
@@ -75,7 +75,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
             {/* Capa 5B: Texto */}
             <span className="text-white font-medium relative z-10 tracking-wide">
-              Abrir Asistente
+              Asistente
             </span>
 
             {/* Capa 6: Partículas Flotantes */}
