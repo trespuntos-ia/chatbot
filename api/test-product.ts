@@ -21,6 +21,111 @@ function extractMultilanguageValue(field: any): string {
   return '';
 }
 
+// Obtener información básica de una categoría
+async function getCategoryBasicInfo(
+  categoryId: number,
+  apiKey: string,
+  prestashopUrl: string,
+  langCode: number
+): Promise<{ name: string; parentId: number | null } | null> {
+  if (!categoryId || categoryId === 1 || categoryId === 0 || categoryId === 2) {
+    return null;
+  }
+
+  try {
+    const queryParams = new URLSearchParams({
+      ws_key: apiKey,
+      output_format: 'JSON',
+      language: String(langCode || 1),
+    });
+    const url = `${prestashopUrl.replace(/\/$/, '')}/categories/${categoryId}?${queryParams.toString()}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
+        'User-Agent': 'Mozilla/5.0 (compatible; PrestaShopProductGrid/1.0)',
+      },
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data?.category) {
+      const name = extractMultilanguageValue(data.category.name);
+      const parentId = data.category.id_parent ? parseInt(data.category.id_parent) : null;
+      return { name, parentId };
+    }
+  } catch (error) {
+    console.error(`Error fetching category ${categoryId}:`, error);
+  }
+
+  return null;
+}
+
+// Obtener jerarquía completa de una categoría (hasta 3 niveles)
+async function getCategoryHierarchy(
+  categoryId: number,
+  cache: Map<number, { name: string; parentId: number | null; hierarchy: string[] }>,
+  apiKey: string,
+  prestashopUrl: string,
+  langCode: number
+): Promise<{ name: string; parentId: number | null; hierarchy: string[] }> {
+  if (!categoryId || categoryId === 1 || categoryId === 0 || categoryId === 2) {
+    return { name: '', parentId: null, hierarchy: [] };
+  }
+
+  if (cache.has(categoryId)) {
+    return cache.get(categoryId)!;
+  }
+
+  const hierarchy: string[] = [];
+  let currentId: number | null = categoryId;
+  const visited = new Set<number>();
+
+  while (currentId && currentId !== 1 && currentId !== 0 && currentId !== 2 && !visited.has(currentId)) {
+    visited.add(currentId);
+
+    if (cache.has(currentId)) {
+      const cached = cache.get(currentId)!;
+      const filteredCachedHierarchy = cached.hierarchy.filter(name => name && name.toLowerCase() !== 'inicio');
+      hierarchy.unshift(...filteredCachedHierarchy);
+      break;
+    }
+
+    const basicInfo = await getCategoryBasicInfo(currentId, apiKey, prestashopUrl, langCode);
+    if (!basicInfo) {
+      break;
+    }
+
+    if (basicInfo.name && basicInfo.name.toLowerCase() !== 'inicio') {
+      hierarchy.unshift(basicInfo.name);
+    }
+
+    if (!basicInfo.parentId || basicInfo.parentId === 1 || basicInfo.parentId === 0 || basicInfo.parentId === 2) {
+      break;
+    }
+
+    currentId = basicInfo.parentId;
+
+    if (hierarchy.length >= 3) {
+      break;
+    }
+  }
+
+  const basicInfo = await getCategoryBasicInfo(categoryId, apiKey, prestashopUrl, langCode);
+  const parentId = basicInfo?.parentId || null;
+  const filteredHierarchy = hierarchy.filter(name => name && name.toLowerCase() !== 'inicio');
+
+  const categoryInfo = {
+    name: filteredHierarchy[filteredHierarchy.length - 1] || '',
+    parentId,
+    hierarchy: filteredHierarchy
+  };
+
+  cache.set(categoryId, categoryInfo);
+  return categoryInfo;
+}
+
 // Obtener nombre de categoría (solo el nombre, no la jerarquía completa)
 async function getCategoryName(
   categoryId: number,
@@ -69,10 +174,11 @@ async function getCategoryName(
   return '';
 }
 
-// Mapear un producto (igual que en PHP)
+// Mapear un producto (igual que en PHP, pero también con jerarquía completa)
 async function mapTestProduct(
   product: any,
   categoryCache: Map<number, string>,
+  fullCategoryCache: Map<number, { name: string; parentId: number | null; hierarchy: string[] }>,
   apiKey: string,
   prestashopUrl: string,
   langCode: number,
@@ -84,10 +190,10 @@ async function mapTestProduct(
     ? extractMultilanguageValue(product.description_short)
     : '';
 
-  // Obtener TODAS las categorías del producto (como en PHP)
-  const categorias: string[] = [];
+  // Extraer todas las categorías del producto
+  const allCategoryIds: number[] = [];
   
-  // Obtener todas las categorías de associations
+  // Primero extraer todas las categorías de associations (como en PHP)
   if (product.associations && product.associations.categories) {
     let associatedCategories: any[] = [];
 
@@ -110,20 +216,59 @@ async function mapTestProduct(
       }
       
       // Excluir categoría "Inicio" (ID 2) y raíz (1, 0)
-      if (catId && catId !== 1 && catId !== 0 && catId !== 2) {
-        const nombreCat = await getCategoryName(catId, categoryCache, apiKey, prestashopUrl, langCode);
-        if (nombreCat && nombreCat.toLowerCase() !== 'inicio') {
-          categorias.push(nombreCat);
-        }
+      if (catId && catId !== 1 && catId !== 0 && catId !== 2 && !allCategoryIds.includes(catId)) {
+        allCategoryIds.push(catId);
       }
     }
   }
   
   // Si no hay categorías en associations, usar la categoría por defecto
-  if (categorias.length === 0 && product.id_category_default && product.id_category_default != 2) {
-    const nombreCat = await getCategoryName(parseInt(product.id_category_default), categoryCache, apiKey, prestashopUrl, langCode);
+  if (allCategoryIds.length === 0 && product.id_category_default && product.id_category_default != 2) {
+    const defaultCategoryId = parseInt(product.id_category_default);
+    if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0 && defaultCategoryId !== 2) {
+      allCategoryIds.push(defaultCategoryId);
+    }
+  }
+
+  // Obtener jerarquía completa de todas las categorías
+  const allCategories: Array<{
+    category: string;
+    subcategory: string | null;
+    subsubcategory: string | null;
+    hierarchy: string[];
+    category_id: number;
+    is_primary: boolean;
+  }> = [];
+
+  for (let i = 0; i < allCategoryIds.length; i++) {
+    const catId = allCategoryIds[i];
+    const categoryInfo = await getCategoryHierarchy(catId, fullCategoryCache, apiKey, prestashopUrl, langCode);
+    const hierarchy = categoryInfo.hierarchy || [];
+
+    if (hierarchy.length === 0) continue;
+
+    const level1 = hierarchy[0] || '';
+    const level2 = hierarchy[1] || null;
+    const level3 = hierarchy[2] || null;
+
+    allCategories.push({
+      category: level1,
+      subcategory: level2,
+      subsubcategory: level3 || null,
+      hierarchy: hierarchy,
+      category_id: catId,
+      is_primary: i === 0
+    });
+  }
+
+  // Obtener nombres simples para el campo category (como en PHP)
+  const categorias: string[] = [];
+  for (const catId of allCategoryIds) {
+    const nombreCat = await getCategoryName(catId, categoryCache, apiKey, prestashopUrl, langCode);
     if (nombreCat && nombreCat.toLowerCase() !== 'inicio') {
-      categorias.push(nombreCat);
+      if (!categorias.includes(nombreCat)) {
+        categorias.push(nombreCat);
+      }
     }
   }
   
@@ -178,6 +323,7 @@ async function mapTestProduct(
     image: imageUrl,
     product_url: productUrl,
     categorias_detalle: categorias,
+    all_categories: allCategories.length > 0 ? allCategories : undefined,
   };
 }
 
@@ -297,9 +443,11 @@ export default async function handler(
 
     // Mapear el producto
     const categoryCache = new Map<number, string>();
+    const fullCategoryCache = new Map<number, { name: string; parentId: number | null; hierarchy: string[] }>();
     const mappedProduct = await mapTestProduct(
       rawProduct,
       categoryCache,
+      fullCategoryCache,
       apiConfig.apiKey,
       apiConfig.prestashopUrl,
       apiConfig.langCode,
