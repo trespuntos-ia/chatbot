@@ -105,3 +105,4 @@ git checkout -b restore-stable v1.0-stable
 - La limpieza de BD funciona con política DELETE habilitada
 
 
+

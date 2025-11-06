@@ -51,7 +51,7 @@ export default async function handler(
     // Obtener productos existentes para preservar valores cuando los nuevos están vacíos
     const { data: existingProducts } = await supabase
       .from('products')
-      .select('sku, category, subcategory, description, image_url, date_add')
+      .select('sku, category, subcategory, description, image_url, date_add, all_categories')
       .in('sku', products.map((p: any) => p.sku).filter(Boolean));
 
     const existingMap = new Map<string, any>();
@@ -82,6 +82,8 @@ export default async function handler(
         category: product.category || existing?.category || '',
         // Agregar subcategoría
         subcategory: product.subcategory || existing?.subcategory || null,
+        // Agregar all_categories (todas las categorías con jerarquía)
+        all_categories: product.all_categories || existing?.all_categories || [],
         description: product.description || existing?.description || '',
         sku: product.sku || '',
         // Preservar imagen existente si la nueva está vacía

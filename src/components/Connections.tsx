@@ -235,9 +235,15 @@ export function Connections() {
         throw new Error(data.error || data.message || 'Error al eliminar productos');
       }
 
+      let message = `Se eliminaron ${data.deleted || 0} productos de la base de datos. ${data.verified ? 'Verificado correctamente.' : 'Verifica en Supabase.'}`;
+      
+      if (data.next_steps && Array.isArray(data.next_steps)) {
+        message += '\n\nPróximos pasos:\n' + data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n');
+      }
+      
       setSaveStatus({ 
         type: 'success', 
-        message: `Se eliminaron ${data.deleted || 0} productos de la base de datos. ${data.verified ? 'Verificado correctamente.' : 'Verifica en Supabase.'}` 
+        message: message
       });
       
       // Limpiar la lista de productos después de eliminar

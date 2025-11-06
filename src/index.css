@@ -9,6 +9,26 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Mejorar scroll en móvil */
+  .scroll-smooth {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Asegurar que los elementos no se compriman */
+  .min-w-fit {
+    min-width: fit-content;
+  }
 }
 
 body {

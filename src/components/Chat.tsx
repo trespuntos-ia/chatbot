@@ -108,6 +108,12 @@ export function Chat({ config }: ChatProps) {
           lastMessage.products = products;
         }
 
+        // Añadir conversation_id al último mensaje del asistente
+        if (lastMessage && response.conversation_id) {
+          lastMessage.conversation_id = response.conversation_id;
+          lastMessage.feedback_submitted = false;
+        }
+
         // Actualizar mensajes con el historial completo
         setMessages(response.conversation_history);
       } else {
@@ -149,25 +155,62 @@ export function Chat({ config }: ChatProps) {
     }
   };
 
+  const handleFeedback = async (conversationId: string, helpful: boolean, messageIndex: number) => {
+    if (!conversationId) return;
+
+    try {
+      const response = await fetch('/api/save-feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          conversationId,
+          helpful
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Marcar el feedback como enviado en el mensaje
+        setMessages(prev => {
+          const updated = [...prev];
+          if (updated[messageIndex]) {
+            updated[messageIndex] = {
+              ...updated[messageIndex],
+              feedback_submitted: true
+            };
+          }
+          return updated;
+        });
+      } else {
+        console.error('Error guardando feedback:', result.error);
+      }
+    } catch (error) {
+      console.error('Error enviando feedback:', error);
+    }
+  };
+
 
 
   return (
     <div className="flex flex-col h-full">
       {/* Mensajes */}
-      <div className="flex-1 overflow-y-auto space-y-3 mb-4 px-4 py-4">
+      <div className="flex-1 overflow-y-auto space-y-5 sm:space-y-3 mb-4 px-5 sm:px-4 py-5 sm:py-4">
         {/* Mensajes de bienvenida cuando no hay conversación */}
         {messages.length === 0 && (
-          <div className="space-y-3">
+          <div className="space-y-5 sm:space-y-3">
             <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-slate-100 text-slate-700">
-                <div className="whitespace-pre-wrap text-sm">
+              <div className="max-w-[95%] sm:max-w-[85%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-100 text-slate-700">
+                <div className="whitespace-pre-wrap text-lg sm:text-sm">
                   👋 ¡Bienvenido a 100%Chef!
                 </div>
               </div>
             </div>
             <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-slate-100 text-slate-700">
-                <div className="whitespace-pre-wrap text-sm">
+              <div className="max-w-[95%] sm:max-w-[85%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-100 text-slate-700">
+                <div className="whitespace-pre-wrap text-lg sm:text-sm leading-relaxed">
                   Si mezclas curiosidad con técnica, estás en el lugar correcto. Cuéntame tu receta… yo pongo la tecnología. ¿En qué puedo ayudarte hoy?
                 </div>
               </div>
@@ -201,13 +244,13 @@ export function Chat({ config }: ChatProps) {
                   
                   return (
                     <div key={`text-${partIndex}`} className="flex justify-start">
-                      <div className="max-w-[90%] rounded-2xl px-4 py-3 bg-slate-100 text-slate-700">
+                      <div className="max-w-[95%] sm:max-w-[90%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-100 text-slate-700">
                         <div 
-                          className="prose prose-sm max-w-none prose-headings:text-slate-700 prose-p:text-slate-700 prose-a:text-blue-600"
+                          className="prose prose-lg sm:prose-sm max-w-none prose-headings:text-slate-700 prose-p:text-slate-700 prose-a:text-blue-600 prose-p:text-lg sm:prose-p:text-sm prose-headings:text-xl sm:prose-headings:text-base"
                           dangerouslySetInnerHTML={{ __html: html }}
                         />
                         {partIndex === 0 && message.function_calls && (
-                          <div className="mt-2 text-xs opacity-75">
+                          <div className="mt-3 text-base sm:text-xs opacity-75">
                             🔍 Consultó la base de datos
                           </div>
                         )}
@@ -218,7 +261,7 @@ export function Chat({ config }: ChatProps) {
                 
                 {/* Todas las tarjetas de productos - ancho completo */}
                 {productParts.length > 0 && (
-                  <div className="w-full -mx-4 px-4 space-y-3">
+                  <div className="w-full -mx-4 px-4 space-y-4 sm:space-y-3">
                     {productParts.map((part, productIndex) => (
                       <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
                     ))}
@@ -228,8 +271,40 @@ export function Chat({ config }: ChatProps) {
                 {/* Mostrar fuentes al final */}
                 {message.sources && message.sources.length > 0 && (
                   <div className="flex justify-start">
-                    <div className="max-w-[90%] text-xs text-slate-500">
+                    <div className="max-w-[95%] text-base sm:text-xs text-slate-500">
                       {getSourcesDescription(message.sources)}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Pregunta de satisfacción */}
+                {message.conversation_id && !message.feedback_submitted && (
+                  <div className="flex justify-start mt-5 sm:mt-3">
+                    <div className="max-w-[95%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-50 border border-slate-200">
+                      <p className="text-base sm:text-xs text-slate-600 mb-4 sm:mb-2 font-medium">¿Te ha ayudado la respuesta?</p>
+                      <div className="flex gap-4 sm:gap-2">
+                        <button
+                          onClick={() => handleFeedback(message.conversation_id!, true, index)}
+                          className="px-6 py-3 sm:px-4 sm:py-2 text-lg sm:text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                        >
+                          Sí
+                        </button>
+                        <button
+                          onClick={() => handleFeedback(message.conversation_id!, false, index)}
+                          className="px-6 py-3 sm:px-4 sm:py-2 text-lg sm:text-sm font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Confirmación de feedback enviado */}
+                {message.feedback_submitted && (
+                  <div className="flex justify-start mt-3">
+                    <div className="max-w-[95%] text-base sm:text-xs text-slate-500">
+                      ✓ Gracias por tu feedback
                     </div>
                   </div>
                 )}
@@ -246,24 +321,50 @@ export function Chat({ config }: ChatProps) {
                 }`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                  className={`max-w-[95%] sm:max-w-[85%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 ${
                     message.role === 'user'
                       ? 'bg-blue-600 text-white'
                       : 'bg-slate-100 text-slate-700'
                   }`}
                 >
-                  <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                  <div className="whitespace-pre-wrap text-lg sm:text-sm leading-relaxed">{message.content}</div>
                   {message.function_calls && (
-                    <div className="mt-2 text-xs opacity-75">
+                    <div className="mt-3 text-base sm:text-xs opacity-75">
                       🔍 Consultó la base de datos
                     </div>
                   )}
                   {/* Fuentes de información */}
                   {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-slate-200">
-                      <p className="text-xs text-slate-500">
+                    <div className="mt-4 pt-4 border-t border-slate-200">
+                      <p className="text-base sm:text-xs text-slate-500">
                         {getSourcesDescription(message.sources)}
                       </p>
+                    </div>
+                  )}
+                  {/* Pregunta de satisfacción */}
+                  {message.role === 'assistant' && message.conversation_id && !message.feedback_submitted && (
+                    <div className="mt-4 pt-4 border-t border-slate-200">
+                      <p className="text-base sm:text-xs text-slate-600 mb-4 sm:mb-2 font-medium">¿Te ha ayudado la respuesta?</p>
+                      <div className="flex gap-4 sm:gap-2">
+                        <button
+                          onClick={() => handleFeedback(message.conversation_id!, true, index)}
+                          className="px-6 py-3 sm:px-3 sm:py-1.5 text-base sm:text-xs font-medium bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                        >
+                          Sí
+                        </button>
+                        <button
+                          onClick={() => handleFeedback(message.conversation_id!, false, index)}
+                          className="px-6 py-3 sm:px-3 sm:py-1.5 text-base sm:text-xs font-medium bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Confirmación de feedback enviado */}
+                  {message.role === 'assistant' && message.feedback_submitted && (
+                    <div className="mt-4 pt-4 border-t border-slate-200">
+                      <p className="text-base sm:text-xs text-slate-500">✓ Gracias por tu feedback</p>
                     </div>
                   )}
                 </div>
@@ -275,10 +376,10 @@ export function Chat({ config }: ChatProps) {
 
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-slate-100 rounded-2xl px-4 py-3">
-              <div className="flex items-center gap-2">
+            <div className="bg-slate-100 rounded-2xl px-6 py-5 sm:px-4 sm:py-3">
+              <div className="flex items-center gap-4 sm:gap-2">
                 <svg
-                  className="animate-spin h-4 w-4 text-slate-600"
+                  className="animate-spin h-6 w-6 sm:h-4 sm:w-4 text-slate-600"
                   xmlns="http://www.w3.org/2000/svg"
                   fill="none"
                   viewBox="0 0 24 24"
@@ -297,7 +398,7 @@ export function Chat({ config }: ChatProps) {
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   ></path>
                 </svg>
-                <span className="text-sm text-slate-600">
+                <span className="text-lg sm:text-sm text-slate-600">
                   {loadingStage || 'Consultando...'}
                 </span>
               </div>
@@ -310,22 +411,22 @@ export function Chat({ config }: ChatProps) {
 
       {/* Error */}
       {error && (
-        <div className="mb-4 mx-4 bg-red-50 border border-red-200 rounded-xl p-3 text-red-800 text-sm">
-          <div className="flex items-center gap-2">
-            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+        <div className="mb-4 mx-5 sm:mx-4 bg-red-50 border border-red-200 rounded-xl p-5 sm:p-3 text-red-800 text-lg sm:text-sm">
+          <div className="flex items-center gap-4 sm:gap-2">
+            <svg className="h-7 w-7 sm:h-5 sm:w-5" fill="currentColor" viewBox="0 0 20 20">
               <path
                 fillRule="evenodd"
                 d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
                 clipRule="evenodd"
               />
             </svg>
-            <span>{error}</span>
+            <span className="flex-1">{error}</span>
             <button
               onClick={() => setError('')}
-              className="ml-auto text-red-600 hover:text-red-800"
+              className="text-red-600 hover:text-red-800 p-1"
               aria-label="Cerrar error"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -334,8 +435,8 @@ export function Chat({ config }: ChatProps) {
       )}
 
       {/* Input */}
-      <div className="border-t border-slate-100 pt-3 px-4 pb-2">
-        <div className="flex gap-2">
+      <div className="border-t border-slate-100 pt-5 sm:pt-3 px-5 sm:px-4 pb-4 sm:pb-2">
+        <div className="flex gap-4 sm:gap-2">
           <textarea
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
@@ -343,16 +444,16 @@ export function Chat({ config }: ChatProps) {
             placeholder="Escribe tu pregunta..."
             disabled={isLoading}
             rows={2}
-            className="flex-1 px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            className="flex-1 px-6 py-4 sm:px-4 sm:py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-lg sm:text-sm"
           />
           <button
             onClick={handleSendMessage}
             disabled={isLoading || !inputMessage.trim()}
-            className="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-6 py-4 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-w-[60px] sm:min-w-0"
           >
             {isLoading ? (
               <svg
-                className="animate-spin h-5 w-5"
+                className="animate-spin h-7 w-7 sm:h-5 sm:w-5"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
@@ -374,7 +475,7 @@ export function Chat({ config }: ChatProps) {
             ) : (
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
+                className="h-7 w-7 sm:h-5 sm:w-5"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"

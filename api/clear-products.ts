@@ -37,6 +37,9 @@ export default async function handler(
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Nota: La estructura de la tabla debe actualizarse manualmente ejecutando
+    // supabase-add-all-categories.sql en Supabase SQL Editor antes de escanear productos
+
     // Primero obtener el conteo antes de eliminar
     const { count: totalCount } = await supabase
       .from('products')
@@ -111,14 +114,37 @@ export default async function handler(
 
     console.log(`Productos restantes después de eliminar: ${remainingCount || 0}`);
 
+    // Mensaje informativo sobre la estructura de la tabla
+    let structureMessage = '';
+    try {
+      // Intentar verificar si existe la columna all_categories
+      const { data: columnCheck } = await supabase
+        .from('products')
+        .select('all_categories')
+        .limit(1);
+      
+      if (columnCheck === null || columnCheck.length === 0) {
+        // No hay productos, no podemos verificar la columna
+        structureMessage = ' Nota: Después de escanear productos, se guardarán con todas las categorías (nivel 1, 2 y 3).';
+      }
+    } catch (e) {
+      // Si no existe la columna, se agregará cuando se guarden productos
+      structureMessage = ' Nota: Asegúrate de ejecutar supabase-add-all-categories.sql si aún no lo has hecho.';
+    }
+
     res.status(200).json({ 
       success: true,
-      message: remainingCount === 0 
-        ? 'Todos los productos han sido eliminados correctamente'
-        : `Se eliminaron ${deletedCount} productos, pero quedan ${remainingCount} en la base de datos`,
+      message: (remainingCount === 0 
+        ? 'Todos los productos han sido eliminados correctamente.'
+        : `Se eliminaron ${deletedCount} productos, pero quedan ${remainingCount} en la base de datos.`) + structureMessage,
       deleted: deletedCount || totalCount || 0,
       remaining: remainingCount || 0,
-      verified: (remainingCount || 0) === 0
+      verified: (remainingCount || 0) === 0,
+      next_steps: [
+        'Escanear productos desde PrestaShop',
+        'Los productos se guardarán con todas las categorías (nivel 1, 2 y 3)',
+        'Asegúrate de que la columna all_categories existe en Supabase (ejecuta supabase-add-all-categories.sql si es necesario)'
+      ]
     });
   } catch (error) {
     console.error('Clear products error:', error);

@@ -38,7 +38,8 @@ export default async function handler(
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Obtener parámetros de query
-    const { dateRange = '7d', includeSummary = false } = req.query;
+    const { dateRange = '7d' } = req.query;
+    const includeSummary = req.query.includeSummary;
 
     // Calcular fecha de inicio
     const endDate = new Date();
@@ -204,7 +205,7 @@ export default async function handler(
 
     // Obtener último resumen si se solicita
     let lastSummary = null;
-    const shouldIncludeSummary = includeSummary === 'true' || includeSummary === true || includeSummary === '1';
+    const shouldIncludeSummary = includeSummary === 'true' || includeSummary === '1' || (Array.isArray(includeSummary) && includeSummary[0] === 'true');
     if (shouldIncludeSummary) {
       const { data: summaryData } = await supabase
         .from('chat_analytics_summaries')

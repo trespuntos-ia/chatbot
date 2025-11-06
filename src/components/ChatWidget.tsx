@@ -26,12 +26,12 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 w-16 h-16 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-110 z-50"
+          className="fixed bottom-6 right-6 w-20 h-20 sm:w-16 sm:h-16 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-110 z-50"
           aria-label="Abrir chat"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="h-8 w-8"
+            className="h-10 w-10 sm:h-8 sm:w-8"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -62,29 +62,29 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
         className={`fixed z-50 flex flex-col transition-all duration-300 ${
           isOpen 
             ? (isMaximized 
-                ? 'bottom-0 right-0 top-0 left-1/2 w-1/2 opacity-100 pointer-events-auto' 
-                : 'bottom-6 right-6 w-full max-w-md h-[85vh] max-h-[700px] opacity-100 pointer-events-auto')
+                ? 'bottom-0 right-0 top-0 left-0 sm:left-1/2 w-full sm:w-1/2 opacity-100 pointer-events-auto' 
+                : 'bottom-0 sm:bottom-6 right-0 sm:right-6 w-full sm:w-full sm:max-w-md h-full sm:h-[85vh] sm:max-h-[700px] opacity-100 pointer-events-auto')
             : 'opacity-0 pointer-events-none invisible'
         }`}
       >
         {/* Contenedor principal con esquinas redondeadas */}
         <div className={`bg-white shadow-2xl flex flex-col h-full overflow-hidden ${
-          isMaximized ? 'rounded-none' : 'rounded-t-[2rem] rounded-b-3xl'
+          isMaximized ? 'rounded-none' : 'rounded-t-3xl sm:rounded-t-[2rem] rounded-b-none sm:rounded-b-3xl'
         }`}>
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => {
                   setIsOpen(false);
                   setIsMaximized(false);
                 }}
-                className="p-1.5 hover:bg-slate-100 rounded-lg transition"
+                className="p-2 sm:p-1.5 hover:bg-slate-100 rounded-lg transition"
                 aria-label="Cerrar"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5 text-slate-600"
+                  className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -97,20 +97,20 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                   />
                 </svg>
               </button>
-              <h2 className="text-lg font-semibold text-slate-900">
+              <h2 className="text-xl sm:text-lg font-semibold text-slate-900">
                 Hola, ¿qué tal? 👋
               </h2>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsMaximized(!isMaximized)}
-                className="p-1.5 hover:bg-slate-100 rounded-lg transition"
+                className="p-2 sm:p-1.5 hover:bg-slate-100 rounded-lg transition"
                 aria-label={isMaximized ? "Minimizar" : "Maximizar"}
               >
                 {isMaximized ? (
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5 text-slate-600"
+                    className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -125,7 +125,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                 ) : (
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5 text-slate-600"
+                    className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -144,13 +144,13 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                   e.stopPropagation();
                   handleClearChat();
                 }}
-                className="p-1.5 hover:bg-slate-100 rounded-lg transition"
+                className="p-2 sm:p-1.5 hover:bg-slate-100 rounded-lg transition"
                 aria-label="Limpiar conversación"
                 title="Limpiar conversación"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5 text-slate-600"
+                  className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -179,12 +179,12 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
             setIsOpen(false);
             setIsMaximized(false);
           }}
-          className="absolute -bottom-12 right-4 w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl flex items-center justify-center transition-all duration-300 hover:scale-110 z-50"
+          className="absolute -bottom-16 sm:-bottom-12 right-4 w-16 h-16 sm:w-14 sm:h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl flex items-center justify-center transition-all duration-300 hover:scale-110 z-50"
           aria-label="Cerrar chat"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
+            className="h-7 w-7 sm:h-6 sm:w-6"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"

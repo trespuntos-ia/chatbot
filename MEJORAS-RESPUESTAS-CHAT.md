@@ -477,3 +477,4 @@ Después de implementar, medir:
 - ✅ Uso de fallbacks (target: <10%)
 - ✅ Productos mostrados por búsqueda (target: 3-5 relevantes)
 
+

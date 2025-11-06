@@ -1,3 +1,12 @@
+export interface CategoryInfo {
+  category: string;
+  subcategory: string | null;
+  subsubcategory?: string | null;
+  hierarchy: string[];
+  category_id: number;
+  is_primary: boolean;
+}
+
 export interface Product {
   name: string;
   price: string;
@@ -9,6 +18,7 @@ export interface Product {
   product_url: string;
   date_add?: string; // Fecha de creación en PrestaShop
   colors?: string[]; // Colores disponibles del producto
+  all_categories?: CategoryInfo[] | null; // Todas las categorías del producto con jerarquía completa
 }
 
 export interface ApiConfig {
@@ -54,6 +64,8 @@ export interface ChatMessage {
   function_result?: any;
   products?: Product[]; // Productos encontrados en esta respuesta
   sources?: MessageSource[]; // Fuentes de información utilizadas
+  conversation_id?: string | null; // ID de la conversación para feedback
+  feedback_submitted?: boolean; // Si el usuario ya envió feedback para este mensaje
 }
 
 export interface ChatConfig {
@@ -71,6 +83,7 @@ export interface ChatResponse {
   function_called?: string;
   function_result?: any;
   conversation_history?: ChatMessage[];
+  conversation_id?: string | null; // ID de la conversación guardada en analytics
   error?: string;
   details?: string;
 }

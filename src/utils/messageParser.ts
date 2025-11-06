@@ -229,19 +229,8 @@ export function parseMessageContent(
   let html = message;
   const productMap = findProductsInMessage(message, products);
 
-  // PRIMERO: Convertir enlaces markdown a HTML (antes de otras transformaciones)
-  // Todos los enlaces se muestran como texto con link, no como botones
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    (_match, text, url) => {
-      // Escapar HTML en el texto y URL para seguridad
-      const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const escapedUrl = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      
-      // Todos los enlaces como links de texto normales con estilo
-      return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-700 underline">${escapedText}</a>`;
-    }
-  );
+  // Convertir negrita markdown primero (para no interferir con enlaces)
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="font-bold text-slate-900">$1</strong>');
 
   // Convertir imágenes markdown a <img> (mejor estilizado)
   // PERO solo si no hay productos, porque si hay productos las imágenes ya están en las tarjetas
@@ -267,9 +256,6 @@ export function parseMessageContent(
     html = html.replace(/^\s*!\[.*?\]\(.*?\)\s*$/gm, '');
   }
 
-  // Convertir negrita markdown
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="font-bold text-slate-900">$1</strong>');
-
   // Convertir saltos de línea dobles en párrafos
   html = html.split(/\n\n+/).map(para => {
     if (para.trim()) {
@@ -277,6 +263,20 @@ export function parseMessageContent(
     }
     return '';
   }).join('');
+
+  // DESPUÉS de procesar párrafos: Convertir enlaces markdown a HTML
+  // Todos los enlaces se muestran como texto con link, no como botones
+  html = html.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (_match, text, url) => {
+      // Escapar HTML en el texto y URL para seguridad
+      const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const escapedUrl = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      
+      // Todos los enlaces como links de texto normales con estilo
+      return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-700 underline">${escapedText}</a>`;
+    }
+  );
 
   return { html, productPositions: productMap };
 }

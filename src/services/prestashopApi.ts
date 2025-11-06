@@ -39,8 +39,63 @@ function sanitizeDescription(content: string): string {
 }
 
 /**
+ * Obtiene información completa de una categoría con su jerarquía completa.
+ */
+async function getCategoryFullInfo(
+  categoryId: number,
+  cache: Map<number, { name: string; parentId?: number; hierarchy: string[] }>,
+  config: ApiConfig
+): Promise<{ name: string; parentId?: number; hierarchy: string[] }> {
+  if (!categoryId || categoryId === 1 || categoryId === 0) {
+    return { name: '', hierarchy: [] };
+  }
+
+  if (cache.has(categoryId)) {
+    return cache.get(categoryId)!;
+  }
+
+  try {
+    const proxyUrl = `/api/prestashop-category?categoryId=${categoryId}&language=${config.langCode || 1}&prestashop_url=${encodeURIComponent(config.prestashopUrl)}&ws_key=${encodeURIComponent(config.apiKey)}`;
+    
+    const response = await fetch(proxyUrl, {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      return { name: '', hierarchy: [] };
+    }
+
+    const data = await response.json();
+    if (data?.category) {
+      const name = extractMultilanguageValue(data.category.name);
+      const parentIdRaw = data.category.id_parent;
+      const parentId = parentIdRaw ? (typeof parentIdRaw === 'string' ? parseInt(parentIdRaw) : parentIdRaw) : undefined;
+      
+      const hierarchy: string[] = [name];
+      
+      // Construir jerarquía completa subiendo por los padres
+      if (parentId && parentId !== 0 && parentId !== 1) {
+        const parentInfo = await getCategoryFullInfo(parentId, cache, config);
+        if (parentInfo.hierarchy.length > 0) {
+          hierarchy.unshift(...parentInfo.hierarchy);
+        }
+      }
+
+      const info = { name, parentId, hierarchy };
+      cache.set(categoryId, info);
+      return info;
+    }
+  } catch (error) {
+    console.error('Error fetching category:', error);
+  }
+
+  return { name: '', hierarchy: [] };
+}
+
+/**
  * Obtiene el nombre de la categoría por su ID usando el proxy de Vercel.
  * Retorna objeto con categoría y subcategoría (categoría padre).
+ * @deprecated Usar getCategoryFullInfo para obtener jerarquía completa
  */
 async function getCategoryInfo(
   categoryId: number,
@@ -55,7 +110,6 @@ async function getCategoryInfo(
   }
 
   try {
-    // Usar el proxy de Vercel en lugar de llamar directamente a la API
     const proxyUrl = `/api/prestashop-category?categoryId=${categoryId}&language=${config.langCode || 1}&prestashop_url=${encodeURIComponent(config.prestashopUrl)}&ws_key=${encodeURIComponent(config.apiKey)}`;
     
     const response = await fetch(proxyUrl, {
@@ -72,7 +126,6 @@ async function getCategoryInfo(
       
       let parentName: string | undefined;
       if (parentId && parentId !== 0 && parentId !== 1) {
-        // Obtener nombre de la categoría padre
         const parentInfo = await getCategoryInfo(parentId, cache, config);
         parentName = parentInfo.name;
       }
@@ -135,7 +188,86 @@ async function mapProduct(
     ? sanitizeDescription(extractMultilanguageValue(product.description_short))
     : '';
 
-  // Obtener categoría y subcategoría separadas
+  // Crear cache para jerarquía completa
+  const fullCategoryCache = new Map<number, { name: string; parentId?: number; hierarchy: string[] }>();
+  
+  // Extraer todas las categorías del producto
+  const allCategoryIds: number[] = [];
+  const defaultCategoryId = product.id_category_default ? parseInt(product.id_category_default) : null;
+  
+  if (defaultCategoryId && defaultCategoryId !== 1 && defaultCategoryId !== 0 && defaultCategoryId !== 2) {
+    allCategoryIds.push(defaultCategoryId);
+  }
+  
+  // Extraer categorías de associations
+  if (product.associations && product.associations.categories) {
+    let associatedCategories: any[] = [];
+    
+    if (Array.isArray(product.associations.categories)) {
+      associatedCategories = product.associations.categories;
+    } else if (product.associations.categories.category) {
+      if (Array.isArray(product.associations.categories.category)) {
+        associatedCategories = product.associations.categories.category;
+      } else {
+        associatedCategories = [product.associations.categories.category];
+      }
+    }
+    
+    for (const cat of associatedCategories) {
+      let catId: number | null = null;
+      if (typeof cat === 'object' && cat !== null) {
+        catId = parseInt(cat.id || cat.id?.value || '0');
+      } else if (typeof cat === 'string' || typeof cat === 'number') {
+        catId = parseInt(String(cat));
+      }
+      // Excluir categorías raíz (1, 0, 2 "Inicio")
+      if (catId && catId !== 1 && catId !== 0 && catId !== 2 && !allCategoryIds.includes(catId)) {
+        allCategoryIds.push(catId);
+      }
+    }
+  }
+  
+  console.log(`Producto ${name}: IDs de categorías encontrados:`, allCategoryIds);
+  
+  // Procesar todas las categorías para obtener jerarquía completa
+  const allCategories: Array<{
+    category: string;
+    subcategory: string | null;
+    subsubcategory?: string | null;
+    hierarchy: string[];
+    category_id: number;
+    is_primary: boolean;
+  }> = [];
+  
+  for (let i = 0; i < allCategoryIds.length; i++) {
+    const catId = allCategoryIds[i];
+    const categoryInfo = await getCategoryFullInfo(catId, fullCategoryCache, config);
+    const hierarchy = categoryInfo.hierarchy || [];
+    
+    if (hierarchy.length === 0) continue;
+    
+    const level1 = hierarchy[0] || '';
+    const level2 = hierarchy[1] || null;
+    const level3 = hierarchy[2] || null;
+    
+    allCategories.push({
+      category: level1,
+      subcategory: level2,
+      subsubcategory: level3 || null,
+      hierarchy: hierarchy,
+      category_id: catId,
+      is_primary: i === 0
+    });
+  }
+  
+  // Log para depuración
+  if (allCategories.length > 0) {
+    console.log(`Producto ${name}: ${allCategories.length} categorías encontradas`, allCategories);
+  } else if (allCategoryIds.length > 0) {
+    console.warn(`Producto ${name}: Se encontraron ${allCategoryIds.length} IDs de categoría pero no se pudieron procesar`);
+  }
+  
+  // Obtener categoría principal para compatibilidad
   const { category, subcategory } = await getProductCategories(product, categoryCache, config);
 
   const linkRewrite = extractMultilanguageValue(product.link_rewrite);
@@ -182,6 +314,7 @@ async function mapProduct(
     image: imageUrl,
     product_url: productUrl,
     date_add: dateAdd,
+    all_categories: allCategories.length > 0 ? allCategories : undefined,
   };
 }
 
@@ -240,7 +373,7 @@ export async function fetchAllProducts(
     const query = {
       language: String(config.langCode || 1),
       limit: `${offset},${chunkSize}`,
-      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,date_add]',
+      display: '[id,id_default_image,name,price,reference,link_rewrite,ean13,id_category_default,description_short,date_add,associations]',
       sort: 'id_ASC',
     };
 

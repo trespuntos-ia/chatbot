@@ -428,6 +428,18 @@ export default async function handler(
       return;
     }
 
+    // Validar que completion tiene la estructura esperada
+    if (!completion || !completion.choices || !completion.choices[0] || !completion.choices[0].message) {
+      console.error('OpenAI completion invalid structure:', completion);
+      res.status(500).json({
+        success: false,
+        error: 'Respuesta inválida de OpenAI',
+        details: 'La respuesta de OpenAI no tiene la estructura esperada',
+        completion: completion ? 'exists but invalid structure' : 'null'
+      });
+      return;
+    }
+
     const responseMessage = completion.choices[0].message;
 
     // 8. Si OpenAI llamó a una función
@@ -535,50 +547,9 @@ export default async function handler(
           }
         }
         
-        // Buscar contenido web adicional para el producto encontrado
-        if (product.id) {
-          try {
-            const webContentResult = await searchWebContent(supabase, {
-              query: product.name,
-              product_id: product.id,
-              limit: 3
-            }, req);
-            
-            if (webContentResult && webContentResult.results && webContentResult.results.length > 0) {
-              enrichedContext += '\n\n📚 INFORMACIÓN ADICIONAL DEL PRODUCTO (de contenido web indexado):\n';
-              webContentResult.results.forEach((webItem: any, idx: number) => {
-                enrichedContext += `\n--- Información adicional ${idx + 1} ---\n`;
-                if (webItem.title) {
-                  enrichedContext += `Título: ${webItem.title}\n`;
-                }
-                if (webItem.snippet) {
-                  enrichedContext += `Descripción: ${webItem.snippet}\n`;
-                }
-                if (webItem.metadata) {
-                  if (webItem.metadata.description) {
-                    enrichedContext += `Descripción completa: ${webItem.metadata.description}\n`;
-                  }
-                  if (webItem.metadata.features && Array.isArray(webItem.metadata.features)) {
-                    enrichedContext += `Características: ${webItem.metadata.features.join(', ')}\n`;
-                  }
-                  if (webItem.metadata.specifications && typeof webItem.metadata.specifications === 'object') {
-                    const specs = Object.entries(webItem.metadata.specifications)
-                      .slice(0, 5)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(', ');
-                    if (specs) {
-                      enrichedContext += `Especificaciones: ${specs}\n`;
-                    }
-                  }
-                }
-              });
-              enrichedContext += '\nUsa esta información adicional para dar respuestas más completas y detalladas sobre el producto.\n';
-            }
-          } catch (error) {
-            // Silenciar errores de búsqueda web para no romper el flujo principal
-            console.error('Error searching web content for product:', error);
-          }
-        }
+        // Buscar contenido web adicional para el producto encontrado (solo si no hay múltiples productos)
+        // Esto se hace después de la primera respuesta para no bloquear
+        // Por ahora, el contenido web se busca directamente en la función search_web_content
       } else if (functionResult.products && functionResult.products.length === 0) {
         enrichedContext += '\n⚠️ No se encontraron productos. Sugiere términos de búsqueda alternativos o pregunta por más detalles.\n';
       }
@@ -644,11 +615,18 @@ export default async function handler(
       */
 
       // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
-      const systemPromptWithContext = systemPrompt + enrichedContext;
+      // Limitar el tamaño del contexto enriquecido para evitar problemas
+      const maxContextLength = 3000; // Limitar a 3000 caracteres
+      const limitedEnrichedContext = enrichedContext.length > maxContextLength 
+        ? enrichedContext.substring(0, maxContextLength) + '\n\n[Contexto truncado para evitar exceder límites]'
+        : enrichedContext;
+      
+      const systemPromptWithContext = systemPrompt + limitedEnrichedContext;
       
       // Log para debugging
       console.log(`Function ${functionName} executed successfully. Result size:`, 
         JSON.stringify(functionResult).length, 'bytes');
+      console.log(`Enriched context length: ${enrichedContext.length} chars (limited to ${limitedEnrichedContext.length})`);
       
       const messagesWithContext = [
         { role: 'system', content: systemPromptWithContext },
@@ -697,21 +675,28 @@ export default async function handler(
           };
         }
         
+        // Preparar mensajes finales con resultado limitado
+        const finalMessages = messagesWithContext.map((msg: any) => {
+          // Asegurar que el mensaje de tool tenga el resultado limitado
+          if (msg.role === 'tool') {
+            return {
+              ...msg,
+              content: JSON.stringify(limitedFunctionResult)
+            };
+          }
+          return msg;
+        });
+        
+        // Calcular tamaño total de mensajes para logging
+        const totalMessagesSize = JSON.stringify(finalMessages).length;
+        console.log(`Calling OpenAI second completion. Total messages size: ${totalMessagesSize} bytes`);
+        
         secondCompletion = await Promise.race([
           openai.chat.completions.create({
             model,
             temperature,
             max_tokens: maxTokens,
-            messages: messagesWithContext.map((msg: any) => {
-              // Asegurar que el mensaje de tool tenga el resultado limitado
-              if (msg.role === 'tool') {
-                return {
-                  ...msg,
-                  content: JSON.stringify(limitedFunctionResult)
-                };
-              }
-              return msg;
-            }) as any,
+            messages: finalMessages as any,
             tools: functions.map(f => ({
               type: 'function' as const,
               function: f
@@ -860,9 +845,9 @@ export default async function handler(
         sources: sources.length > 0 ? sources : ['general']
       };
 
-      // Guardar conversación en analytics (en background, no bloquea la respuesta)
+      // Guardar conversación en analytics
       const responseTime = Date.now() - startTime;
-      saveConversationToAnalytics(
+      const conversationId = await saveConversationToAnalytics(
         supabase,
         sessionId || 'default',
         message,
@@ -872,13 +857,14 @@ export default async function handler(
         functionArgs.category || functionArgs.subcategory,
         model,
         responseTime
-      ).catch(err => console.error('Error guardando analytics (no crítico):', err));
+      );
 
       res.status(200).json({
         success: true,
         message: finalMessage,
         function_called: functionName,
         function_result: functionResult,
+        conversation_id: conversationId,
         conversation_history: [
           ...conversationHistory,
           { role: 'user', content: message },
@@ -896,9 +882,9 @@ export default async function handler(
         sources: ['general']
       };
 
-      // Guardar conversación en analytics (en background, no bloquea la respuesta)
+      // Guardar conversación en analytics
       const responseTime = Date.now() - startTime;
-      saveConversationToAnalytics(
+      const conversationId = await saveConversationToAnalytics(
         supabase,
         sessionId || 'default',
         message,
@@ -908,11 +894,12 @@ export default async function handler(
         undefined, // No hay categoría
         model,
         responseTime
-      ).catch(err => console.error('Error guardando analytics (no crítico):', err));
+      );
 
       res.status(200).json({
         success: true,
         message: response,
+        conversation_id: conversationId,
         conversation_history: [
           ...conversationHistory,
           { role: 'user', content: message },
@@ -1562,29 +1549,126 @@ async function searchProductsByCategory(supabase: any, params: any) {
 
 // Función para obtener categorías de productos
 async function getProductCategories(supabase: any, params: any) {
-  const { data, error } = await supabase
-    .from('products')
-    .select('category, subcategory');
-  
-  if (error) {
-    throw new Error(`Supabase error: ${error.message}`);
-  }
-  
+  // Usar una consulta más eficiente que obtenga todas las categorías únicas
+  // Ahora leemos de all_categories (JSONB) que contiene TODAS las categorías de cada producto
   const categories = new Set<string>();
   const subcategories = new Map<string, Set<string>>();
+  const allCategoriesDetailed = new Map<string, {
+    count: number;
+    subcategories: Set<string>;
+    hierarchies: Set<string>;
+  }>();
   
-  (data || []).forEach((product: any) => {
-    if (product.category) {
-      categories.add(product.category);
-      
-      if (params.include_subcategories && product.subcategory) {
-        if (!subcategories.has(product.category)) {
-          subcategories.set(product.category, new Set());
-        }
-        subcategories.get(product.category)!.add(product.subcategory);
-      }
+  // Obtener datos en lotes para evitar límites de Supabase (por defecto 1000 filas)
+  let offset = 0;
+  const batchSize = 1000;
+  let hasMore = true;
+  let totalProcessed = 0;
+  
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('category, subcategory, all_categories')
+      .or('category.not.is.null,all_categories.not.is.null')
+      .range(offset, offset + batchSize - 1)
+      .order('category', { ascending: true });
+    
+    if (error) {
+      console.error('Error fetching categories batch:', error);
+      throw new Error(`Supabase error: ${error.message}`);
     }
-  });
+    
+    if (!data || data.length === 0) {
+      hasMore = false;
+      break;
+    }
+    
+    // Procesar lote de productos
+    data.forEach((product: any) => {
+      // 1. Procesar categoría principal (compatibilidad)
+      const category = product.category?.trim();
+      if (category && category.length > 0) {
+        categories.add(category);
+        
+        if (!allCategoriesDetailed.has(category)) {
+          allCategoriesDetailed.set(category, {
+            count: 0,
+            subcategories: new Set(),
+            hierarchies: new Set()
+          });
+        }
+        allCategoriesDetailed.get(category)!.count++;
+        
+        if (params.include_subcategories && product.subcategory) {
+          const subcategory = product.subcategory?.trim();
+          if (subcategory && subcategory.length > 0) {
+            if (!subcategories.has(category)) {
+              subcategories.set(category, new Set());
+            }
+            subcategories.get(category)!.add(subcategory);
+            allCategoriesDetailed.get(category)!.subcategories.add(subcategory);
+          }
+        }
+      }
+      
+      // 2. Procesar all_categories (JSONB) - TODAS las categorías del producto
+      if (product.all_categories && Array.isArray(product.all_categories)) {
+        product.all_categories.forEach((catInfo: any) => {
+          if (catInfo && catInfo.category) {
+            const catName = catInfo.category?.trim();
+            if (catName && catName.length > 0) {
+              categories.add(catName);
+              
+              if (!allCategoriesDetailed.has(catName)) {
+                allCategoriesDetailed.set(catName, {
+                  count: 0,
+                  subcategories: new Set(),
+                  hierarchies: new Set()
+                });
+              }
+              allCategoriesDetailed.get(catName)!.count++;
+              
+              // Agregar subcategoría si existe
+              if (catInfo.subcategory) {
+                const subcat = catInfo.subcategory?.trim();
+                if (subcat && subcat.length > 0) {
+                  if (!subcategories.has(catName)) {
+                    subcategories.set(catName, new Set());
+                  }
+                  subcategories.get(catName)!.add(subcat);
+                  allCategoriesDetailed.get(catName)!.subcategories.add(subcat);
+                }
+              }
+              
+              // Agregar jerarquía completa si existe
+              if (catInfo.hierarchy && Array.isArray(catInfo.hierarchy)) {
+                const hierarchyStr = catInfo.hierarchy.join(' > ');
+                allCategoriesDetailed.get(catName)!.hierarchies.add(hierarchyStr);
+              }
+            }
+          }
+        });
+      }
+    });
+    
+    totalProcessed += data.length;
+    
+    // Si obtuvimos menos de batchSize, significa que no hay más datos
+    if (data.length < batchSize) {
+      hasMore = false;
+    } else {
+      offset += batchSize;
+    }
+    
+    // Límite de seguridad para evitar bucles infinitos
+    if (totalProcessed > 100000) {
+      console.warn(`Reached safety limit of ${totalProcessed} products processed for categories`);
+      break;
+    }
+  }
+  
+  console.log(`Processed ${totalProcessed} products to extract ${categories.size} unique categories`);
+  console.log(`Categories found: ${Array.from(categories).join(', ')}`);
   
   const result: any = {
     categories: Array.from(categories).sort(),
@@ -1597,6 +1681,19 @@ async function getProductCategories(supabase: any, params: any) {
       subcatsMap[cat] = Array.from(subs).sort();
     });
     result.subcategories = subcatsMap;
+  }
+  
+  // Agregar información detallada si se solicita
+  if (params.include_details) {
+    const detailed: any = {};
+    allCategoriesDetailed.forEach((details, catName) => {
+      detailed[catName] = {
+        count: details.count,
+        subcategories: Array.from(details.subcategories).sort(),
+        hierarchies: Array.from(details.hierarchies).sort()
+      };
+    });
+    result.detailed = detailed;
   }
   
   return result;
@@ -1814,7 +1911,7 @@ async function saveConversationToAnalytics(
   categoryConsulted?: string,
   modelUsed?: string,
   responseTimeMs?: number
-) {
+): Promise<string | null> {
   try {
     console.log('[Analytics] Intentando guardar conversación:', {
       sessionId: sessionId || 'default',
@@ -1866,13 +1963,14 @@ async function saveConversationToAnalytics(
         hint: error.hint,
         sessionId: sessionId || 'default'
       });
-      // No fallar si no se puede guardar
+      return null;
     } else {
       console.log('[Analytics] Conversación guardada exitosamente:', {
         id: data?.[0]?.id,
         sessionId: sessionId || 'default',
         createdAt: data?.[0]?.created_at
       });
+      return data?.[0]?.id || null;
     }
   } catch (error) {
     console.error('[Analytics] Error en saveConversationToAnalytics:', {
@@ -1880,7 +1978,7 @@ async function saveConversationToAnalytics(
       stack: error instanceof Error ? error.stack : undefined,
       sessionId: sessionId || 'default'
     });
-    // No fallar si no se puede guardar
+    return null;
   }
 }
 
