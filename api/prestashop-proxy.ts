@@ -43,24 +43,25 @@ export default async function handler(
     }
 
     // Construir query string
-    // El parámetro 'display' puede venir con corchetes, necesitamos manejarlo correctamente
-    const query = new URLSearchParams();
-    query.set('ws_key', apiKey as string);
-    query.set('output_format', 'JSON');
+    // El parámetro 'display' necesita corchetes sin codificar para PrestaShop
+    const queryParts: string[] = [];
+    queryParts.push(`ws_key=${encodeURIComponent(apiKey as string)}`);
+    queryParts.push(`output_format=JSON`);
     
     // Agregar todos los demás parámetros
     for (const [key, value] of Object.entries(queryParams)) {
       if (key !== 'prestashop_url' && key !== 'ws_key' && key !== 'endpoint') {
-        // Si el valor es un string con corchetes (display), mantenerlo como está
-        if (typeof value === 'string') {
-          query.set(key, value);
+        // El parámetro 'display' necesita corchetes sin codificar
+        if (key === 'display' && typeof value === 'string' && value.startsWith('[')) {
+          queryParts.push(`${key}=${value}`);
         } else {
-          query.set(key, String(value));
+          queryParts.push(`${key}=${encodeURIComponent(String(value))}`);
         }
       }
     }
 
-    const url = `${prestashopUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}?${query.toString()}`;
+    const queryString = queryParts.join('&');
+    const url = `${prestashopUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}?${queryString}`;
 
     // Hacer la solicitud a la API de PrestaShop
     console.log('Making request to PrestaShop:', url.substring(0, 100) + '...');
