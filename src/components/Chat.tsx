@@ -8,16 +8,32 @@ import type { ChatConfig, ChatMessage, Product } from '../types';
 
 interface ChatProps {
   config: ChatConfig;
+  onFirstMessage?: () => void;
 }
 
-export function Chat({ config }: ChatProps) {
+// Sugerencias de búsqueda específicas del contexto gastronómico
+const SUGGESTED_QUERIES = [
+  "Busco un ahumador portátil para showcooking en sala",
+  "¿Tenéis herramientas para trabajar con nitrógeno líquido?",
+  "Necesito una máquina para destilaciones en frío",
+  "¿Tenéis copas o vasos que funcionen con hielo seco?",
+  "Producto para infusionar aceites en frío"
+];
+
+export function Chat({ config, onFirstMessage }: ChatProps) {
   const { messages, setMessages } = useChat();
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [sessionId, setSessionId] = useState<string>('');
+  const [isFocused, setIsFocused] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
+  const hasSentFirstMessage = useRef(false);
+
+  // Determinar si estamos en estado inicial (sin mensajes)
+  const isInitialState = messages.length === 0;
 
   // Generar o recuperar session_id desde localStorage
   useEffect(() => {
@@ -36,18 +52,21 @@ export function Chat({ config }: ChatProps) {
 
   useEffect(() => {
     // Solo hacer scroll automático si el último mensaje no tiene productos
-    // Si hay productos, el usuario debe poder ver desde arriba y bajar manualmente
     const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.role === 'assistant' && lastMessage.products && lastMessage.products.length > 0) {
-      // No hacer scroll si hay productos, dejar que el usuario vea desde arriba
       return;
     }
-    // Hacer scroll solo para mensajes normales sin productos
     scrollToBottom();
   }, [messages]);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
+
+    // Notificar primer mensaje
+    if (!hasSentFirstMessage.current) {
+      hasSentFirstMessage.current = true;
+      onFirstMessage?.();
+    }
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -76,7 +95,6 @@ export function Chat({ config }: ChatProps) {
 
       if (response.function_called) {
         setLoadingStage('Consultando base de datos...');
-        // Pequeña pausa para mostrar el cambio de estado
         await new Promise(resolve => setTimeout(resolve, 100));
         setLoadingStage('Generando respuesta...');
       }
@@ -91,7 +109,6 @@ export function Chat({ config }: ChatProps) {
           if (response.function_result.products && Array.isArray(response.function_result.products)) {
             products = response.function_result.products;
           } else if (response.function_result.product && response.function_result.found) {
-            // Producto único por SKU
             products = [response.function_result.product];
           }
         }
@@ -101,7 +118,6 @@ export function Chat({ config }: ChatProps) {
           if (lastMessage.content) {
             const recommendedProduct = findRecommendedProduct(lastMessage.content, products);
             if (recommendedProduct && products.length > 1) {
-              // Solo mostrar el producto recomendado si hay múltiples productos
               products = [recommendedProduct];
             }
           }
@@ -128,14 +144,12 @@ export function Chat({ config }: ChatProps) {
       
       setError(errorMessage);
       
-      // Añadir mensaje de error al chat solo si no hay un error previo similar
       const errorMsg: ChatMessage = {
         role: 'assistant',
         content: `Lo siento, hubo un error: ${errorMessage}. Por favor, intenta de nuevo o contacta con soporte si el problema persiste.`
       };
       
       setMessages(prev => {
-        // Evitar duplicar mensajes de error consecutivos
         const lastMessage = prev[prev.length - 1];
         if (lastMessage && lastMessage.role === 'assistant' && lastMessage.content.includes('Lo siento, hubo un error')) {
           return prev;
@@ -148,11 +162,16 @@ export function Chat({ config }: ChatProps) {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleSuggestionClick = (suggestion: string) => {
+    setInputMessage(suggestion);
+    inputRef.current?.focus();
   };
 
   const handleFeedback = async (conversationId: string, helpful: boolean, messageIndex: number) => {
@@ -173,7 +192,6 @@ export function Chat({ config }: ChatProps) {
       const result = await response.json();
 
       if (result.success) {
-        // Marcar el feedback como enviado en el mensaje
         setMessages(prev => {
           const updated = [...prev];
           if (updated[messageIndex]) {
@@ -192,32 +210,10 @@ export function Chat({ config }: ChatProps) {
     }
   };
 
-
-
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-[#202020]">
       {/* Mensajes */}
-      <div className="flex-1 overflow-y-auto space-y-5 sm:space-y-3 mb-4 px-5 sm:px-4 py-5 sm:py-4">
-        {/* Mensajes de bienvenida cuando no hay conversación */}
-        {messages.length === 0 && (
-          <div className="space-y-5 sm:space-y-3">
-            <div className="flex justify-start">
-              <div className="max-w-[95%] sm:max-w-[85%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-100 text-slate-700">
-                <div className="whitespace-pre-wrap text-lg sm:text-sm">
-                  👋 ¡Bienvenido a 100%Chef!
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-start">
-              <div className="max-w-[95%] sm:max-w-[85%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-100 text-slate-700">
-                <div className="whitespace-pre-wrap text-lg sm:text-sm leading-relaxed">
-                  Si mezclas curiosidad con técnica, estás en el lugar correcto. Cuéntame tu receta… yo pongo la tecnología. ¿En qué puedo ayudarte hoy?
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
+      <div className="flex-1 overflow-y-auto space-y-4 px-6 py-6">
         {/* Mensajes de la conversación */}
         {messages.map((message, index) => {
           if (message.role === 'assistant' && message.products && message.products.length > 0) {
@@ -230,27 +226,25 @@ export function Chat({ config }: ChatProps) {
             
             return (
               <div key={index} className="space-y-4">
-                {/* Mostrar texto introductorio (ya filtrado por splitMessageWithProducts) */}
+                {/* Mostrar texto introductorio */}
                 {textParts.map((part, partIndex) => {
                   const textContent = part.content as string;
                   
-                  // Solo mostrar si hay contenido significativo (más de 10 caracteres)
                   if (!textContent || textContent.trim().length < 10) {
                     return null;
                   }
                   
-                  // Parsear el texto con formato markdown (sin imágenes si hay productos)
                   const { html } = parseMessageContent(textContent, message.products);
                   
                   return (
                     <div key={`text-${partIndex}`} className="flex justify-start">
-                      <div className="max-w-[95%] sm:max-w-[90%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-100 text-slate-700">
+                      <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 text-gray-300">
                         <div 
-                          className="prose prose-lg sm:prose-sm max-w-none prose-headings:text-slate-700 prose-p:text-slate-700 prose-a:text-blue-600 prose-p:text-lg sm:prose-p:text-sm prose-headings:text-xl sm:prose-headings:text-base"
+                          className="prose prose-sm max-w-none prose-headings:text-gray-300 prose-p:text-gray-300 prose-a:text-cyan-400 prose-p:text-sm prose-headings:text-base whitespace-pre-wrap"
                           dangerouslySetInnerHTML={{ __html: html }}
                         />
                         {partIndex === 0 && message.function_calls && (
-                          <div className="mt-3 text-base sm:text-xs opacity-75">
+                          <div className="mt-3 text-xs text-gray-500">
                             🔍 Consultó la base de datos
                           </div>
                         )}
@@ -259,19 +253,19 @@ export function Chat({ config }: ChatProps) {
                   );
                 })}
                 
-                {/* Todas las tarjetas de productos - ancho completo */}
+                {/* Tarjetas de productos */}
                 {productParts.length > 0 && (
-                  <div className="w-full -mx-4 px-4 space-y-4 sm:space-y-3">
+                  <div className="w-full space-y-4">
                     {productParts.map((part, productIndex) => (
                       <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
                     ))}
                   </div>
                 )}
                 
-                {/* Mostrar fuentes al final */}
+                {/* Fuentes */}
                 {message.sources && message.sources.length > 0 && (
                   <div className="flex justify-start">
-                    <div className="max-w-[95%] text-base sm:text-xs text-slate-500">
+                    <div className="max-w-[85%] text-xs text-gray-500">
                       {getSourcesDescription(message.sources)}
                     </div>
                   </div>
@@ -279,19 +273,19 @@ export function Chat({ config }: ChatProps) {
                 
                 {/* Pregunta de satisfacción */}
                 {message.conversation_id && !message.feedback_submitted && (
-                  <div className="flex justify-start mt-5 sm:mt-3">
-                    <div className="max-w-[95%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 bg-slate-50 border border-slate-200">
-                      <p className="text-base sm:text-xs text-slate-600 mb-4 sm:mb-2 font-medium">¿Te ha ayudado la respuesta?</p>
-                      <div className="flex gap-4 sm:gap-2">
+                  <div className="flex justify-start mt-4">
+                    <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50">
+                      <p className="text-sm text-gray-300 mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
+                      <div className="flex gap-3">
                         <button
                           onClick={() => handleFeedback(message.conversation_id!, true, index)}
-                          className="px-6 py-3 sm:px-4 sm:py-2 text-lg sm:text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                          className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
                         >
                           Sí
                         </button>
                         <button
                           onClick={() => handleFeedback(message.conversation_id!, false, index)}
-                          className="px-6 py-3 sm:px-4 sm:py-2 text-lg sm:text-sm font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                          className="px-4 py-2 text-sm font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
                         >
                           No
                         </button>
@@ -300,10 +294,10 @@ export function Chat({ config }: ChatProps) {
                   </div>
                 )}
                 
-                {/* Confirmación de feedback enviado */}
+                {/* Confirmación de feedback */}
                 {message.feedback_submitted && (
                   <div className="flex justify-start mt-3">
-                    <div className="max-w-[95%] text-base sm:text-xs text-slate-500">
+                    <div className="max-w-[85%] text-xs text-gray-500">
                       ✓ Gracias por tu feedback
                     </div>
                   </div>
@@ -321,50 +315,50 @@ export function Chat({ config }: ChatProps) {
                 }`}
               >
                 <div
-                  className={`max-w-[95%] sm:max-w-[85%] rounded-2xl px-6 py-5 sm:px-4 sm:py-3 ${
+                  className={`max-w-[85%] rounded-2xl px-6 py-4 ${
                     message.role === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-100 text-slate-700'
+                      ? 'bg-cyan-500 text-black'
+                      : 'bg-[#2a2a2a] border border-gray-700/50 text-gray-300'
                   }`}
                 >
-                  <div className="whitespace-pre-wrap text-lg sm:text-sm leading-relaxed">{message.content}</div>
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</div>
                   {message.function_calls && (
-                    <div className="mt-3 text-base sm:text-xs opacity-75">
+                    <div className="mt-3 text-xs text-gray-500">
                       🔍 Consultó la base de datos
                     </div>
                   )}
                   {/* Fuentes de información */}
                   {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-slate-200">
-                      <p className="text-base sm:text-xs text-slate-500">
+                    <div className="mt-4 pt-4 border-t border-gray-700/50">
+                      <p className="text-xs text-gray-500">
                         {getSourcesDescription(message.sources)}
                       </p>
                     </div>
                   )}
                   {/* Pregunta de satisfacción */}
                   {message.role === 'assistant' && message.conversation_id && !message.feedback_submitted && (
-                    <div className="mt-4 pt-4 border-t border-slate-200">
-                      <p className="text-base sm:text-xs text-slate-600 mb-4 sm:mb-2 font-medium">¿Te ha ayudado la respuesta?</p>
-                      <div className="flex gap-4 sm:gap-2">
+                    <div className="mt-4 pt-4 border-t border-gray-700/50">
+                      <p className="text-xs text-gray-300 mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
+                      <div className="flex gap-3">
                         <button
                           onClick={() => handleFeedback(message.conversation_id!, true, index)}
-                          className="px-6 py-3 sm:px-3 sm:py-1.5 text-base sm:text-xs font-medium bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                          className="px-4 py-2 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
                         >
                           Sí
                         </button>
                         <button
                           onClick={() => handleFeedback(message.conversation_id!, false, index)}
-                          className="px-6 py-3 sm:px-3 sm:py-1.5 text-base sm:text-xs font-medium bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                          className="px-4 py-2 text-xs font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
                         >
                           No
                         </button>
                       </div>
                     </div>
                   )}
-                  {/* Confirmación de feedback enviado */}
+                  {/* Confirmación de feedback */}
                   {message.role === 'assistant' && message.feedback_submitted && (
-                    <div className="mt-4 pt-4 border-t border-slate-200">
-                      <p className="text-base sm:text-xs text-slate-500">✓ Gracias por tu feedback</p>
+                    <div className="mt-4 pt-4 border-t border-gray-700/50">
+                      <p className="text-xs text-gray-500">✓ Gracias por tu feedback</p>
                     </div>
                   )}
                 </div>
@@ -373,34 +367,28 @@ export function Chat({ config }: ChatProps) {
           );
         })}
 
-
+        {/* Indicador de escritura - tres puntos animados */}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-slate-100 rounded-2xl px-6 py-5 sm:px-4 sm:py-3">
-              <div className="flex items-center gap-4 sm:gap-2">
-                <svg
-                  className="animate-spin h-6 w-6 sm:h-4 sm:w-4 text-slate-600"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <span className="text-lg sm:text-sm text-slate-600">
-                  {loadingStage || 'Consultando...'}
-                </span>
+            <div className="bg-[#2a2a2a] border border-gray-700/50 rounded-2xl px-6 py-4">
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  <div 
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: '0ms' }}
+                  />
+                  <div 
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: '150ms' }}
+                  />
+                  <div 
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: '300ms' }}
+                  />
+                </div>
+                {loadingStage && (
+                  <span className="text-sm text-gray-400 ml-2">{loadingStage}</span>
+                )}
               </div>
             </div>
           </div>
@@ -411,9 +399,9 @@ export function Chat({ config }: ChatProps) {
 
       {/* Error */}
       {error && (
-        <div className="mb-4 mx-5 sm:mx-4 bg-red-50 border border-red-200 rounded-xl p-5 sm:p-3 text-red-800 text-lg sm:text-sm">
-          <div className="flex items-center gap-4 sm:gap-2">
-            <svg className="h-7 w-7 sm:h-5 sm:w-5" fill="currentColor" viewBox="0 0 20 20">
+        <div className="mx-6 mb-4 bg-red-900/30 border border-red-700/50 rounded-xl p-4 text-red-300 text-sm">
+          <div className="flex items-center gap-2">
+            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
               <path
                 fillRule="evenodd"
                 d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
@@ -423,10 +411,10 @@ export function Chat({ config }: ChatProps) {
             <span className="flex-1">{error}</span>
             <button
               onClick={() => setError('')}
-              className="text-red-600 hover:text-red-800 p-1"
+              className="text-red-400 hover:text-red-300 p-1"
               aria-label="Cerrar error"
             >
-              <svg className="h-6 w-6 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -434,48 +422,136 @@ export function Chat({ config }: ChatProps) {
         </div>
       )}
 
-      {/* Input */}
-      <div className="border-t border-slate-100 pt-5 sm:pt-3 px-5 sm:px-4 pb-4 sm:pb-2">
-        <div className="flex gap-4 sm:gap-2">
-          <textarea
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Escribe tu pregunta..."
-            disabled={isLoading}
-            rows={2}
-            className="flex-1 px-6 py-4 sm:px-4 sm:py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-lg sm:text-sm"
-          />
-          <button
-            onClick={handleSendMessage}
-            disabled={isLoading || !inputMessage.trim()}
-            className="px-6 py-4 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-w-[60px] sm:min-w-0"
-          >
-            {isLoading ? (
+      {/* Input - Estado inicial vs conversacional */}
+      {isInitialState ? (
+        // Estado inicial: textarea grande con sugerencias
+        <div className="border-t border-gray-700/50 pt-6 px-6 pb-6">
+          <div className="relative">
+            <textarea
+              ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyPress={handleKeyPress}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setTimeout(() => setIsFocused(false), 200)}
+              placeholder="Escribe tu pregunta..."
+              disabled={isLoading}
+              rows={4}
+              className="w-full min-h-[100px] px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500"
+            />
+            
+            {/* Sugerencias de búsqueda - aparecen cuando el input tiene foco */}
+            {isFocused && isInitialState && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 bg-[#2a2a2a] border border-gray-700/50 rounded-xl shadow-xl overflow-hidden z-10">
+                {SUGGESTED_QUERIES.map((suggestion, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSuggestionClick(suggestion)}
+                    className="w-full text-left px-6 py-3 text-sm text-gray-300 hover:bg-[#202020] transition-colors border-b border-gray-700/30 last:border-b-0"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Botones en fila inferior */}
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-700/30">
+              <button
+                className="p-3 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded-lg transition"
+                aria-label="Micrófono"
+                title="Micrófono (próximamente)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                  />
+                </svg>
+              </button>
+              <button
+                onClick={handleSendMessage}
+                disabled={isLoading || !inputMessage.trim()}
+                className={`px-6 py-3 rounded-lg font-medium transition ${
+                  inputMessage.trim() && !isLoading
+                    ? 'bg-cyan-500 text-black hover:bg-cyan-400'
+                    : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                }`}
+                aria-label="Enviar"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        // Estado conversacional: input compacto en línea
+        <div className="border-t border-gray-700/50 pt-3 px-6 pb-4">
+          <div className="flex items-center gap-3">
+            <input
+              ref={inputRef as React.RefObject<HTMLInputElement>}
+              type="text"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Escribe tu pregunta..."
+              disabled={isLoading}
+              className="flex-1 px-4 py-3 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500 text-sm"
+            />
+            <button
+              className="p-3 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded-lg transition"
+              aria-label="Micrófono"
+              title="Micrófono (próximamente)"
+            >
               <svg
-                className="animate-spin h-7 w-7 sm:h-5 sm:w-5"
                 xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
                 fill="none"
                 viewBox="0 0 24 24"
+                stroke="currentColor"
               >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                ></circle>
                 <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
               </svg>
-            ) : (
+            </button>
+            <button
+              onClick={handleSendMessage}
+              disabled={isLoading || !inputMessage.trim()}
+              className={`p-3 rounded-lg transition ${
+                inputMessage.trim() && !isLoading
+                  ? 'bg-cyan-500 text-black hover:bg-cyan-400'
+                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+              }`}
+              aria-label="Enviar"
+            >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-7 w-7 sm:h-5 sm:w-5"
+                className="h-5 w-5"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -487,11 +563,10 @@ export function Chat({ config }: ChatProps) {
                   d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
                 />
               </svg>
-            )}
-          </button>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
-

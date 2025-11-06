@@ -20,9 +20,9 @@ export function ProductCard({ product }: ProductCardProps) {
   };
 
   return (
-    <div className="w-full bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden flex flex-col sm:flex-row">
+    <div className="w-full bg-[#2a2a2a] rounded-xl border border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden flex flex-col sm:flex-row">
       {/* Imagen del producto - a la izquierda */}
-      <div className="relative w-full sm:w-48 h-48 sm:h-auto sm:min-w-[12rem] bg-slate-50 overflow-hidden flex items-center justify-center flex-shrink-0">
+      <div className="relative w-full sm:w-48 h-48 sm:h-auto sm:min-w-[12rem] bg-[#202020] overflow-hidden flex items-center justify-center flex-shrink-0">
         {product.image && product.image.trim() !== '' ? (
           <img
             src={product.image}
@@ -34,7 +34,7 @@ export function ProductCard({ product }: ProductCardProps) {
             }}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-slate-400">
+          <div className="w-full h-full flex items-center justify-center text-gray-500">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className="h-16 w-16"
@@ -70,20 +70,20 @@ export function ProductCard({ product }: ProductCardProps) {
       {/* Contenido de la tarjeta - a la derecha */}
       <div className="p-5 sm:p-4 flex-1 flex flex-col">
         {/* Título */}
-        <h3 className="font-bold text-base sm:text-sm text-slate-900 mb-2 sm:mb-1.5 line-clamp-2 leading-tight">
+        <h3 className="font-bold text-base sm:text-sm text-white mb-2 sm:mb-1.5 line-clamp-2 leading-tight">
           {product.name}
         </h3>
 
         {/* Descripción */}
         {product.description && (
-          <p className="text-sm sm:text-xs text-slate-600 mb-3 sm:mb-2 line-clamp-2 leading-relaxed">
+          <p className="text-sm sm:text-xs text-gray-400 mb-3 sm:mb-2 line-clamp-2 leading-relaxed">
             {truncateDescription(product.description, 120)}
           </p>
         )}
 
         {/* Precio destacado */}
         <div className="mb-3 sm:mb-2">
-          <span className="font-bold text-xl sm:text-lg text-slate-900">
+          <span className="font-bold text-xl sm:text-lg text-white">
             {formatPrice(product.price)}
           </span>
         </div>
@@ -91,12 +91,12 @@ export function ProductCard({ product }: ProductCardProps) {
         {/* Colores disponibles */}
         {product.colors && product.colors.length > 0 && (
           <div className="mb-4 sm:mb-3">
-            <span className="text-sm sm:text-xs text-slate-500 block mb-2 sm:mb-1 leading-tight">Colores:</span>
+            <span className="text-sm sm:text-xs text-gray-400 block mb-2 sm:mb-1 leading-tight">Colores:</span>
             <div className="flex gap-2 sm:gap-1.5 flex-wrap">
               {product.colors.map((color, idx) => (
                 <span
                   key={idx}
-                  className="text-sm sm:text-xs px-3 py-1 sm:px-2 sm:py-0.5 bg-slate-100 text-slate-700 rounded-md font-medium"
+                  className="text-sm sm:text-xs px-3 py-1 sm:px-2 sm:py-0.5 bg-[#202020] text-gray-300 rounded-md font-medium border border-gray-700/50"
                 >
                   {color}
                 </span>
@@ -112,7 +112,7 @@ export function ProductCard({ product }: ProductCardProps) {
               href={product.product_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block w-full text-center py-3 px-4 sm:py-2 sm:px-3 bg-black hover:bg-gray-800 text-white text-sm sm:text-xs font-semibold rounded-lg transition-all duration-200 hover:shadow-md"
+              className="block w-full text-center py-3 px-4 sm:py-2 sm:px-3 bg-cyan-500 hover:bg-cyan-400 text-black text-sm sm:text-xs font-semibold rounded-lg transition-all duration-200 hover:shadow-md"
             >
               Ver Producto
             </a>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Chat } from './Chat';
 import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
 import { useChat } from '../contexts/ChatContext';
@@ -10,28 +10,36 @@ interface ChatWidgetProps {
 
 export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isMaximized, setIsMaximized] = useState(false);
-  const { clearMessages } = useChat();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const { messages, clearMessages } = useChat();
+
+  // Auto-expandir al enviar el primer mensaje
+  useEffect(() => {
+    if (messages.length > 0 && !isExpanded) {
+      setIsExpanded(true);
+    }
+  }, [messages.length, isExpanded]);
 
   // Función para limpiar el chat
   const handleClearChat = () => {
     if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
       clearMessages();
+      setIsExpanded(false);
     }
   };
 
   return (
     <>
-      {/* Botón flotante circular */}
+      {/* Botón reabrir - aparece cuando el modal está cerrado */}
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 w-20 h-20 sm:w-16 sm:h-16 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-110 z-50"
-          aria-label="Abrir chat"
+          className="fixed bottom-6 right-6 bg-cyan-500 hover:bg-cyan-600 text-black font-semibold px-6 py-3 rounded-full shadow-xl flex items-center gap-2 transition-all duration-300 hover:scale-105 z-50"
+          aria-label="Abrir Búsqueda"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="h-10 w-10 sm:h-8 sm:w-8"
+            className="h-5 w-5"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -40,77 +48,71 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
             />
           </svg>
+          Abrir Búsqueda
         </button>
       )}
 
-      {/* Overlay con blur */}
-      <div
-        className={`fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity duration-300 ${
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-        onClick={() => {
-          setIsOpen(false);
-          setIsMaximized(false);
-        }}
-      />
-
-      {/* Ventana de chat - siempre montada pero oculta cuando está cerrada */}
+      {/* Modal flotante - esquina superior derecha */}
       <div 
-        className={`fixed z-50 flex flex-col transition-all duration-300 ${
+        className={`fixed z-50 transition-all duration-300 ${
           isOpen 
-            ? (isMaximized 
-                ? 'bottom-0 right-0 top-0 left-0 sm:left-1/2 w-full sm:w-1/2 opacity-100 pointer-events-auto' 
-                : 'bottom-0 sm:bottom-6 right-0 sm:right-6 w-full sm:w-full sm:max-w-md h-full sm:h-[85vh] sm:max-h-[700px] opacity-100 pointer-events-auto')
+            ? (isExpanded 
+                ? 'top-0 right-0 md:top-6 md:right-6 w-full md:w-[800px] h-full md:h-[calc(100vh-3rem)] opacity-100 pointer-events-auto' 
+                : 'top-6 right-6 w-full md:w-[400px] h-[650px] opacity-100 pointer-events-auto')
             : 'opacity-0 pointer-events-none invisible'
         }`}
       >
-        {/* Contenedor principal con esquinas redondeadas */}
-        <div className={`bg-white shadow-2xl flex flex-col h-full overflow-hidden ${
-          isMaximized ? 'rounded-none' : 'rounded-t-3xl sm:rounded-t-[2rem] rounded-b-none sm:rounded-b-3xl'
+        {/* Contenedor principal con esquinas redondeadas y sombra */}
+        <div className={`bg-[#202020] shadow-2xl flex flex-col h-full overflow-hidden border border-gray-700/50 ${
+          isExpanded ? 'md:rounded-2xl' : 'rounded-2xl'
         }`}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  setIsMaximized(false);
-                }}
-                className="p-2 sm:p-1.5 hover:bg-slate-100 rounded-lg transition"
-                aria-label="Cerrar"
+          {/* Header con botones de control */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700/50">
+            {/* Botón cerrar (X) - esquina superior izquierda */}
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                setIsExpanded(false);
+              }}
+              className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
+              aria-label="Cerrar"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-              </button>
-              <h2 className="text-xl sm:text-lg font-semibold text-slate-900">
-                Hola, ¿qué tal? 👋
-              </h2>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+
+            {/* Logo y descripción de ChefCopilot */}
+            <div className="flex-1 text-center">
+              <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
+              <p className="text-xs text-gray-400">Asesor experto en cocina profesional</p>
             </div>
+
+            {/* Botones de control - esquina superior derecha */}
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setIsMaximized(!isMaximized)}
-                className="p-2 sm:p-1.5 hover:bg-slate-100 rounded-lg transition"
-                aria-label={isMaximized ? "Minimizar" : "Maximizar"}
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
+                aria-label={isExpanded ? "Contraer" : "Expandir"}
               >
-                {isMaximized ? (
+                {isExpanded ? (
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
+                    className="h-5 w-5"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -125,7 +127,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                 ) : (
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
+                    className="h-5 w-5"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -144,13 +146,13 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                   e.stopPropagation();
                   handleClearChat();
                 }}
-                className="p-2 sm:p-1.5 hover:bg-slate-100 rounded-lg transition"
+                className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
                 aria-label="Limpiar conversación"
                 title="Limpiar conversación"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-6 w-6 sm:h-5 sm:w-5 text-slate-600"
+                  className="h-5 w-5"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -168,42 +170,15 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
           {/* Contenido del chat */}
           <div className="flex-1 overflow-hidden">
-            <Chat config={config} />
-          </div>
-
-        </div>
-
-        {/* Botón de cerrar circular azul fuera del chat */}
-        <button
-          onClick={() => {
-            setIsOpen(false);
-            setIsMaximized(false);
-          }}
-          className="absolute -bottom-16 sm:-bottom-12 right-4 w-16 h-16 sm:w-14 sm:h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl flex items-center justify-center transition-all duration-300 hover:scale-110 z-50"
-          aria-label="Cerrar chat"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-7 w-7 sm:h-6 sm:w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2.5}
-              d="M6 18L18 6M6 6l12 12"
+            <Chat 
+              config={config} 
+              onFirstMessage={() => {
+                if (!isExpanded) {
+                  setIsExpanded(true);
+                }
+              }}
             />
-          </svg>
-        </button>
-
-        {/* Footer con branding - más abajo */}
-        <div className="absolute bottom-[-5rem] left-1/2 transform -translate-x-1/2 text-center w-full">
-          <p className="text-xs text-slate-400">
-            POWERED BY{' '}
-            <span className="font-semibold text-slate-600">Tres Puntos</span>
-          </p>
+          </div>
         </div>
       </div>
     </>
