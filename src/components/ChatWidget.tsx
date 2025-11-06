@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 import { Chat } from './Chat';
@@ -13,21 +13,25 @@ interface ChatWidgetProps {
 export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(true); // Abierto por defecto
   const [isExpanded, setIsExpanded] = useState(false);
-  const { messages, clearMessages } = useChat();
-
-  // Auto-expandir al enviar el primer mensaje
-  useEffect(() => {
-    if (messages.length > 0 && !isExpanded) {
-      setIsExpanded(true);
-    }
-  }, [messages.length, isExpanded]);
+  const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
+  const { clearMessages } = useChat();
 
   // Función para limpiar el chat
   const handleClearChat = () => {
     if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
       clearMessages();
       setIsExpanded(false);
+      setHasAutoExpanded(false); // Resetear para permitir auto-expansión en la próxima conversación
     }
+  };
+
+  // Función para manejar el cambio manual de expansión
+  const handleToggleExpand = () => {
+    const newExpandedState = !isExpanded;
+    setIsExpanded(newExpandedState);
+    // Si el usuario contrae manualmente, marcar que ya no queremos auto-expansión
+    // Si expande manualmente, también marcar para evitar conflictos
+    setHasAutoExpanded(true);
   };
 
   return (
@@ -181,7 +185,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
               {/* Botones de control - esquina superior derecha */}
               <div className="flex items-center gap-2">
               <button
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={handleToggleExpand}
                 className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
                 aria-label={isExpanded ? "Contraer" : "Expandir"}
               >
@@ -257,8 +261,9 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
             <Chat 
               config={config} 
               onFirstMessage={() => {
-                if (!isExpanded) {
+                if (!isExpanded && !hasAutoExpanded) {
                   setIsExpanded(true);
+                  setHasAutoExpanded(true);
                 }
               }}
             />
