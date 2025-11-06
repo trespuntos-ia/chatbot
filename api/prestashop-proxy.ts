@@ -46,9 +46,8 @@ export default async function handler(
     // El parámetro 'display' necesita corchetes sin codificar para PrestaShop
     const queryParts: string[] = [];
     queryParts.push(`ws_key=${encodeURIComponent(apiKey as string)}`);
-    queryParts.push(`output_format=JSON`);
     
-    // Agregar todos los demás parámetros
+    // Agregar todos los demás parámetros (evitar duplicar output_format)
     for (const [key, value] of Object.entries(queryParams)) {
       if (key !== 'prestashop_url' && key !== 'ws_key' && key !== 'endpoint') {
         // El parámetro 'display' puede venir codificado o no, necesitamos decodificarlo y mantener corchetes sin codificar
@@ -62,11 +61,18 @@ export default async function handler(
           }
           // Asegurarse de que los corchetes estén sin codificar
           displayValue = displayValue.replace(/%5B/g, '[').replace(/%5D/g, ']');
+          // Remover 'associations' del display ya que no está disponible en este parámetro
+          displayValue = displayValue.replace(/associations/g, '').replace(/,,/g, ',').replace(/\[,/g, '[').replace(/,\]/g, ']');
           queryParts.push(`${key}=${displayValue}`);
         } else {
           queryParts.push(`${key}=${encodeURIComponent(String(value))}`);
         }
       }
+    }
+    
+    // Agregar output_format al final si no está presente
+    if (!queryParams.output_format) {
+      queryParts.push(`output_format=JSON`);
     }
 
     const queryString = queryParts.join('&');
