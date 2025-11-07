@@ -438,3 +438,7 @@ Después de la Fase 1, el bot:
 **Dificultad:** Media  
 **Riesgo:** Bajo
 
+
+
+
+

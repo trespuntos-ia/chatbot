@@ -163,15 +163,38 @@ export default async function handler(
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Conversaciones por día (para gráfico)
+    // Conversaciones por día (para gráfico) + tiempos por día
     const conversationsByDay = new Map<string, number>();
+    const responseTimesByDayMap = new Map<string, { sum: number; count: number; fastest: number; slowest: number }>();
     conversations?.forEach((conv: any) => {
       const date = new Date(conv.created_at).toISOString().split('T')[0];
       conversationsByDay.set(date, (conversationsByDay.get(date) || 0) + 1);
+
+      if (conv.response_time_ms && conv.response_time_ms > 0) {
+        const stats = responseTimesByDayMap.get(date) || { sum: 0, count: 0, fastest: Number.POSITIVE_INFINITY, slowest: 0 };
+        stats.sum += conv.response_time_ms;
+        stats.count += 1;
+        if (conv.response_time_ms < stats.fastest) {
+          stats.fastest = conv.response_time_ms;
+        }
+        if (conv.response_time_ms > stats.slowest) {
+          stats.slowest = conv.response_time_ms;
+        }
+        responseTimesByDayMap.set(date, stats);
+      }
     });
     
     const conversationsByDayArray = Array.from(conversationsByDay.entries())
       .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const responseTimesByDay = Array.from(responseTimesByDayMap.entries())
+      .map(([date, stats]) => ({
+        date,
+        avgResponseTime: stats.count > 0 ? Math.round(stats.sum / stats.count) : 0,
+        fastestResponseTime: stats.fastest === Number.POSITIVE_INFINITY ? 0 : stats.fastest,
+        slowestResponseTime: stats.slowest
+      }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
     // Tiempo promedio de respuesta
@@ -179,6 +202,74 @@ export default async function handler(
     const avgResponseTime = responseTimes.length > 0
       ? Math.round(responseTimes.reduce((a: number, b: number) => a + b, 0) / responseTimes.length)
       : 0;
+
+    let p90ResponseTime = 0;
+    let fastestResponseTime = 0;
+    let slowestResponseTime = 0;
+    if (responseTimes.length > 0) {
+      const sortedTimes = [...responseTimes].sort((a, b) => a - b);
+      fastestResponseTime = sortedTimes[0];
+      slowestResponseTime = sortedTimes[sortedTimes.length - 1];
+      const p90Index = Math.floor(0.9 * (sortedTimes.length - 1));
+      p90ResponseTime = sortedTimes[p90Index];
+    }
+
+    // Métricas de consumo de OpenAI
+    const conversationsWithTokens = conversations?.filter((c: any) => c.tokens_used && c.tokens_used > 0) || [];
+    const totalTokens = conversationsWithTokens.reduce((sum: number, c: any) => sum + (c.tokens_used || 0), 0);
+    const avgTokensPerConversation = conversationsWithTokens.length > 0
+      ? Math.round(totalTokens / conversationsWithTokens.length)
+      : 0;
+    
+    // Calcular costos estimados por modelo
+    // Precios por 1M tokens (aproximados, actualizados a 2024)
+    const modelPricing: { [key: string]: { input: number; output: number } } = {
+      'gpt-4': { input: 30, output: 60 },
+      'gpt-4-turbo': { input: 10, output: 30 },
+      'gpt-4o': { input: 5, output: 15 },
+      'gpt-3.5-turbo': { input: 0.5, output: 1.5 },
+      'gpt-3.5-turbo-16k': { input: 3, output: 4 },
+    };
+    
+    // Calcular costos por modelo
+    const tokensByModel = new Map<string, { total: number; count: number }>();
+    conversationsWithTokens.forEach((c: any) => {
+      const model = c.model_used || 'gpt-3.5-turbo';
+      const tokens = c.tokens_used || 0;
+      const current = tokensByModel.get(model) || { total: 0, count: 0 };
+      tokensByModel.set(model, {
+        total: current.total + tokens,
+        count: current.count + 1
+      });
+    });
+    
+    // Estimar costos (asumiendo 70% input, 30% output como promedio)
+    let estimatedCost = 0;
+    const costByModel: Array<{ model: string; tokens: number; cost: number }> = [];
+    
+    tokensByModel.forEach((data, model) => {
+      const pricing = modelPricing[model] || modelPricing['gpt-3.5-turbo'];
+      const inputTokens = Math.round(data.total * 0.7);
+      const outputTokens = Math.round(data.total * 0.3);
+      const cost = (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
+      estimatedCost += cost;
+      costByModel.push({
+        model,
+        tokens: data.total,
+        cost: Math.round(cost * 100) / 100 // Redondear a 2 decimales
+      });
+    });
+    
+    // Tokens por día
+    const tokensByDay = new Map<string, number>();
+    conversationsWithTokens.forEach((c: any) => {
+      const date = new Date(c.created_at).toISOString().split('T')[0];
+      tokensByDay.set(date, (tokensByDay.get(date) || 0) + (c.tokens_used || 0));
+    });
+    
+    const tokensByDayArray = Array.from(tokensByDay.entries())
+      .map(([date, tokens]) => ({ date, tokens }))
+      .sort((a, b) => a.date.localeCompare(b.date));
 
     // Estadísticas de feedback (satisfacción)
     const feedbackStats = {
@@ -225,16 +316,28 @@ export default async function handler(
         totalConversations,
         uniqueSessions,
         avgResponseTime,
+        p90ResponseTime,
+        fastestResponseTime,
+        slowestResponseTime,
         dateRange: {
           start: startDate.toISOString(),
           end: endDate.toISOString()
         }
+      },
+      openaiUsage: {
+        totalTokens,
+        avgTokensPerConversation: avgTokensPerConversation,
+        conversationsWithTokens: conversationsWithTokens.length,
+        estimatedCost: Math.round(estimatedCost * 100) / 100,
+        costByModel,
+        tokensByDay: tokensByDayArray
       },
       feedbackStats,
       topProducts,
       topCategories,
       topQuestions,
       conversationsByDay: conversationsByDayArray,
+      responseTimesByDay,
       recentConversations: recentConversationsData || [], // Últimas 20 conversaciones (sin filtro de fecha)
       lastSummary: lastSummary || null
     });

@@ -68,3 +68,7 @@ echo "" | tee -a "$LOG_FILE"
 echo "[$(date +'%H:%M:%S')] 🎉 Proceso completado. Log guardado en: $LOG_FILE" | tee -a "$LOG_FILE"
 
 
+
+
+
+

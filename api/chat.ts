@@ -115,8 +115,8 @@ export default async function handler(
       variables: activePrompts.prompt_variables || []
     });
 
-    // 3. Limitar historial de conversación (últimos 5 mensajes para mayor velocidad)
-    const limitedHistory = conversationHistory.slice(-5);
+    // 3. Limitar historial de conversación (incluir solo si es continuación relevante)
+    const limitedHistory = getRelevantHistory(message, conversationHistory);
 
     // 4. Definir funciones disponibles para Function Calling
     const functions = [
@@ -386,14 +386,30 @@ export default async function handler(
       }
     ];
 
-    // 5. Detectar si el mensaje es sobre productos para forzar búsqueda
-    const isProductQuery = detectProductQuery(message);
+    // 5. Detectar intención del usuario ANTES de detectar si es query de productos
+    const userIntent = detectUserIntent(message);
+    const isComparisonQuery = userIntent.intent === 'compare';
     
-    // 6. Preparar mensajes para OpenAI (con historial limitado)
+    // 6. Detectar categoría en el mensaje
+    const detectedCategory = detectCategoryInMessage(message);
+    
+    // 7. Detectar si el mensaje es sobre productos para forzar búsqueda
+    // PERO solo si NO es una pregunta de comparación
+    const isProductQuery = detectProductQuery(message) && !isComparisonQuery;
+    
+    // 8. Preparar mensajes para OpenAI (con historial limitado)
     // Añadir instrucción adicional al system prompt si es una pregunta sobre productos
     let enhancedSystemPrompt = systemPrompt;
-    if (isProductQuery) {
-      enhancedSystemPrompt += '\n\n⚠️ ATENCIÓN: El usuario está preguntando sobre productos. DEBES usar la función search_products ANTES de responder. NO respondas directamente sin buscar en la base de datos.';
+    if (isComparisonQuery) {
+      // Para preguntas de comparación, instruir a usar compare_products
+      enhancedSystemPrompt += '\n\n⚠️ ATENCIÓN: El usuario quiere COMPARAR productos específicos. DEBES usar la función compare_products con los nombres de los productos mencionados. Extrae los nombres de los productos del mensaje y úsalos en product_names.';
+    } else if (isProductQuery) {
+      if (detectedCategory) {
+        // Si se detectó una categoría, priorizar search_products_by_category
+        enhancedSystemPrompt += `\n\n⚠️ ATENCIÓN: El usuario está preguntando sobre productos en la categoría "${detectedCategory}". DEBES usar la función search_products_by_category con category="${detectedCategory}" ANTES de responder. También puedes usar search_products con query para buscar términos específicos dentro de esa categoría. NO respondas directamente sin buscar en la base de datos.`;
+      } else {
+        enhancedSystemPrompt += '\n\n⚠️ ATENCIÓN: El usuario está preguntando sobre productos. DEBES usar la función search_products ANTES de responder. NO respondas directamente sin buscar en la base de datos.';
+      }
     }
     
     const messages: any[] = [
@@ -402,36 +418,68 @@ export default async function handler(
       { role: 'user', content: message }
     ];
 
-    // 7. Configuración de OpenAI (OPTIMIZADO PARA VELOCIDAD)
+    // 8. Configuración de OpenAI (OPTIMIZADO PARA VELOCIDAD)
     const model = config.model || 'gpt-3.5-turbo'; // Por defecto más rápido
-    const temperature = config.temperature !== undefined ? config.temperature : 0.7;
-    const maxTokens = config.max_tokens || 1000; // Reducido de 1500 a 1000 para respuestas más rápidas
+    const temperature = config.temperature !== undefined ? config.temperature : 0.6;
+    const maxTokens = config.max_tokens || 600; // Reducido para acelerar la generación
 
-    // 8. Llamar a OpenAI (con timeout para evitar errores de Vercel)
+    // 9. Llamar a OpenAI (con timeout para evitar errores de Vercel)
     // Si es una pregunta sobre productos, forzar el uso de herramientas
     let completion;
     try {
       // Si es una pregunta sobre productos, forzar búsqueda
       let toolChoice: any = 'auto';
-      if (isProductQuery) {
-        // Extraer término de búsqueda del mensaje para añadirlo como contexto
-        const searchTerm = extractSearchTermFromMessage(message);
-        // Añadir el término de búsqueda al mensaje del usuario para que OpenAI lo use
-        if (searchTerm && searchTerm !== message.trim()) {
+      if (isComparisonQuery) {
+        // Para comparaciones, NO forzar search_products, dejar que OpenAI elija compare_products
+        // O extraer nombres y llamar directamente
+        toolChoice = 'auto'; // Dejar que OpenAI elija compare_products automáticamente
+      } else if (isProductQuery) {
+        if (detectedCategory) {
+          // Si hay categoría detectada, forzar búsqueda en esa categoría con términos relevantes
+          const searchTerm = extractSearchTermFromMessage(message);
+          const categoryQuery = buildCategorySearchQuery(searchTerm, detectedCategory);
+          const instructionQuery = categoryQuery || searchTerm;
+
           messages[messages.length - 1] = {
             role: 'user',
-            content: `${message}\n\n[IMPORTANTE: Busca productos relacionados con "${searchTerm}" usando la función search_products]`
+            content: `${message}\n\n[IMPORTANTE: El usuario pregunta sobre "${detectedCategory}". DEBES usar search_products_by_category con category="${detectedCategory}"${instructionQuery ? ` y query="${instructionQuery}"` : ''} para buscar productos relevantes dentro de esa categoría.]`
+          };
+
+          const categoryFunctionArgs: any = {
+            category: detectedCategory
+          };
+          if (categoryQuery) {
+            categoryFunctionArgs.query = categoryQuery;
+          }
+
+          toolChoice = {
+            type: 'function' as const,
+            function: {
+              name: 'search_products_by_category',
+              arguments: JSON.stringify(categoryFunctionArgs)
+            }
+          };
+        } else {
+          // Extraer término de búsqueda del mensaje para añadirlo como contexto
+          const searchTerm = extractSearchTermFromMessage(message);
+          // Añadir el término de búsqueda al mensaje del usuario para que OpenAI lo use
+          if (searchTerm && searchTerm !== message.trim()) {
+            messages[messages.length - 1] = {
+              role: 'user',
+              content: `${message}\n\n[IMPORTANTE: Busca productos relacionados con "${searchTerm}" usando la función search_products]`
+            };
+          }
+          // Forzar el uso de search_products
+          toolChoice = { 
+            type: 'function' as const, 
+            function: { 
+              name: 'search_products'
+            } 
           };
         }
-        // Forzar el uso de search_products
-        toolChoice = { 
-          type: 'function' as const, 
-          function: { 
-            name: 'search_products'
-          } 
-        };
       }
       
+      console.time('openai_call_1');
       completion = await Promise.race([
         openai.chat.completions.create({
           model,
@@ -448,6 +496,7 @@ export default async function handler(
           setTimeout(() => reject(new Error('OpenAI request timeout')), 15000) // Reducido a 15s para mayor velocidad
         )
       ]) as any;
+      console.timeEnd('openai_call_1');
     } catch (openaiError) {
       console.error('OpenAI API error:', openaiError);
       res.status(500).json({
@@ -475,6 +524,7 @@ export default async function handler(
     
     // Capturar tokens de la primera llamada
     let firstCallTokens = 0;
+    let totalTokens = 0;
     if (completion.usage) {
       firstCallTokens = completion.usage.total_tokens || 0;
       console.log('[Tokens] Primera llamada:', {
@@ -553,48 +603,196 @@ export default async function handler(
           return;
       }
 
-      // Detectar intención del usuario
+      // Detectar intención del usuario (ya la tenemos, pero recalcular por si cambió)
       const userIntent = detectUserIntent(message);
       
+      // Si no hay resultados, intentar generar alternativas automáticas
+      if (
+        functionName === 'search_products' &&
+        (!functionResult.products || functionResult.products.length === 0) &&
+        functionArgs && typeof functionArgs.query === 'string' && functionArgs.query.trim().length > 0 &&
+        functionArgs.query.trim().length >= 6
+      ) {
+        try {
+          const originalQuery = functionArgs.query.trim();
+          const clarifyResult = await clarifySearchIntent(supabase, { original_query: originalQuery });
+
+          const suggestionQueries = (clarifyResult?.suggestions || [])
+            .map((q: string) => q.trim())
+            .filter((q: string) => q.length > 0 && q.toLowerCase() !== originalQuery.toLowerCase());
+
+          const alternativeProducts: any[] = [];
+          const seenProductIds = new Set<string>();
+
+          for (const suggestion of suggestionQueries) {
+            const altResult = await searchProducts(supabase, { query: suggestion, limit: 3 });
+            if (altResult?.products && altResult.products.length > 0) {
+              altResult.products.forEach((product: any) => {
+                const key = String(product.id || product.sku || product.name);
+                if (!seenProductIds.has(key) && alternativeProducts.length < 5) {
+                  seenProductIds.add(key);
+                  alternativeProducts.push(product);
+                }
+              });
+            }
+
+            if (alternativeProducts.length >= 5) {
+              break;
+            }
+          }
+
+          if (suggestionQueries.length > 0) {
+            functionResult.search_suggestions = suggestionQueries;
+          }
+          if (alternativeProducts.length > 0) {
+            functionResult.alternative_products = alternativeProducts;
+          }
+        } catch (alternativeSearchError) {
+          console.error('Alternative search attempt failed:', alternativeSearchError);
+        }
+      }
+
+      const searchTermForResult = (functionArgs && typeof functionArgs.query === 'string' && functionArgs.query.trim().length > 0)
+        ? functionArgs.query.trim()
+        : extractSearchTermFromMessage(message);
+
+      if (shouldUseQuickResponse(functionName, functionResult, userIntent)) {
+        const product = functionResult.products[0];
+        const quickMessage = buildQuickResponse(
+          product,
+          searchTermForResult,
+          userIntent
+        );
+
+        totalTokens = firstCallTokens || 0;
+
+        const responseTime = Date.now() - startTime;
+        const conversationId = await saveConversationToAnalytics(
+          supabase,
+          sessionId || 'default',
+          message,
+          quickMessage,
+          functionName,
+          functionResult.products,
+          functionArgs?.category || functionArgs?.subcategory,
+          model,
+          responseTime,
+          totalTokens
+        );
+
+        res.status(200).json({
+          success: true,
+          message: quickMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          conversation_id: conversationId,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content: quickMessage,
+              function_calls: [toolCall],
+              products: functionResult.products,
+              sources: ['products_db'],
+              quick_response: true
+            }
+          ]
+        });
+        return;
+      }
+
+      if (shouldUseStructuredResponse(functionName, functionResult, userIntent)) {
+        const structuredMessage = buildStructuredResponse(
+          functionResult.products,
+          searchTermForResult,
+          userIntent,
+          functionArgs?.category || functionArgs?.subcategory || detectedCategory,
+          functionResult.total
+        );
+
+        totalTokens = firstCallTokens || 0;
+
+        const responseTime = Date.now() - startTime;
+        const conversationId = await saveConversationToAnalytics(
+          supabase,
+          sessionId || 'default',
+          message,
+          structuredMessage,
+          functionName,
+          functionResult.products,
+          functionArgs?.category || functionArgs?.subcategory,
+          model,
+          responseTime,
+          totalTokens
+        );
+
+        res.status(200).json({
+          success: true,
+          message: structuredMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          conversation_id: conversationId,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content: structuredMessage,
+              function_calls: [toolCall],
+              products: functionResult.products,
+              sources: ['products_db'],
+              structured_response: true
+            }
+          ]
+        });
+        return;
+      }
+
       // Pasar userIntent a searchProducts si es search_products
       if (functionName === 'search_products' && functionArgs) {
         functionArgs.userIntent = userIntent;
       }
-      
+
       // Preparar contexto enriquecido con instrucciones de validación
       let enrichedContext = '';
       
-      // INSTRUCCIONES MEJORADAS PARA OPENAI (FASE 1 - FORMATO ENRIQUECIDO - OPTIMIZADO)
-      enrichedContext += '\n\n📋 INSTRUCCIONES CRÍTICAS:\n';
-      enrichedContext += '1. Presenta productos: **Nombre**, 💰 Precio, 📦 Categoría, 📝 Descripción breve, 🔗 URL\n';
-      enrichedContext += '2. Agrupa: 🏆 RECOMENDADO (primero), 🔁 ALTERNATIVAS (2-3 siguientes), 💡 PUEDE INTERESARTE (resto)\n';
-      enrichedContext += '3. SIEMPRE menciona precio si está disponible\n';
-      enrichedContext += '4. Sé específico: "He encontrado X productos relacionados con [término]"\n';
-      enrichedContext += '5. Si no encuentras exactamente, sugiere alternativas similares\n\n';
-      
-      // Añadir instrucciones según la intención detectada
-      if (userIntent.intent === 'buy') {
-        enrichedContext += '8. ⚠️ INTENCIÓN DETECTADA: El usuario quiere COMPRAR\n';
-        enrichedContext += '   - Destaca el precio de forma prominente\n';
-        enrichedContext += '   - Menciona disponibilidad si es relevante\n';
-        enrichedContext += '   - Facilita el acceso al link de compra\n';
-        enrichedContext += '   - Puedes mencionar: "Para comprar este producto, haz clic en el enlace"\n\n';
-      } else if (userIntent.intent === 'compare') {
-        enrichedContext += '8. ⚠️ INTENCIÓN DETECTADA: El usuario quiere COMPARAR productos\n';
-        enrichedContext += '   - Presenta los productos en formato comparativo\n';
-        enrichedContext += '   - Destaca diferencias clave (precio, características, categoría)\n';
-        enrichedContext += '   - Usa formato tabla o lista con columnas claras\n';
-        enrichedContext += '   - Puedes sugerir: "Para ayudarte a decidir, aquí están las diferencias principales:"\n\n';
-      } else if (userIntent.intent === 'info') {
-        enrichedContext += '8. ⚠️ INTENCIÓN DETECTADA: El usuario busca INFORMACIÓN\n';
-        enrichedContext += '   - Proporciona descripciones más detalladas\n';
-        enrichedContext += '   - Menciona características técnicas si están disponibles\n';
-        enrichedContext += '   - Explica para qué sirve cada producto\n';
-        enrichedContext += '   - Puedes usar: "Este producto es ideal para..." o "Características principales:"\n\n';
+      // Si es una comparación, usar instrucciones específicas para comparación
+      if (functionName === 'compare_products') {
+        enrichedContext += '\n\n📊 INSTRUCCIONES PARA COMPARAR:\n';
+        enrichedContext += '• Explica las diferencias clave entre los productos (precio, uso, características técnicas).\n';
+        enrichedContext += '• Ofrece un resumen inicial y después una comparación punto por punto.\n';
+        enrichedContext += '• Cierra con una recomendación clara de cuándo elegir cada opción.\n';
+        enrichedContext += '• Evita repetir especificaciones sin contexto; interpreta qué implican para el usuario.\n\n';
+      } else {
+        enrichedContext += '\n\n📋 INSTRUCCIONES PRINCIPALES:\n';
+        enrichedContext += '• Usa la estructura fija: Nombre en negrita, Precio, Categoría (si aplica), Descripción corta (1 frase), Enlace.\n';
+        enrichedContext += '• Ordena la respuesta en bloques: 🏆 RECOMENDADO (1 producto), 🔁 ALTERNATIVAS (siguientes 2), 💡 PUEDE INTERESARTE (resto).\n';
+        enrichedContext += '• Presenta siempre el precio si existe y abre con “He encontrado X productos relacionados con [término]”.\n';
+        enrichedContext += '• Si el producto no coincide exactamente, sugiere alternativas dentro de la misma categoría.\n\n';
+        
+        // Añadir instrucciones según la intención detectada
+        if (userIntent.intent === 'buy') {
+          enrichedContext += '• Intención de compra: destaca el precio y anima a usar el enlace para completar la adquisición.\n';
+        } else if (userIntent.intent === 'info') {
+          enrichedContext += '• Intención informativa: incluye características técnicas y aclara para qué sirve cada producto.\n';
+        }
       }
       
       // Añadir instrucciones específicas según el caso
-      if (functionResult.products && functionResult.products.length > 1) {
+      if (functionName === 'compare_products') {
+        // Instrucciones específicas para comparación
+        if (functionResult.products && functionResult.products.length >= 2) {
+          enrichedContext += `\n✅ Has encontrado ${functionResult.products.length} productos para comparar.\n`;
+          enrichedContext += 'IMPORTANTE: DEBES crear una comparación detallada explicando las diferencias entre estos productos.\n';
+          enrichedContext += 'NO solo listes los productos. Explica QUÉ los hace diferentes.\n';
+          enrichedContext += `Productos a comparar: ${functionResult.products.map((p: any) => p.name).join(', ')}\n`;
+        } else if (functionResult.products && functionResult.products.length === 1) {
+          enrichedContext += '\n⚠️ Solo se encontró un producto. Explica sus características y menciona que no se pudo encontrar el otro producto para comparar.\n';
+        } else {
+          enrichedContext += '\n⚠️ No se encontraron productos para comparar. Informa al usuario amablemente.\n';
+        }
+      } else if (functionResult.products && functionResult.products.length > 1) {
         enrichedContext += '\n⚠️ IMPORTANTE: Has encontrado múltiples productos (ya ordenados por relevancia). Presenta los más relevantes primero.\n';
       } else if (functionResult.products && functionResult.products.length === 1) {
         const product = functionResult.products[0];
@@ -612,21 +810,38 @@ export default async function handler(
         // Esto se hace después de la primera respuesta para no bloquear
         // Por ahora, el contenido web se busca directamente en la función search_web_content
       } else if (functionResult.products && functionResult.products.length === 0) {
-        // FASE 1 - MEJOR FALLBACK (SIN RESULTADOS)
-        enrichedContext += '\n⚠️ No se encontraron productos. Debes:\n';
-        enrichedContext += '   1. Ser EMPÁTICO y profesional:\n';
-        enrichedContext += '      - "Lo siento, no encontré productos que coincidan exactamente con tu búsqueda de \'[término]\'."\n';
-        enrichedContext += '      - "Entiendo que puede ser frustrante. Déjame ayudarte a encontrar alternativas."\n';
-        enrichedContext += '   2. Buscar productos similares automáticamente:\n';
-        enrichedContext += '      - Intenta buscar productos relacionados por categoría\n';
-        enrichedContext += '      - Busca variaciones del término de búsqueda\n';
-        enrichedContext += '   3. Sugerir términos alternativos o variaciones\n';
-        enrichedContext += '   4. Preguntar por más detalles de forma amigable:\n';
-        enrichedContext += '      - "¿Podrías ser más específico? Por ejemplo, menciona la categoría o características que buscas"\n';
-        enrichedContext += '      - "¿Hay alguna categoría específica en la que te gustaría que busque?"\n';
-        enrichedContext += '   5. Ofrecer ayuda proactiva:\n';
-        enrichedContext += '      - "¿Te gustaría que busque productos similares o en otra categoría?"\n';
-        enrichedContext += '      - "Puedo ayudarte a explorar nuestras categorías disponibles"\n';
+        // Detectar si hay una categoría detectada o consultada
+        const categoryConsulted = functionArgs.category || detectedCategory;
+        
+        const noResultIntro = categoryConsulted
+          ? `No hay coincidencias exactas en la categoría "${categoryConsulted}".`
+          : 'No hay productos que coincidan exactamente con la búsqueda.';
+
+        enrichedContext += `\n⚠️ ${noResultIntro} Construye una respuesta breve con estos pasos:\n`;
+        enrichedContext += '• Muestra empatía y ofrece ayuda inmediata.\n';
+        if (categoryConsulted) {
+          enrichedContext += `• Pregunta qué tipo de ${categoryConsulted.toLowerCase()} necesita (material, tamaño, uso).\n`;
+        }
+        enrichedContext += '• Usa las sugerencias generadas para proponer términos o categorías nuevas.\n';
+        enrichedContext += '• Invita al usuario a detallar mejor la necesidad para que puedas refinar la búsqueda.\n';
+
+        if (functionResult.search_suggestions && functionResult.search_suggestions.length > 0) {
+          enrichedContext += '\n🔄 SUGERENCIAS AUTOMÁTICAS:\n';
+          functionResult.search_suggestions.slice(0, 5).forEach((suggestion: string, idx: number) => {
+            enrichedContext += `   ${idx + 1}. ${suggestion}\n`;
+          });
+          enrichedContext += 'Incluye estas opciones como propuestas concretas.\n';
+        }
+
+        if (functionResult.alternative_products && functionResult.alternative_products.length > 0) {
+          enrichedContext += '\n🧾 PRODUCTOS ALTERNATIVOS DISPONIBLES:\n';
+          functionResult.alternative_products.slice(0, 3).forEach((product: any, idx: number) => {
+            const priceInfo = product.price ? ` - ${product.price}` : '';
+            const categoryInfo = product.category ? ` (${product.category})` : '';
+            enrichedContext += `   ${idx + 1}. ${product.name}${priceInfo}${categoryInfo}\n`;
+          });
+          enrichedContext += 'Preséntalos como opciones sugeridas si encajan con la necesidad.\n';
+        }
         
         // Generar sugerencias automáticas mejoradas
         if (functionArgs.query && typeof functionArgs.query === 'string') {
@@ -653,14 +868,14 @@ export default async function handler(
               .not('category', 'is', null)
               .limit(10); // Reducir límite para ser más rápido
             
-            const categoriesResult = await Promise.race([
+            const categoriesResult: { data?: any[] | null } | null = await Promise.race([
               categoriesQuery,
-              new Promise((_, reject) => 
+              new Promise<{ data: null }>((_, reject) => 
                 setTimeout(() => reject(new Error('Timeout')), 2000)
               )
             ]).catch(() => ({ data: null }));
             
-            if (categoriesResult && categoriesResult.data && categoriesResult.data.length > 0) {
+            if (categoriesResult && categoriesResult.data && Array.isArray(categoriesResult.data) && categoriesResult.data.length > 0) {
               const uniqueCategories = [...new Set(categoriesResult.data.map((c: any) => c.category))];
               const normalizedQuery = normalizeText(functionArgs.query);
               
@@ -749,9 +964,10 @@ export default async function handler(
 
       // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
       // Limitar el tamaño del contexto enriquecido para mayor velocidad (OPTIMIZADO)
-      const maxContextLength = 2000; // Reducido de 3000 a 2000 caracteres para mayor velocidad
-      const limitedEnrichedContext = enrichedContext.length > maxContextLength 
-        ? enrichedContext.substring(0, maxContextLength) + '\n\n[Contexto truncado para optimizar velocidad]'
+      enrichedContext = promptReducer(enrichedContext);
+
+      const limitedEnrichedContext = enrichedContext.length > MAX_CONTEXT_CHAR_LENGTH 
+        ? enrichedContext.substring(0, MAX_CONTEXT_CHAR_LENGTH) + '\n\n[Contexto truncado para optimizar velocidad]'
         : enrichedContext;
       
       const systemPromptWithContext = systemPrompt + limitedEnrichedContext;
@@ -762,7 +978,7 @@ export default async function handler(
       console.log(`Enriched context length: ${enrichedContext.length} chars (limited to ${limitedEnrichedContext.length})`);
       
       // Inicializar totalTokens con los tokens de la primera llamada (asegurar que esté definido)
-      let totalTokens: number = firstCallTokens || 0;
+      totalTokens = firstCallTokens || 0;
       
       const messagesWithContext = [
         { role: 'system', content: systemPromptWithContext },
@@ -787,17 +1003,16 @@ export default async function handler(
         // Limitar el tamaño de functionResult para mayor velocidad (OPTIMIZADO)
         let limitedFunctionResult = functionResult;
         if (functionResult.products && Array.isArray(functionResult.products)) {
-          // Limitar a máximo 5 productos (reducido de 10) para mayor velocidad
+          // Limitar a máximo 5 productos (los 3 primeros con detalle reducido, el resto solo resumen)
           limitedFunctionResult = {
             ...functionResult,
-            products: functionResult.products.slice(0, 5).map((p: any) => ({
+            products: functionResult.products.slice(0, 5).map((p: any, index: number) => ({
               id: p.id,
               name: p.name,
               price: p.price,
               category: p.category,
               sku: p.sku,
-              // Excluir description para reducir tokens
-              description: p.description ? p.description.substring(0, 100) + '...' : undefined
+              description: index < 3 && p.description ? p.description.substring(0, 80) + '...' : undefined
             })),
             total: functionResult.products.length,
             limited: functionResult.products.length > 5
@@ -836,6 +1051,7 @@ export default async function handler(
         const totalMessagesSize = JSON.stringify(finalMessages).length;
         console.log(`Calling OpenAI second completion. Total messages size: ${totalMessagesSize} bytes`);
         
+        console.time('openai_call_2');
         secondCompletion = await Promise.race([
           openai.chat.completions.create({
             model,
@@ -852,6 +1068,7 @@ export default async function handler(
             setTimeout(() => reject(new Error('OpenAI request timeout')), 20000) // Reducido a 20s para mayor velocidad
           )
         ]) as any;
+        console.timeEnd('openai_call_2');
         
         // Capturar tokens de la segunda llamada
         if (secondCompletion?.usage) {
@@ -1014,25 +1231,25 @@ export default async function handler(
         if (!fallbackMessage || fallbackMessage.trim().length === 0) {
           fallbackMessage = 'He procesado tu consulta. ¿Hay algo más específico que te gustaría saber?';
         }
-        
-        res.status(200).json({
-          success: true,
-          message: fallbackMessage,
-          function_called: functionName,
-          function_result: functionResult,
-          fallback: true,
-          conversation_history: [
-            ...conversationHistory,
-            { role: 'user', content: message },
-            {
-              role: 'assistant',
-              content: fallbackMessage,
-              function_calls: [toolCall],
-              sources: ['products_db']
-            }
-          ]
-        });
-        return;
+          
+          res.status(200).json({
+            success: true,
+            message: fallbackMessage,
+            function_called: functionName,
+            function_result: functionResult,
+            fallback: true,
+            conversation_history: [
+              ...conversationHistory,
+              { role: 'user', content: message },
+              {
+                role: 'assistant',
+                content: fallbackMessage,
+                function_calls: [toolCall],
+                sources: ['products_db']
+              }
+            ]
+          });
+          return;
       }
 
       // Determinar fuentes de información
@@ -1064,7 +1281,7 @@ export default async function handler(
         : (functionResult.products && functionResult.products.length > 0
           ? `He encontrado ${functionResult.products.length} producto(s). ¿Te gustaría más información?`
           : 'He procesado tu consulta. ¿Hay algo más específico que te gustaría saber?');
-      
+
       // Preparar mensaje del asistente con productos y fuentes
       const assistantMessage: any = {
         role: 'assistant',
@@ -1091,7 +1308,7 @@ export default async function handler(
       // Asegurar que el mensaje en la respuesta también esté presente
       // Usar nombre diferente para evitar conflicto con responseMessage de la línea 474
       const finalResponseMessage = safeFinalMessage || finalMessage || 'He procesado tu consulta.';
-      
+
       res.status(200).json({
         success: true,
         message: finalResponseMessage,
@@ -1308,18 +1525,433 @@ function extractSearchTermFromMessage(message: string): string {
   // Eliminar palabras comunes y dejar solo las relevantes
   const words = message.split(/\s+/).filter(word => {
     const lowerWord = word.toLowerCase().replace(/[?¿!¡.,;:]/g, '');
-    return lowerWord.length > 2 && 
+    // Incluir todas las palabras de 3+ letras (incluyendo palabras como "WOW")
+    // Solo excluir palabras de acción muy comunes
+    return lowerWord.length >= 3 && 
            !['tienes', 'tiene', 'tienen', 'busca', 'buscar', 'hay', 'existe', 
              'muestra', 'muestrame', 'muéstrame', 'encuentra', 'producto', 
-             'productos', 'artículo', 'artículos', 'precio', 'cuánto', 'cuanto'].includes(lowerWord);
+             'productos', 'artículo', 'artículos', 'precio', 'cuánto', 'cuanto', 'busco'].includes(lowerWord);
   });
   
   if (words.length > 0) {
     return words.join(' ');
   }
   
-  // Si todo falla, devolver el mensaje completo sin signos de interrogación
-  return message.replace(/[?¿!¡]/g, '').trim();
+  // Si todo falla, devolver el mensaje completo sin signos de interrogación (limpiando palabras muy comunes)
+  const cleanedMessage = message
+    .replace(/[?¿!¡]/g, '')
+    .replace(/\b(busco|busca|tienes|tiene|hay|existe|muestra|muestrame|muéstrame|encuentra|producto|productos|artículo|artículos|precio|cuánto|cuanto)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  return cleanedMessage || message.replace(/[?¿!¡]/g, '').trim();
+}
+
+// Función para detectar categorías comunes en el mensaje
+const MAX_CONTEXT_CHAR_LENGTH = 1500;
+const QUICK_RESPONSE_SCORE_THRESHOLD = 220;
+
+function detectCategoryInMessage(message: string): string | null {
+  const lowerMessage = message.toLowerCase();
+  
+  // Mapa de palabras clave de categorías comunes (palabra clave -> categoría)
+  const categoryKeywords: { [key: string]: string } = {
+    // Vajilla y platos
+    'plato': 'Vajilla',
+    'platos': 'Vajilla',
+    'vajilla': 'Vajilla',
+    'copa': 'Vajilla',
+    'copas': 'Vajilla',
+    'vaso': 'Vajilla',
+    'vasos': 'Vajilla',
+    'cubierto': 'Vajilla',
+    'cubiertos': 'Vajilla',
+    'cuchillo': 'Vajilla',
+    'cuchillos': 'Vajilla',
+    'tenedor': 'Vajilla',
+    'tenedores': 'Vajilla',
+    'cuchara': 'Vajilla',
+    'cucharas': 'Vajilla',
+    'servilleta': 'Vajilla',
+    'servilletas': 'Vajilla',
+    'tapa': 'Vajilla',
+    'tapas': 'Vajilla',
+    'presentación': 'Vajilla',
+    'presentacion': 'Vajilla',
+    'presentaciones': 'Vajilla',
+    'bandeja': 'Vajilla',
+    'bandejas': 'Vajilla',
+    'fuente': 'Vajilla',
+    'fuentes': 'Vajilla',
+    'platillo': 'Vajilla',
+    'platillos': 'Vajilla',
+    
+    // Herramientas
+    'herramienta': 'Herramientas',
+    'herramientas': 'Herramientas',
+    'utensilio': 'Utensilios',
+    'utensilios': 'Utensilios',
+    'cuchillo de cocina': 'Herramientas',
+    'tijeras': 'Herramientas',
+    'pelador': 'Herramientas',
+    'rallador': 'Herramientas',
+    
+    // Equipamiento
+    'equipamiento': 'Equipamiento',
+    'equipo': 'Equipamiento',
+    'máquina': 'Equipamiento',
+    'maquina': 'Equipamiento',
+    'aparato': 'Equipamiento',
+    'aparatos': 'Equipamiento',
+    
+    // Cocina
+    'sartén': 'Cocina',
+    'sarten': 'Cocina',
+    'sartenes': 'Cocina',
+    'olla': 'Cocina',
+    'ollas': 'Cocina',
+    'cacerola': 'Cocina',
+    'cacerolas': 'Cocina',
+    'plancha': 'Cocina',
+    'planchas': 'Cocina',
+    
+    // Postres y repostería
+    'postre': 'Repostería',
+    'postres': 'Repostería',
+    'repostería': 'Repostería',
+    'reposteria': 'Repostería',
+    'dulce': 'Repostería',
+    'dulces': 'Repostería',
+    'pastelero': 'Pastelería',
+    'pastelera': 'Pastelería',
+    'pastelería': 'Pastelería',
+    'pasteleria': 'Pastelería',
+    'repostero': 'Pastelería',
+    'repostera': 'Pastelería',
+    'pastel': 'Pastelería',
+    'pasteles': 'Pastelería',
+    'cupcake': 'Pastelería',
+    'cupcakes': 'Pastelería',
+    'tarta': 'Pastelería',
+    'tartas': 'Pastelería',
+    'bizcocho': 'Pastelería',
+    'bizcochos': 'Pastelería',
+    'bombón': 'Chocolate',
+    'bombon': 'Chocolate',
+    'bombones': 'Chocolate',
+    'chocolate': 'Chocolate',
+    'chocolates': 'Chocolate',
+    'chocolatero': 'Chocolate',
+    'chocolatera': 'Chocolate',
+    'cacao': 'Chocolate',
+    'ganache': 'Chocolate',
+    'atemperar': 'Chocolate',
+    'templar': 'Chocolate',
+    'refinar': 'Maquinaria',
+    'refinador': 'Maquinaria',
+    'refinadora': 'Maquinaria',
+    'refinadoras': 'Maquinaria',
+    'molino': 'Maquinaria',
+    'molinos': 'Maquinaria',
+    
+    // Bebidas
+    'bebida': 'Bebidas',
+    'bebidas': 'Bebidas',
+    'coctel': 'Bebidas',
+    'cóctel': 'Bebidas',
+    'cocktail': 'Bebidas',
+    'cerveza': 'Bebidas',
+    'vino': 'Bebidas',
+    
+    // Textil
+    'textil': 'Textil',
+    'textiles': 'Textil',
+    'tela': 'Textil',
+    'telas': 'Textil',
+    'ropa': 'Textil',
+    'mantel': 'Textil',
+    'manteles': 'Textil',
+    'delantal': 'Textil',
+    'delantales': 'Textil',
+    
+    // Limpieza
+    'limpieza': 'Limpieza',
+    'limpiar': 'Limpieza',
+    'detergente': 'Limpieza',
+    'detergentes': 'Limpieza',
+    'desinfectante': 'Limpieza',
+    
+    // Almacenamiento
+    'almacenamiento': 'Almacenamiento',
+    'contenedor': 'Almacenamiento',
+    'contenedores': 'Almacenamiento',
+    'recipiente': 'Almacenamiento',
+    'recipientes': 'Almacenamiento',
+    'tupper': 'Almacenamiento',
+    'tapper': 'Almacenamiento',
+    
+    // Decoración
+    'decoración': 'Decoración',
+    'decoracion': 'Decoración',
+    'decorativo': 'Decoración',
+    'decorativos': 'Decoración',
+    'centro de mesa': 'Decoración',
+    'centro de mesas': 'Decoración',
+  };
+  
+  // Buscar palabras clave de categorías
+  for (const [keyword, category] of Object.entries(categoryKeywords)) {
+    // Buscar como palabra completa (con límites de palabra)
+    const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(lowerMessage)) {
+      return category;
+    }
+  }
+  
+  return null;
+}
+
+function buildCategorySearchQuery(searchTerm: string, category: string): string | undefined {
+  if (!searchTerm || searchTerm.trim().length === 0) {
+    return undefined;
+  }
+
+  const categoryWords = normalizeText(category).split(/\s+/).filter(Boolean);
+  const categorySet = new Set(categoryWords);
+
+  const words = searchTerm.split(/\s+/).map(w => w.trim()).filter(Boolean);
+  const cleanedWords: string[] = [];
+
+  words.forEach(word => {
+    const normalized = normalizeText(word);
+    if (!normalized) return;
+    if (SEARCH_STOP_WORDS.has(normalized)) return;
+    if (CATEGORY_STOP_WORDS.has(normalized)) return;
+    if (categorySet.has(normalized)) return;
+    if (['de', 'la', 'el', 'los', 'las', 'un', 'una', 'del', 'con', 'por', 'para', 'y'].includes(normalized)) return;
+
+    cleanedWords.push(normalized);
+
+    if (normalized === 'refinar') {
+      cleanedWords.push('refinadora', 'refinador');
+    }
+    if (normalized === 'maquina' || normalized === 'máquina') {
+      cleanedWords.push('maquinaria');
+    }
+  });
+
+  const unique = [...new Set(cleanedWords)].filter(Boolean);
+  if (unique.length === 0) {
+    return undefined;
+  }
+
+  return unique.join(' ');
+}
+
+function getRelevantHistory(message: string, history: ChatMessage[]): ChatMessage[] {
+  if (!history || history.length === 0) {
+    return [];
+  }
+
+  const trimmedMessage = message.toLowerCase().trim();
+  const followUpKeywords = [
+    'más barato',
+    'mas barato',
+    'más caro',
+    'mas caro',
+    'ese',
+    'esa',
+    'anterior',
+    'otra opción',
+    'otra opcion',
+    'alternativa',
+    'compar',
+    'sirve',
+    'funciona',
+    'lo mismo',
+    'qué tal',
+    'que tal',
+    'otro',
+    'diferente'
+  ];
+
+  const isShortFollowUp = trimmedMessage.length <= 60 && followUpKeywords.some(keyword => trimmedMessage.includes(keyword));
+
+  if (!isShortFollowUp) {
+    return [];
+  }
+
+  return history.slice(-2);
+}
+
+function promptReducer(text: string): string {
+  if (!text) {
+    return text;
+  }
+
+  const seen = new Set<string>();
+  const filteredLines = text
+    .split('\n')
+    .map(line => line.replace(/\s+/g, ' ').trimEnd())
+    .filter((line, index, arr) => {
+      const normalized = line.trim().toLowerCase();
+      if (!normalized) {
+        // Permitir líneas en blanco simples pero evitar múltiples consecutivas
+        const prev = arr[index - 1];
+        return prev && prev.trim().length > 0;
+      }
+      if (seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+
+  return filteredLines.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function buildQuickResponse(product: any, searchTerm: string | undefined, userIntent?: { intent: string }): string {
+  const description = (product.description || '').replace(/\s+/g, ' ').trim();
+  const descriptionPreview = description.length > 160 ? `${description.substring(0, 160)}...` : (description || 'Sin descripción disponible');
+
+  const lines: string[] = [];
+  if (searchTerm && searchTerm.trim().length > 0) {
+    lines.push(`He encontrado un resultado muy relevante para "${searchTerm.trim()}"`);
+  } else {
+    lines.push('He encontrado un producto muy relevante para tu búsqueda');
+  }
+  lines.push('');
+  lines.push(`🏆 **${product.name}**`);
+  lines.push(`💰 Precio: ${product.price || 'No disponible'}`);
+  if (product.category) {
+    lines.push(`📦 Categoría: ${product.category}`);
+  }
+  lines.push(`📝 ${descriptionPreview}`);
+  if (product.product_url) {
+    lines.push(`🔗 [Ver producto](${product.product_url})`);
+  }
+
+  if (userIntent?.intent === 'buy') {
+    lines.push('');
+    lines.push('🛒 Consejo: Haz clic en el enlace para ver detalles o solicitar asistencia con la compra.');
+  }
+
+  lines.push('');
+  lines.push('¿Quieres que te cuente más detalles o te muestre alternativas?');
+
+  return lines.join('\n');
+}
+
+function shouldUseQuickResponse(functionName: string, functionResult: any, userIntent: { intent: string }): boolean {
+  if (functionName !== 'search_products') {
+    return false;
+  }
+
+  if (!functionResult || !Array.isArray(functionResult.products) || functionResult.products.length !== 1) {
+    return false;
+  }
+
+  if (userIntent.intent === 'compare') {
+    return false;
+  }
+
+  const product = functionResult.products[0];
+  const score = product?.relevanceScore ?? product?.relevance_score ?? 0;
+  return score >= QUICK_RESPONSE_SCORE_THRESHOLD;
+}
+
+function shouldUseStructuredResponse(functionName: string, functionResult: any, userIntent: { intent: string }): boolean {
+  if (functionName !== 'search_products' && functionName !== 'search_products_by_category') {
+    return false;
+  }
+
+  if (!functionResult || !Array.isArray(functionResult.products) || functionResult.products.length === 0) {
+    return false;
+  }
+
+  if (functionResult.products.length > 5) {
+    return false;
+  }
+
+  if (userIntent.intent === 'compare') {
+    return false;
+  }
+
+  return true;
+}
+
+function buildStructuredResponse(
+  products: any[],
+  searchTerm: string | undefined,
+  userIntent: { intent: string },
+  category?: string,
+  total?: number
+): string {
+  const lines: string[] = [];
+  const normalizedCategory = category ? category.toLowerCase() : undefined;
+  const totalCount = typeof total === 'number' && total > 0 ? total : products.length;
+
+  if (searchTerm && searchTerm.trim().length > 0) {
+    if (normalizedCategory) {
+      lines.push(`He encontrado ${totalCount} producto(s) para "${searchTerm.trim()}" en ${category}.`);
+    } else {
+      lines.push(`He encontrado ${totalCount} producto(s) para "${searchTerm.trim()}".`);
+    }
+  } else if (normalizedCategory) {
+    lines.push(`He encontrado ${totalCount} producto(s) destacados en ${category}.`);
+  } else {
+    lines.push(`He encontrado ${totalCount} producto(s) relevantes para tu búsqueda.`);
+  }
+
+  lines.push('');
+
+  const highlight = products[0];
+  const rest = products.slice(1);
+
+  const renderProduct = (product: any, index: number, label?: string) => {
+    const description = (product.description || '').replace(/\s+/g, ' ').trim();
+    const descriptionPreview = description.length > 140 ? `${description.substring(0, 140)}...` : (description || 'Sin descripción disponible');
+    const priceLine = `💰 Precio: ${product.price || 'No disponible'}`;
+    const categoryLine = product.category ? `📦 Categoría: ${product.category}` : undefined;
+    const lines: string[] = [];
+
+    lines.push(`${index}. **${product.name}**${label ? ` — ${label}` : ''}`);
+    lines.push(priceLine);
+    if (categoryLine) {
+      lines.push(categoryLine);
+    }
+    lines.push(`📝 ${descriptionPreview}`);
+    if (product.product_url) {
+      lines.push(`🔗 [Ver producto](${product.product_url})`);
+    }
+    return lines.join('\n');
+  };
+
+  lines.push(renderProduct(highlight, 1, 'TOP')); // principal
+
+  if (rest.length > 0) {
+    lines.push('');
+    lines.push('Otras opciones que podrían interesarte:');
+    rest.forEach((product, idx) => {
+      lines.push('');
+      lines.push(renderProduct(product, idx + 2));
+    });
+  }
+
+  if (totalCount > products.length) {
+    lines.push('');
+    lines.push(`Hay ${totalCount - products.length} producto(s) adicionales disponibles en la base de datos.`);
+  }
+
+  if (userIntent.intent === 'buy') {
+    lines.push('');
+    lines.push('🛒 Si alguno encaja con lo que necesitas, dime y te paso más detalles o te ayudo con el proceso de compra.');
+  } else {
+    lines.push('');
+    lines.push('¿Quieres más detalles, comparar alternativas o ver otros tipos de productos?');
+  }
+
+  return lines.join('\n');
 }
 
 // Función para detectar intención del usuario
@@ -1602,114 +2234,74 @@ function formatProductsForPrompt(products: any[], limit: number = 5): string {
     return 'No se encontraron productos.';
   }
   
-  const limited = products.slice(0, limit);
-  
-  // FASE 1: Agrupación enriquecida
-  let formatted = '';
-  
-  if (limited.length === 1) {
-    // Un solo producto: presentarlo como recomendado (OPTIMIZADO - descripción más corta)
-    const p = limited[0];
-    const description = (p.description || '').trim();
-    const descriptionPreview = description.length > 120 
-      ? description.substring(0, 120) + '...' 
-      : description || 'Sin descripción disponible';
-    
-    formatted += `🏆 **RECOMENDADO**\n\n`;
-    formatted += `**${p.name}**\n`;
-    formatted += `💰 Precio: ${p.price || 'No disponible'}\n`;
-    if (p.category) {
-      formatted += `📦 Categoría: ${p.category}\n`;
+  const detailedLimit = Math.min(limit, 3);
+  const detailedProducts = products.slice(0, detailedLimit);
+  const summarizedProducts = products.slice(detailedLimit, Math.min(products.length, detailedLimit + 2));
+  const remainingCount = Math.max(products.length - detailedProducts.length - summarizedProducts.length, 0);
+
+  const lines: string[] = [];
+
+  if (detailedProducts.length > 0) {
+    const primary = detailedProducts[0];
+    const description = (primary.description || '').trim();
+    const descriptionPreview = description.length > 120
+      ? `${description.substring(0, 120)}...`
+      : (description || 'Sin descripción disponible');
+
+    lines.push('🏆 **RECOMENDADO**', '');
+    lines.push(`**${primary.name}**`);
+    lines.push(`💰 Precio: ${primary.price || 'No disponible'}`);
+    if (primary.category) {
+      lines.push(`📦 Categoría: ${primary.category}`);
     }
-    if (p.sku) {
-      formatted += `🏷️ SKU: ${p.sku}\n`;
+    if (primary.sku) {
+      lines.push(`🏷️ SKU: ${primary.sku}`);
     }
-    formatted += `📝 ${descriptionPreview}\n`;
-    if (p.product_url) {
-      formatted += `🔗 URL: ${p.product_url}`;
+    lines.push(`📝 ${descriptionPreview}`);
+    if (primary.product_url) {
+      lines.push(`🔗 URL: ${primary.product_url}`);
     }
-  } else {
-    // Múltiples productos: agrupar
-    const recommended = limited[0];
-    const alternatives = limited.slice(1, Math.min(4, limited.length));
-    const additional = limited.slice(4);
-    
-    // 🏆 RECOMENDADO (OPTIMIZADO - descripción más corta)
-    if (recommended) {
-      const description = (recommended.description || '').trim();
-      const descriptionPreview = description.length > 120 
-        ? description.substring(0, 120) + '...' 
-        : description || 'Sin descripción disponible';
-      
-      formatted += `🏆 **RECOMENDADO**\n\n`;
-      formatted += `**${recommended.name}**\n`;
-      formatted += `💰 Precio: ${recommended.price || 'No disponible'}\n`;
-      if (recommended.category) {
-        formatted += `📦 Categoría: ${recommended.category}\n`;
-      }
-      if (recommended.sku) {
-        formatted += `🏷️ SKU: ${recommended.sku}\n`;
-      }
-      formatted += `📝 ${descriptionPreview}\n`;
-      if (recommended.product_url) {
-        formatted += `🔗 URL: ${recommended.product_url}`;
-      }
-      formatted += '\n\n';
-    }
-    
-    // 🔁 ALTERNATIVAS
-    if (alternatives.length > 0) {
-      formatted += `🔁 **ALTERNATIVAS**\n\n`;
-      alternatives.forEach((p, i) => {
-        const description = (p.description || '').trim();
-        const descriptionPreview = description.length > 80 
-          ? description.substring(0, 80) + '...' 
-          : description || 'Sin descripción disponible';
-        
-        formatted += `${i + 1}. **${p.name}**\n`;
-        formatted += `   💰 Precio: ${p.price || 'No disponible'}\n`;
-        if (p.category) {
-          formatted += `   📦 Categoría: ${p.category}\n`;
-        }
-        formatted += `   📝 ${descriptionPreview}\n`;
-        if (p.product_url) {
-          formatted += `   🔗 URL: ${p.product_url}`;
-        }
-        formatted += '\n\n';
-      });
-    }
-    
-    // 💡 PUEDE INTERESARTE
-    if (additional.length > 0) {
-      formatted += `💡 **PUEDE INTERESARTE**\n\n`;
-      additional.forEach((p, i) => {
-        const description = (p.description || '').trim();
-        const descriptionPreview = description.length > 60 
-          ? description.substring(0, 60) + '...' 
-          : description || 'Sin descripción disponible';
-        
-        formatted += `${i + 1}. **${p.name}**\n`;
-        formatted += `   💰 Precio: ${p.price || 'No disponible'}\n`;
-        if (p.category) {
-          formatted += `   📦 Categoría: ${p.category}\n`;
-        }
-        formatted += `   📝 ${descriptionPreview}\n`;
-        if (p.product_url) {
-          formatted += `   🔗 URL: ${p.product_url}`;
-        }
-        formatted += '\n\n';
-      });
-    }
-    
-    // Resumen del conjunto de productos
-    formatted += `\n📊 **RESUMEN**: Se encontraron ${products.length} producto(s) relacionado(s). `;
-    if (products.length > limit) {
-      formatted += `Mostrando los ${limit} más relevantes. `;
-    }
-    formatted += `Los productos están ordenados por relevancia, siendo el primero el más recomendado.\n`;
+    lines.push('');
   }
-  
-  return formatted;
+
+  if (detailedProducts.length > 1) {
+    lines.push('🔁 **ALTERNATIVAS**', '');
+    detailedProducts.slice(1).forEach((product: any, index: number) => {
+      const description = (product.description || '').trim();
+      const preview = description.length > 90
+        ? `${description.substring(0, 90)}...`
+        : (description || 'Sin descripción disponible');
+
+      lines.push(`${index + 1}. **${product.name}**`);
+      lines.push(`   💰 Precio: ${product.price || 'No disponible'}`);
+      if (product.category) {
+        lines.push(`   📦 Categoría: ${product.category}`);
+      }
+      lines.push(`   📝 ${preview}`);
+      if (product.product_url) {
+        lines.push(`   🔗 URL: ${product.product_url}`);
+      }
+      lines.push('');
+    });
+  }
+
+  if (summarizedProducts.length > 0) {
+    lines.push('💡 **OTRAS OPCIONES (resumen)**');
+    summarizedProducts.forEach((product: any) => {
+      const priceInfo = product.price ? ` (${product.price})` : '';
+      lines.push(`• ${product.name}${priceInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (remainingCount > 0) {
+    lines.push(`(Existen ${remainingCount} productos adicionales disponibles.)`);
+  }
+
+  return lines
+    .filter((line, index, arr) => !(line === '' && arr[index + 1] === ''))
+    .join('\n')
+    .trim();
 }
 
 // Función para generar variaciones de palabras comunes
@@ -1755,7 +2347,7 @@ function generateWordVariations(word: string): string[] {
     // Si la palabra termina en "ar", buscar sustantivos relacionados
     else if (normalized.endsWith('ar') && normalized.length > 4) {
       const base = normalized.slice(0, -2);
-      variations.push(base + 'dor', base + 'a', base + 'ado');
+      variations.push(base + 'ador', base + 'adora', base + 'ado', base + 'acion');
     }
     // Si la palabra termina en "a" y es corta, podría ser forma del verbo
     else if (normalized.endsWith('a') && normalized.length <= 6) {
@@ -1767,6 +2359,18 @@ function generateWordVariations(word: string): string[] {
   // Eliminar duplicados y mantener solo variaciones únicas
   return [...new Set(variations)];
 }
+
+const SEARCH_STOP_WORDS = new Set([
+  'soy', 'estoy', 'somos', 'eres', 'busco', 'buscar', 'buscas', 'necesito', 'necesitamos',
+  'necesitas', 'quiero', 'quieres', 'quisiera', 'hola', 'buenas', 'gracias', 'ayuda',
+  'ayudame', 'ayúdame', 'ayudar', 'podria', 'podría', 'podrias', 'podrías', 'puedo',
+  'puedes', 'dime', 'dame', 'indica', 'indícame', 'enseñame', 'enséñame', 'saludos'
+]);
+
+const CATEGORY_STOP_WORDS = new Set([
+  'pastelero', 'pastelera', 'pastelería', 'pasteleria', 'repostero', 'repostera',
+  'repostería', 'reposteria'
+]);
 
 // Función para buscar productos (optimizada con búsqueda flexible)
 async function searchProducts(supabase: any, params: any) {
@@ -1786,10 +2390,20 @@ async function searchProducts(supabase: any, params: any) {
       const conditions: string[] = [];
       
       words.forEach(word => {
+        const normalizedWord = word.toLowerCase().trim();
+        
         // Filtrar palabras muy cortas que no son relevantes para la búsqueda
-        if (word.length <= 2 && !['de', 'la', 'el'].includes(word.toLowerCase())) {
+        // PERO incluir palabras de 3 letras que pueden ser importantes (ej: "WOW")
+        if (normalizedWord.length <= 2 && !['de', 'la', 'el'].includes(normalizedWord)) {
           return; // Saltar artículos y preposiciones muy cortas
         }
+        
+        if (SEARCH_STOP_WORDS.has(normalizedWord)) {
+          return;
+        }
+
+        // No filtrar palabras de 3+ letras, incluso si son comunes, ya que pueden ser parte de nombres de productos
+        // (ej: "WOW", "PRO", "MAX", etc.)
         
         // Generar variaciones de la palabra
         const variations = generateWordVariations(word);
@@ -1812,11 +2426,11 @@ async function searchProducts(supabase: any, params: any) {
         conditions.push(`description.ilike.%${searchTerm}%`);
         conditions.push(`sku.ilike.%${searchTerm}%`);
       }
-      
+        
       if (conditions.length > 0) {
         // Usar OR para buscar cualquiera de las condiciones
         // El filtrado en memoria se encargará de refinar los resultados
-        query = query.or(conditions.join(','));
+          query = query.or(conditions.join(','));
       }
     }
   }
@@ -1861,7 +2475,8 @@ async function searchProducts(supabase: any, params: any) {
   }
 
   // Filtrar resultados en memoria si hay múltiples palabras de búsqueda
-  let sortedData = data || [];
+  const originalData = data || [];
+  let sortedData = originalData.slice();
   if (params.query && typeof params.query === 'string') {
     const searchTerm = params.query.trim();
     if (searchTerm.length > 0) {
@@ -1870,7 +2485,22 @@ async function searchProducts(supabase: any, params: any) {
       // Si hay múltiples palabras, filtrar de forma más flexible
       if (words.length > 1) {
         // Filtrar palabras muy cortas (artículos, preposiciones) que no son relevantes
-        const relevantWords = words.filter(w => w.length > 2 && !['de', 'la', 'el', 'los', 'las', 'un', 'una', 'del', 'con', 'por', 'para'].includes(w.toLowerCase()));
+        // PERO mantener palabras de 3+ letras incluso si son comunes, ya que pueden ser parte de nombres de productos
+        const relevantWords = words.filter(w => {
+          const normalized = w.toLowerCase().trim();
+          if (SEARCH_STOP_WORDS.has(normalized)) {
+            return false;
+          }
+          if (CATEGORY_STOP_WORDS.has(normalized)) {
+            return false;
+          }
+          // Incluir todas las palabras de 3+ letras
+          if (normalized.length >= 3) {
+            // Solo excluir preposiciones muy comunes
+            return !['una', 'del', 'con', 'por', 'para'].includes(normalized);
+          }
+          return false;
+        });
         
         // Si después de filtrar solo queda una palabra relevante, no aplicar filtro estricto
         if (relevantWords.length <= 1) {
@@ -1878,32 +2508,47 @@ async function searchProducts(supabase: any, params: any) {
         } else {
           // Filtrar para asegurar que al menos las palabras relevantes aparezcan
           // Usar un enfoque más flexible: al menos el 70% de las palabras relevantes deben aparecer
-          const minWordsRequired = Math.ceil(relevantWords.length * 0.7);
+          const optionalWords = new Set(['hacer', 'elaborar', 'preparar', 'crear', 'busco', 'buscar', 'necesito', 'soy', 'estoy', 'quiero', 'quisiera']);
+          const requiredWords = relevantWords.filter(word => {
+            const normalizedWord = normalizeText(word);
+            return !optionalWords.has(normalizedWord);
+          });
+
+          const minWordsRequired = requiredWords.length > 0
+            ? Math.max(1, Math.min(requiredWords.length, Math.ceil(requiredWords.length * 0.6)))
+            : Math.max(1, Math.ceil(relevantWords.length * 0.6));
           
-          sortedData = sortedData.filter((product: any) => {
-            // Combinar todos los campos de texto donde buscar
-            const searchableText = [
-              product.name || '',
-              product.description || '',
-              product.sku || '',
-              product.category || '',
-              product.subcategory || ''
-            ].join(' ').toLowerCase();
-            
-            // Normalizar el texto de búsqueda
-            const normalizedSearchText = normalizeText(searchableText);
-            
+        sortedData = sortedData.filter((product: any) => {
+          // Combinar todos los campos de texto donde buscar
+          const searchableText = [
+            product.name || '',
+            product.description || '',
+            product.sku || '',
+            product.category || '',
+            product.subcategory || ''
+          ].join(' ').toLowerCase();
+          
+          // Normalizar el texto de búsqueda
+          const normalizedSearchText = normalizeText(searchableText);
+          
             // Contar cuántas palabras relevantes aparecen
-            let matchingWords = 0;
+            let matchingRequiredWords = 0;
+            let matchingOptionalWords = 0;
             relevantWords.forEach(word => {
-              const variations = generateWordVariations(word);
-              const normalizedVariations = variations.map(v => normalizeText(v));
-              
-              // Verificar si alguna variación aparece en el texto
-              if (normalizedVariations.some(variation => 
-                normalizedSearchText.includes(variation)
-              )) {
-                matchingWords++;
+              const normalizedWord = normalizeText(word);
+            const variations = generateWordVariations(word);
+            const normalizedVariations = variations.map(v => normalizeText(v));
+              const hasMatch = normalizedVariations.some(variation => 
+              normalizedSearchText.includes(variation)
+            );
+              if (!hasMatch) {
+                return;
+              }
+
+              if (optionalWords.has(normalizedWord)) {
+                matchingOptionalWords++;
+              } else {
+                matchingRequiredWords++;
               }
             });
             
@@ -1914,11 +2559,22 @@ async function searchProducts(supabase: any, params: any) {
             }
             
             // Incluir si al menos el mínimo requerido de palabras aparece
-            return matchingWords >= minWordsRequired;
+            if (requiredWords.length > 0) {
+              return matchingRequiredWords >= minWordsRequired;
+            }
+            // Si todas eran opcionales, bastará con tener coincidencias
+            return matchingOptionalWords > 0;
           });
         }
       }
     }
+  }
+
+  // Si el filtrado en memoria eliminó todos los resultados pero la búsqueda original devolvió datos,
+  // utilizar los datos originales para no perder posibles coincidencias parciales.
+  if (sortedData.length === 0 && originalData.length > 0) {
+    console.warn('[searchProducts] No results after in-memory filtering, falling back to raw data');
+    sortedData = originalData.slice();
   }
 
   // Calcular scores de relevancia y ordenar si hay término de búsqueda

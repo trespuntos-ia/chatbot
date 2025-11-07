@@ -82,3 +82,7 @@ Una vez ejecutado el SQL:
 **¿Necesitas ayuda?** Si tienes problemas al ejecutar el SQL, comparte el error que ves.
 
 
+
+
+
+

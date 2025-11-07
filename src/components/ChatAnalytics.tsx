@@ -6,10 +6,21 @@ interface AnalyticsData {
     totalConversations: number;
     uniqueSessions: number;
     avgResponseTime: number;
+    p90ResponseTime?: number;
+    fastestResponseTime?: number;
+    slowestResponseTime?: number;
     dateRange: {
       start: string;
       end: string;
     };
+  };
+  openaiUsage?: {
+    totalTokens: number;
+    avgTokensPerConversation: number;
+    conversationsWithTokens: number;
+    estimatedCost: number;
+    costByModel: Array<{ model: string; tokens: number; cost: number }>;
+    tokensByDay: Array<{ date: string; tokens: number }>;
   };
   feedbackStats: {
     total: number;
@@ -21,6 +32,7 @@ interface AnalyticsData {
   topCategories: Array<{ category: string; count: number }>;
   topQuestions: Array<{ question: string; count: number }>;
   conversationsByDay: Array<{ date: string; count: number }>;
+  responseTimesByDay?: Array<{ date: string; avgResponseTime: number; fastestResponseTime: number; slowestResponseTime: number }>;
   recentConversations: Array<any>;
 }
 
@@ -39,13 +51,11 @@ export function ChatAnalytics() {
   useEffect(() => {
     fetchAnalytics();
     fetchLastSummary();
-    
-    // Auto-refresh cada 30 segundos para ver conversaciones nuevas
+
     const interval = setInterval(() => {
       fetchAnalytics();
-      setLastRefresh(new Date());
-    }, 30000); // 30 segundos
-    
+    }, 20 * 60 * 1000); // 20 minutos
+
     return () => clearInterval(interval);
   }, [dateRange]);
 
@@ -109,44 +119,11 @@ export function ChatAnalytics() {
     }
   };
 
-  const exportToCSV = () => {
-    if (!data || !data.recentConversations || data.recentConversations.length === 0) {
-      alert('No hay conversaciones para exportar');
-      return;
+  const formatMsToSeconds = (ms?: number) => {
+    if (!ms || ms <= 0) {
+      return '—';
     }
-
-    // Preparar datos CSV
-    const headers = ['Fecha', 'Usuario', 'Bot', 'Función Llamada', 'Productos Consultados', 'Categoría', 'Tiempo Respuesta (ms)'];
-    const rows = data.recentConversations.map((conv: any) => {
-      const fecha = new Date(conv.created_at).toLocaleString('es-ES');
-      const userMessage = (conv.user_message || '').replace(/"/g, '""'); // Escapar comillas
-      const botResponse = (conv.bot_response || '').replace(/"/g, '""'); // Escapar comillas
-      const functionCalled = conv.function_called || '';
-      const products = conv.products_consulted 
-        ? JSON.stringify(conv.products_consulted).replace(/"/g, '""')
-        : '';
-      const category = conv.category_consulted || '';
-      const responseTime = conv.response_time_ms || '';
-      
-      return `"${fecha}","${userMessage}","${botResponse}","${functionCalled}","${products}","${category}","${responseTime}"`;
-    });
-
-    // Crear contenido CSV
-    const csvContent = [
-      headers.join(','),
-      ...rows
-    ].join('\n');
-
-    // Crear blob y descargar
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' }); // BOM para Excel
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `conversaciones_${dateRange}_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return `${(ms / 1000).toFixed(2)}s`;
   };
 
   if (loading) {
@@ -173,6 +150,58 @@ export function ChatAnalytics() {
       </div>
     );
   }
+
+  const analytics = data;
+
+  const exportToCSV = () => {
+    if (!analytics.recentConversations || analytics.recentConversations.length === 0) {
+      alert('No hay conversaciones para exportar');
+      return;
+    }
+
+    const headers = ['Fecha', 'Usuario', 'Bot', 'Función Llamada', 'Productos Consultados', 'Categoría', 'Tiempo Respuesta (ms)'];
+    const rows = analytics.recentConversations.map((conv: any) => {
+      const fecha = new Date(conv.created_at).toLocaleString('es-ES');
+      const userMessage = (conv.user_message || '').replace(/"/g, '""');
+      const botResponse = (conv.bot_response || '').replace(/"/g, '""');
+      const functionCalled = conv.function_called || '';
+      const products = conv.products_consulted
+        ? JSON.stringify(conv.products_consulted).replace(/"/g, '""')
+        : '';
+      const category = conv.category_consulted || '';
+      const responseTime = conv.response_time_ms || '';
+
+      return `"${fecha}","${userMessage}","${botResponse}","${functionCalled}","${products}","${category}","${responseTime}"`;
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows
+    ].join('\n');
+
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `conversaciones_${dateRange}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const conversationChartData = analytics.conversationsByDay.map(item => ({
+    date: new Date(item.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
+    count: item.count
+  }));
+
+  const responseTimesByDay = analytics.responseTimesByDay || [];
+  const responseTimeChartData = responseTimesByDay.map(item => ({
+    date: new Date(item.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
+    avg: Number((item.avgResponseTime / 1000).toFixed(2)),
+    fast: Number((item.fastestResponseTime / 1000).toFixed(2)),
+    slow: Number((item.slowestResponseTime / 1000).toFixed(2)),
+  }));
 
   const COLORS = ['#4f46e5', '#7c3aed', '#a855f7', '#c084fc', '#d8b4fe', '#e9d5ff', '#f3e8ff', '#faf5ff'];
 
@@ -227,7 +256,17 @@ export function ChatAnalytics() {
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="text-sm font-medium text-slate-600 mb-1">Tiempo Promedio</div>
-          <div className="text-3xl font-bold text-slate-900">{data.metrics.avgResponseTime}ms</div>
+          <div className="flex items-baseline gap-2">
+            <div className="text-3xl font-bold text-slate-900">{formatMsToSeconds(data.metrics.avgResponseTime)}</div>
+            <span className={data.metrics.avgResponseTime <= 3000 ? 'px-2 py-1 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-full' : 'px-2 py-1 text-xs font-semibold bg-amber-100 text-amber-700 rounded-full'}>
+              Objetivo ≤ 3s
+            </span>
+          </div>
+          <div className="text-xs text-slate-500 mt-2">
+            {data.metrics.avgResponseTime <= 3000
+              ? '¡Excelente! Estamos dentro del objetivo.'
+              : 'Seguimos optimizando para bajar de los 3 segundos.'}
+          </div>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="text-sm font-medium text-slate-600 mb-1">Satisfacción</div>
@@ -242,6 +281,153 @@ export function ChatAnalytics() {
             <div className="text-lg text-slate-400">Sin datos</div>
           )}
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="text-sm font-medium text-slate-600 mb-1">Percentil 90</div>
+          <div className="text-2xl font-bold text-slate-900">{formatMsToSeconds(data.metrics.p90ResponseTime)}</div>
+          <div className="text-xs text-slate-500 mt-1">El 90% de las respuestas fueron más rápidas que este tiempo.</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="text-sm font-medium text-slate-600 mb-1">Respuesta más rápida</div>
+          <div className="text-2xl font-bold text-slate-900">{formatMsToSeconds(data.metrics.fastestResponseTime)}</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="text-sm font-medium text-slate-600 mb-1">Respuesta más lenta</div>
+          <div className="text-2xl font-bold text-slate-900">{formatMsToSeconds(data.metrics.slowestResponseTime)}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Conversaciones por día</h3>
+          {conversationChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={conversationChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis dataKey="date" stroke="#475569" fontSize={12} />
+                <YAxis stroke="#475569" fontSize={12} allowDecimals={false} />
+                <Tooltip formatter={(value) => [`${value} conversaciones`, 'Total']} labelStyle={{ fontSize: 12 }} />
+                <Bar dataKey="count" fill="#6366F1" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-sm text-slate-500">No hay datos suficientes para mostrar el historial.</div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Velocidad de respuesta</h3>
+          {responseTimeChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={responseTimeChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis dataKey="date" stroke="#475569" fontSize={12} />
+                <YAxis stroke="#475569" fontSize={12} unit="s" allowDecimals />
+                <Tooltip formatter={(value) => [`${value} s`, '']} labelStyle={{ fontSize: 12 }} />
+                <Legend />
+                <Line type="monotone" dataKey="avg" stroke="#4F46E5" strokeWidth={2} dot={false} name="Promedio" />
+                <Line type="monotone" dataKey="fast" stroke="#22C55E" strokeWidth={1.5} dot={false} name="Más rápida" />
+                <Line type="monotone" dataKey="slow" stroke="#EF4444" strokeWidth={1.5} dot={false} name="Más lenta" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-sm text-slate-500">No hay datos suficientes para mostrar la velocidad de respuesta.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Métricas de Consumo de OpenAI */}
+      <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl shadow-sm border border-purple-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          Consumo de OpenAI
+        </h3>
+        
+        {data.openaiUsage && data.openaiUsage.totalTokens > 0 ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white rounded-lg p-4 border border-purple-100">
+                <div className="text-xs font-medium text-slate-600 mb-1">Tokens Totales</div>
+                <div className="text-2xl font-bold text-purple-900">
+                  {data.openaiUsage.totalTokens.toLocaleString()}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {data.openaiUsage.conversationsWithTokens} conversaciones
+                </div>
+              </div>
+              <div className="bg-white rounded-lg p-4 border border-purple-100">
+                <div className="text-xs font-medium text-slate-600 mb-1">Promedio por Conversación</div>
+                <div className="text-2xl font-bold text-purple-900">
+                  {data.openaiUsage.avgTokensPerConversation.toLocaleString()}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">tokens</div>
+              </div>
+              <div className="bg-white rounded-lg p-4 border border-purple-100">
+                <div className="text-xs font-medium text-slate-600 mb-1">Costo Estimado</div>
+                <div className="text-2xl font-bold text-purple-900">
+                  ${data.openaiUsage.estimatedCost.toFixed(2)}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">USD</div>
+              </div>
+              <div className="bg-white rounded-lg p-4 border border-purple-100">
+                <div className="text-xs font-medium text-slate-600 mb-1">Costo por Conversación</div>
+                <div className="text-2xl font-bold text-purple-900">
+                  ${data.openaiUsage.conversationsWithTokens > 0 
+                    ? (data.openaiUsage.estimatedCost / data.openaiUsage.conversationsWithTokens).toFixed(4)
+                    : '0.0000'}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">promedio</div>
+              </div>
+            </div>
+
+            {/* Costo por Modelo */}
+            {data.openaiUsage.costByModel && data.openaiUsage.costByModel.length > 0 && (
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-slate-700 mb-3">Costo por Modelo</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {data.openaiUsage.costByModel.map((item, index) => (
+                    <div key={index} className="bg-white rounded-lg p-3 border border-purple-100">
+                      <div className="text-xs font-medium text-slate-600 mb-1">{item.model}</div>
+                      <div className="flex items-baseline justify-between">
+                        <div className="text-lg font-bold text-purple-900">${item.cost.toFixed(2)}</div>
+                        <div className="text-xs text-slate-500">{item.tokens.toLocaleString()} tokens</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Gráfico de Tokens por Día */}
+            {data.openaiUsage.tokensByDay && data.openaiUsage.tokensByDay.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-3">Tokens por Día</h4>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={data.openaiUsage.tokensByDay.map(d => ({ ...d, date: new Date(d.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip formatter={(value: any) => `${value.toLocaleString()} tokens`} />
+                    <Bar dataKey="tokens" fill="#7c3aed" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="bg-white rounded-lg p-6 border border-purple-100 text-center">
+            <p className="text-slate-600 mb-2">
+              {data.openaiUsage ? 'No hay datos de consumo en este período' : 'Cargando datos de consumo...'}
+            </p>
+            <p className="text-xs text-slate-500">
+              Los datos de consumo se mostrarán automáticamente cuando haya conversaciones con tokens registrados.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Estadísticas de Satisfacción */}

@@ -34,7 +34,7 @@ export function ProductCard({ product }: ProductCardProps) {
             }}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-500">
+          <div className="w-full h-full flex items-center justify-center text-gray-400">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className="h-16 w-16"
@@ -76,7 +76,7 @@ export function ProductCard({ product }: ProductCardProps) {
 
         {/* Descripción */}
         {product.description && (
-          <p className="text-sm sm:text-xs text-gray-400 mb-3 sm:mb-2 line-clamp-2 leading-relaxed">
+          <p className="text-sm sm:text-xs text-white/80 mb-3 sm:mb-2 line-clamp-2 leading-relaxed">
             {truncateDescription(product.description, 120)}
           </p>
         )}
@@ -91,12 +91,12 @@ export function ProductCard({ product }: ProductCardProps) {
         {/* Colores disponibles */}
         {product.colors && product.colors.length > 0 && (
           <div className="mb-4 sm:mb-3">
-            <span className="text-sm sm:text-xs text-gray-400 block mb-2 sm:mb-1 leading-tight">Colores:</span>
+            <span className="text-sm sm:text-xs text-white/80 block mb-2 sm:mb-1 leading-tight">Colores:</span>
             <div className="flex gap-2 sm:gap-1.5 flex-wrap">
               {product.colors.map((color, idx) => (
                 <span
                   key={idx}
-                  className="text-sm sm:text-xs px-3 py-1 sm:px-2 sm:py-0.5 bg-[#202020] text-gray-300 rounded-md font-medium border border-gray-700/50"
+                  className="text-sm sm:text-xs px-3 py-1 sm:px-2 sm:py-0.5 bg-[#202020] text-white rounded-md font-medium border border-gray-700/50"
                 >
                   {color}
                 </span>

@@ -92,3 +92,7 @@ COMMENT ON COLUMN web_content_index.next_check_at IS 'Fecha/hora de la próxima 
 COMMENT ON COLUMN web_content_index.metadata IS 'Metadatos extraídos (descripción, características, especificaciones, colores, etc.)';
 
 
+
+
+
+

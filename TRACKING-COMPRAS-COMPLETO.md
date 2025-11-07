@@ -1216,3 +1216,7 @@ Este documento contiene toda la información necesaria para implementar el siste
 
 Todo se mostrará en el **apartado de Analytics** del panel de administración.
 
+
+
+
+

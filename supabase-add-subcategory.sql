@@ -20,3 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_products_subcategory ON products(subcategory);
 
 
 
+
+
+
+

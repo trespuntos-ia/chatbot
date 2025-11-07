@@ -246,51 +246,51 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
       <div className="flex-1 overflow-y-auto space-y-4 px-6 py-6">
         {/* Mensajes de la conversación */}
         {messages.map((message, index) => {
-          if (message.role === 'assistant' && message.products && message.products.length > 0) {
-            // Dividir mensaje en partes (texto y productos)
-            const parts = splitMessageWithProducts(message.content, message.products);
-            
-            // Separar texto y productos
-            const textParts = parts.filter(p => p.type === 'text');
-            const productParts = parts.filter(p => p.type === 'product');
-            
-            return (
-              <div key={index} className="space-y-4">
+            if (message.role === 'assistant' && message.products && message.products.length > 0) {
+              // Dividir mensaje en partes (texto y productos)
+              const parts = splitMessageWithProducts(message.content, message.products);
+              
+              // Separar texto y productos
+              const textParts = parts.filter(p => p.type === 'text');
+              const productParts = parts.filter(p => p.type === 'product');
+              
+              return (
+                <div key={index} className="space-y-4">
                 {/* Mostrar texto introductorio */}
-                {textParts.map((part, partIndex) => {
-                  const textContent = part.content as string;
-                  
+                  {textParts.map((part, partIndex) => {
+                    const textContent = part.content as string;
+                    
                   // Mostrar mensaje incluso si es corto (pero no vacío)
                   if (!textContent || textContent.trim().length === 0) {
-                    return null;
-                  }
-                  
-                  const { html } = parseMessageContent(textContent, message.products);
-                  
-                  return (
-                    <div key={`text-${partIndex}`} className="flex justify-start">
-                      <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 text-gray-300">
-                        <div 
-                          className="prose prose-sm max-w-none prose-headings:text-gray-300 prose-p:text-gray-300 prose-a:text-cyan-400 prose-p:text-sm prose-headings:text-base whitespace-pre-wrap"
-                          dangerouslySetInnerHTML={{ __html: html }}
-                        />
-                        {partIndex === 0 && message.function_calls && (
-                          <div className="mt-3 text-xs text-gray-500">
-                            🔍 Consultó la base de datos
-                          </div>
-                        )}
+                      return null;
+                    }
+                    
+                    const { html } = parseMessageContent(textContent, message.products);
+                    
+                    return (
+                      <div key={`text-${partIndex}`} className="flex justify-start">
+                      <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 text-white">
+                          <div 
+                          className="prose prose-sm max-w-none prose-headings:text-white prose-p:text-white prose-a:text-blue-400 prose-p:text-sm prose-headings:text-base whitespace-pre-wrap"
+                            dangerouslySetInnerHTML={{ __html: html }}
+                          />
+                          {partIndex === 0 && message.function_calls && (
+                          <div className="mt-3 text-xs text-white">
+                              🔍 Consultó la base de datos
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-                
+                    );
+                  })}
+                  
                 {/* Si no hay texto pero hay productos, mostrar mensaje por defecto */}
                 {textParts.length === 0 && productParts.length > 0 && (
                   <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 text-gray-300">
+                    <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 text-white">
                       <p className="text-sm">He encontrado estos productos para ti:</p>
                       {message.function_calls && (
-                        <div className="mt-3 text-xs text-gray-500">
+                        <div className="mt-3 text-xs text-white">
                           🔍 Consultó la base de datos
                         </div>
                       )}
@@ -299,18 +299,18 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                 )}
                 
                 {/* Tarjetas de productos */}
-                {productParts.length > 0 && (
+                  {productParts.length > 0 && (
                   <div className={`w-full ${isExpanded ? 'grid grid-cols-2 gap-4' : 'space-y-4'}`}>
-                    {productParts.map((part, productIndex) => (
-                      <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
-                    ))}
-                  </div>
-                )}
-                
+                      {productParts.map((part, productIndex) => (
+                        <ProductCard key={`product-${productIndex}`} product={part.content as Product} />
+                      ))}
+                    </div>
+                  )}
+                  
                 {/* Fuentes */}
-                {message.sources && message.sources.length > 0 && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[85%] text-xs text-gray-500">
+                  {message.sources && message.sources.length > 0 && (
+                  <div className="flex justify-start mt-3">
+                    <div className="max-w-[85%] text-xs text-white/90 bg-[#2a2a2a]/50 rounded-lg px-4 py-2 border border-gray-700/30">
                       {getSourcesDescription(message.sources)}
                     </div>
                   </div>
@@ -320,7 +320,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                 {message.conversation_id && !message.feedback_submitted && (
                   <div className="flex justify-start mt-4">
                     <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50">
-                      <p className="text-sm text-gray-300 mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
+                      <p className="text-sm text-white mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
                       <div className="flex gap-3">
                         <button
                           onClick={() => handleFeedback(message.conversation_id!, true, index)}
@@ -342,55 +342,55 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                 {/* Confirmación de feedback */}
                 {message.feedback_submitted && (
                   <div className="flex justify-start mt-3">
-                    <div className="max-w-[85%] text-xs text-gray-500">
+                    <div className="max-w-[85%] text-xs text-white">
                       ✓ Gracias por tu feedback
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            );
-          }
+                  )}
+                </div>
+              );
+            }
 
-          // Mensaje normal (usuario o asistente sin productos)
+            // Mensaje normal (usuario o asistente sin productos)
           // Si el mensaje del asistente está vacío pero hay function_calls, mostrar mensaje por defecto
           const displayContent = message.role === 'assistant' && (!message.content || message.content.trim().length === 0) && message.function_calls
             ? 'He consultado la base de datos. Por favor, espera mientras genero la respuesta...'
             : message.content || '';
           
-          return (
-            <div key={index}>
-              <div
-                className={`flex ${
-                  message.role === 'user' ? 'justify-end' : 'justify-start'
-                }`}
-              >
+            return (
+              <div key={index}>
                 <div
-                  className={`max-w-[85%] rounded-2xl px-6 py-4 ${
-                    message.role === 'user'
-                      ? 'bg-cyan-500 text-black'
-                      : 'bg-[#2a2a2a] border border-gray-700/50 text-gray-300'
-                  }`}
+                  className={`flex ${
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                }`}
                 >
+                  <div
+                  className={`max-w-[85%] rounded-2xl px-6 py-4 ${
+                      message.role === 'user'
+                      ? 'bg-cyan-500 text-black'
+                      : 'bg-[#2a2a2a] border border-gray-700/50 text-white'
+                    }`}
+                  >
                   {displayContent && (
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">{displayContent}</div>
                   )}
-                  {message.function_calls && (
-                    <div className="mt-3 text-xs text-gray-500">
-                      🔍 Consultó la base de datos
-                    </div>
-                  )}
-                  {/* Fuentes de información */}
-                  {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+                    {message.function_calls && (
+                    <div className="mt-3 text-xs text-white">
+                        🔍 Consultó la base de datos
+                      </div>
+                    )}
+                    {/* Fuentes de información */}
+                    {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-gray-700/50">
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-white/90">
                         {getSourcesDescription(message.sources)}
-                      </p>
-                    </div>
-                  )}
+                        </p>
+                      </div>
+                    )}
                   {/* Pregunta de satisfacción */}
                   {message.role === 'assistant' && message.conversation_id && !message.feedback_submitted && (
                     <div className="mt-4 pt-4 border-t border-gray-700/50">
-                      <p className="text-xs text-gray-300 mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
+                      <p className="text-xs text-white mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
                       <div className="flex gap-3">
                         <button
                           onClick={() => handleFeedback(message.conversation_id!, true, index)}
@@ -410,13 +410,13 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                   {/* Confirmación de feedback */}
                   {message.role === 'assistant' && message.feedback_submitted && (
                     <div className="mt-4 pt-4 border-t border-gray-700/50">
-                      <p className="text-xs text-gray-500">✓ Gracias por tu feedback</p>
+                      <p className="text-xs text-white">✓ Gracias por tu feedback</p>
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
+            );
         })}
 
         {/* Indicador de escritura - tres puntos animados */}
@@ -439,7 +439,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                   />
                 </div>
                 {loadingStage && (
-                  <span className="text-sm text-gray-400 ml-2">{loadingStage}</span>
+                  <span className="text-sm text-white/80 ml-2">{loadingStage}</span>
                 )}
               </div>
             </div>
@@ -479,20 +479,20 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
         // Estado inicial: textarea grande con sugerencias debajo
         <div className="border-t border-gray-700/50 pt-6 px-6 pb-6">
           <div className="relative">
-            <textarea
+          <textarea
               ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyPress={handleKeyPress}
               placeholder="Pregunta cualquier cosa..."
-              disabled={isLoading}
+            disabled={isLoading}
               rows={4}
               className="w-full min-h-[100px] px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500"
-            />
+          />
 
             {/* Botones en fila inferior dentro del textarea */}
             <div className="absolute bottom-3 right-3 flex items-center gap-2">
-              <button
+          <button
                 className="p-2 text-gray-400 hover:text-white hover:bg-[#202020] rounded-lg transition"
                 aria-label="Micrófono"
                 title="Micrófono (próximamente)"
@@ -563,7 +563,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                   />
                 </svg>
                 <span className="flex-1">{suggestion}</span>
-              </button>
+          </button>
             ))}
           </div>
         </div>
@@ -627,7 +627,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
               </svg>
             </button>
           </div>
-        </div>
+      </div>
       )}
     </div>
   );

@@ -78,3 +78,7 @@ async function indexAllProducts() {
 indexAllProducts();
 
 
+
+
+
+

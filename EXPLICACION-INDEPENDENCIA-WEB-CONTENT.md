@@ -157,3 +157,7 @@ LIMIT 20;
 **Recomendación**: Si vas a resetear productos, primero guarda las relaciones URL → product_id para poder relacionarlas después.
 
 
+
+
+
+

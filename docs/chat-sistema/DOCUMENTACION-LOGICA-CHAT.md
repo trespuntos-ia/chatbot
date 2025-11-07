@@ -215,11 +215,13 @@ La intención se usa para personalizar las instrucciones que se dan a OpenAI en 
    - Formato: Array de objetos `{ role: 'user'|'assistant', content: string }`
 
 3. **Mensaje actual del usuario**:
-   - Si es pregunta sobre productos: Añadir contexto extraído
+   - Si se detecta **categoría** (`Pastelería`, `Chocolate`, etc.):
      ```
-     [IMPORTANTE: Busca productos relacionados con "pajitas de cartón" 
-     usando la función search_products]
+     [IMPORTANTE: El usuario pregunta sobre "Pastelería". DEBES usar
+     search_products_by_category con category="Pastelería" y query="maquina refinar" ]
      ```
+     Además, el bot forzará la llamada a `search_products_by_category` con la categoría detectada y un término de búsqueda limpio (sin stopwords como "soy", "busco", etc.).
+   - Si no hay categoría: añadir contexto para `search_products` con la query extraída.
 
 ### Estructura final:
 ```typescript
@@ -246,14 +248,22 @@ La intención se usa para personalizar las instrucciones que se dan a OpenAI en 
 ### Tool Choice (Forzar función):
 
 ```typescript
-// Si es pregunta sobre productos:
-tool_choice: { 
-  type: 'function', 
-  function: { name: 'search_products' } 
+if (detectedCategory) {
+  tool_choice = {
+    type: 'function',
+    function: {
+      name: 'search_products_by_category',
+      arguments: JSON.stringify({ category: 'Pastelería', query: 'maquina refinar' })
+    }
+  };
+} else if (isProductQuery) {
+  tool_choice = {
+    type: 'function',
+    function: { name: 'search_products' }
+  };
+} else {
+  tool_choice = 'auto';
 }
-
-// Si no:
-tool_choice: 'auto'
 ```
 
 ### Funciones disponibles:
@@ -381,10 +391,11 @@ query = query.limit(limit);
 
    b. **Calcular mínimo requerido**:
       ```typescript
-      const minWordsRequired = Math.ceil(relevantWords.length * 0.7);
-      // 2 palabras → mínimo 2 (100%)
-      // 3 palabras → mínimo 3 (100%)
-      // 5 palabras → mínimo 4 (80%)
+      const optionalWords = new Set(['hacer','elaborar','preparar','crear','busco','buscar','necesito']);
+      const requiredWords = relevantWords.filter(word => !optionalWords.has(normalizeText(word)));
+      const minWordsRequired = requiredWords.length > 0
+        ? Math.max(1, Math.min(requiredWords.length, Math.ceil(requiredWords.length * 0.6)))
+        : Math.max(1, Math.ceil(relevantWords.length * 0.6));
       ```
 
    c. **Filtrar productos**:
@@ -393,11 +404,20 @@ query = query.limit(limit);
       - Contar cuántas palabras relevantes aparecen
       - **Incluir si**:
         - La frase completa aparece, O
-        - Al menos `minWordsRequired` palabras aparecen
+        - Coinciden al menos `minWordsRequired` palabras **requeridas**
+        - Si todas las palabras eran opcionales basta con que alguna coincida
+
+   d. **Fallback inteligente**:
+      - Si después del filtrado no queda ningún producto pero la consulta original sí devolvió resultados SQL → se usa la lista original (sin filtrar) para no perder coincidencias parciales
 
 2. **Si solo hay una palabra relevante**:
    - No filtrar estrictamente
    - Dejar que el scoring de relevancia ordene
+
+3. **Respuestas aceleradas**:
+   - Si el resultado es **un único producto** con score ≥220 → se usa `buildQuickResponse`, evitando la segunda llamada a OpenAI (respuesta en ~1-1.5s).
+   - Si hay **1-5 productos** → se usa `buildStructuredResponse` para generar una respuesta enumerada (🏆 recomendado + alternativas) directamente en el backend.
+   - Solo se invoca una segunda llamada a OpenAI cuando hay muchos productos, comparaciones o contextos complejos.
 
 ### 7.3 Scoring de Relevancia
 
@@ -950,8 +970,4 @@ if (functionResult.products && functionResult.products.length > 0) {
 ---
 
 **Nota:** Este documento debe actualizarse cada vez que se modifique la lógica del chat. Añadir cambios en la sección "Historial de Cambios" con fecha y descripción detallada.
-
-
-
-
 

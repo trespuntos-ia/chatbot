@@ -28,3 +28,7 @@ echo "   SELECT COUNT(*) as total_con_url FROM products WHERE product_url IS NOT
 echo ""
 
 
+
+
+
+

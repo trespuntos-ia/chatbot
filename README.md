@@ -89,6 +89,18 @@ prestashop-products-app/
 - Vite
 - Tailwind CSS
 
+## 📚 Documentación
+
+Toda la documentación del proyecto está organizada en la carpeta `docs/`:
+
+- **Sistema de Chat**: Ver [docs/chat-sistema/](./docs/chat-sistema/README.md)
+  - Lógica completa del sistema
+  - Plan de mejoras
+  - Análisis de viabilidad y costos
+  - Propuestas y mejoras
+
+Para más información, consulta [docs/README.md](./docs/README.md)
+
 ## Licencia
 
 MIT

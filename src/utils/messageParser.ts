@@ -230,7 +230,7 @@ export function parseMessageContent(
   const productMap = findProductsInMessage(message, products);
 
   // Convertir negrita markdown primero (para no interferir con enlaces)
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="font-bold text-slate-900">$1</strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="font-bold text-white">$1</strong>');
 
   // Convertir imágenes markdown a <img> (mejor estilizado)
   // PERO solo si no hay productos, porque si hay productos las imágenes ya están en las tarjetas
@@ -273,8 +273,8 @@ export function parseMessageContent(
       const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       const escapedUrl = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       
-      // Todos los enlaces como links de texto normales con estilo
-      return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-700 underline">${escapedText}</a>`;
+      // Todos los enlaces como links de texto normales con estilo (más claro para fondo oscuro)
+      return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:text-cyan-300 underline">${escapedText}</a>`;
     }
   );
 

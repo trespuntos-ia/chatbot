@@ -223,3 +223,7 @@ node scripts/index-all-products.js
 - Verifica que no estés usando un offset muy alto
 
 
+
+
+
+

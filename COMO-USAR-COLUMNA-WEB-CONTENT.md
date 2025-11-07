@@ -146,3 +146,7 @@ SET has_web_content = EXISTS (
 **¡Listo!** Después de ejecutar el SQL, la columna estará disponible y funcionando automáticamente.
 
 
+
+
+
+

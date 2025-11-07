@@ -121,3 +121,7 @@ bash scripts/index-product-curl.sh "https://100x100chef.com/shop/espana/es/aroma
 ¿Necesitas más ayuda? Verifica los logs de Vercel para ver errores específicos.
 
 
+
+
+
+
