@@ -57,6 +57,16 @@ export interface SystemPrompt {
 // Tipos para Chat (Fase 2)
 export type MessageSource = 'products_db' | 'web' | 'documents' | 'general';
 
+export interface ResponseTimingStep {
+  name: string;
+  duration_ms: number;
+}
+
+export interface ResponseTimings {
+  total_ms: number;
+  steps: ResponseTimingStep[];
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -66,6 +76,7 @@ export interface ChatMessage {
   sources?: MessageSource[]; // Fuentes de información utilizadas
   conversation_id?: string | null; // ID de la conversación para feedback
   feedback_submitted?: boolean; // Si el usuario ya envió feedback para este mensaje
+  response_timings?: ResponseTimings; // Métricas de tiempo de respuesta asociadas al mensaje
 }
 
 export interface ChatConfig {
@@ -86,6 +97,7 @@ export interface ChatResponse {
   conversation_id?: string | null; // ID de la conversación guardada en analytics
   error?: string;
   details?: string;
+  timings?: ResponseTimings;
 }
 
 // Tipos para Documentación

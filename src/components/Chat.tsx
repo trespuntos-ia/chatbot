@@ -1,11 +1,50 @@
 import { useState, useRef, useEffect } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
 import { getSourcesDescription } from '../utils/sourceLabels';
 import { useChat } from '../contexts/ChatContext';
 import { getSuggestedQueries } from '../services/suggestedQueriesService';
-import type { ChatConfig, ChatMessage, Product } from '../types';
+import type { ChatConfig, ChatMessage, Product, ResponseTimings } from '../types';
+
+const formatDuration = (ms: number) => {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return '0 ms';
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)} ms`;
+  }
+  const seconds = ms / 1000;
+  return `${seconds.toFixed(seconds >= 10 ? 1 : 2)} s`;
+};
+
+function TimingDetails({ timings }: { timings?: ResponseTimings }) {
+  if (!timings || typeof timings.total_ms !== 'number') {
+    return null;
+  }
+
+  const steps = Array.isArray(timings.steps) ? timings.steps : [];
+
+  return (
+    <div className="pt-3 border-t border-gray-700/40 space-y-1 text-white/80">
+      <div className="flex items-center gap-2 font-medium text-white">
+        <span role="img" aria-hidden="true">⏱️</span>
+        <span>Tiempo total: {formatDuration(timings.total_ms)}</span>
+      </div>
+      {steps.length > 0 && (
+        <ul className="list-disc list-inside space-y-1 text-white/70">
+          {steps.map((step, index) => (
+            <li key={`${step.name}-${index}`}>
+              <span className="font-medium text-white/80">{step.name}:</span>{' '}
+              <span className="text-white">{formatDuration(step.duration_ms)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 interface ChatProps {
   config: ChatConfig;
@@ -21,17 +60,41 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
   const [error, setError] = useState<string>('');
   const [sessionId, setSessionId] = useState<string>('');
   const [suggestedQueries, setSuggestedQueries] = useState<string[]>([]);
+  const [currentSuggestionIndex, setCurrentSuggestionIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const hasSentFirstMessage = useRef(false);
 
   // Determinar si estamos en estado inicial (sin mensajes)
   const isInitialState = messages.length === 0;
+  const currentSuggestion =
+    suggestedQueries.length > 0
+      ? suggestedQueries[Math.min(currentSuggestionIndex, suggestedQueries.length - 1)]
+      : '';
 
   // Cargar sugerencias al montar
   useEffect(() => {
     loadSuggestedQueries();
   }, []);
+
+  useEffect(() => {
+    setCurrentSuggestionIndex(0);
+  }, [suggestedQueries]);
+
+  useEffect(() => {
+    if (!isInitialState || suggestedQueries.length <= 1) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setCurrentSuggestionIndex((prev) => {
+        const nextIndex = prev + 1;
+        return nextIndex >= suggestedQueries.length ? 0 : nextIndex;
+      });
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [isInitialState, suggestedQueries]);
 
   const loadSuggestedQueries = async () => {
     try {
@@ -160,8 +223,26 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
           lastMessage.feedback_submitted = false;
         }
 
+        // Adjuntar métricas de tiempo al último mensaje del asistente si no vienen incluidas
+        let updatedHistory = response.conversation_history;
+        if (response.timings && updatedHistory.length > 0) {
+          const lastIndex = updatedHistory.length - 1;
+          const lastMsg = updatedHistory[lastIndex];
+          if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.response_timings) {
+            updatedHistory = updatedHistory.map((msg, idx) => {
+              if (idx === lastIndex) {
+                return {
+                  ...msg,
+                  response_timings: response.timings
+                };
+              }
+              return msg;
+            });
+          }
+        }
+
         // Actualizar mensajes con el historial completo
-        setMessages(response.conversation_history);
+        setMessages(updatedHistory);
       } else {
         throw new Error(response.error || 'Error al obtener respuesta');
       }
@@ -307,11 +388,19 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                     </div>
                   )}
                   
-                {/* Fuentes */}
-                  {message.sources && message.sources.length > 0 && (
+                {/* Fuentes y tiempo */}
+                  {(message.sources && message.sources.length > 0) && (
                   <div className="flex justify-start mt-3">
-                    <div className="max-w-[85%] text-xs text-white/90 bg-[#2a2a2a]/50 rounded-lg px-4 py-2 border border-gray-700/30">
-                      {getSourcesDescription(message.sources)}
+                    <div className="max-w-[85%] text-xs text-white/90 bg-[#2a2a2a]/50 rounded-lg px-4 py-3 border border-gray-700/30 space-y-2">
+                      <div>{getSourcesDescription(message.sources)}</div>
+                      <TimingDetails timings={message.response_timings} />
+                    </div>
+                  </div>
+                )}
+                {!message.sources?.length && message.response_timings && (
+                  <div className="flex justify-start mt-3">
+                    <div className="max-w-[85%] text-xs bg-[#2a2a2a]/50 border border-gray-700/30 rounded-lg px-4 py-3">
+                      <TimingDetails timings={message.response_timings} />
                     </div>
                   </div>
                 )}
@@ -382,11 +471,17 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                     {/* Fuentes de información */}
                     {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-gray-700/50">
-                      <p className="text-xs text-white/90">
-                        {getSourcesDescription(message.sources)}
-                        </p>
+                      <div className="text-xs text-white/90 space-y-2">
+                        <p>{getSourcesDescription(message.sources)}</p>
+                        <TimingDetails timings={message.response_timings} />
+                      </div>
                       </div>
                     )}
+                  {message.role === 'assistant' && (!message.sources || message.sources.length === 0) && message.response_timings && (
+                    <div className="mt-4">
+                      <TimingDetails timings={message.response_timings} />
+                    </div>
+                  )}
                   {/* Pregunta de satisfacción */}
                   {message.role === 'assistant' && message.conversation_id && !message.feedback_submitted && (
                     <div className="mt-4 pt-4 border-t border-gray-700/50">
@@ -540,17 +635,17 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
             </div>
           </div>
 
-          {/* Sugerencias de búsqueda - siempre visibles debajo del input */}
-          <div className="mt-4 space-y-2">
-            {suggestedQueries.map((suggestion, idx) => (
+          {/* Sugerencias animadas - se muestran de una en una en loop */}
+          {currentSuggestion && (
+            <div className="mt-6">
+              <p className="text-xs uppercase tracking-widest text-white/40 mb-2">Ejemplos</p>
               <button
-                key={idx}
-                onClick={() => handleSuggestionClick(suggestion)}
-                className="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-[#2a2a2a] hover:text-white transition-colors rounded-lg flex items-center gap-3 group"
+                onClick={() => handleSuggestionClick(currentSuggestion)}
+                className="w-full text-left px-4 py-4 bg-[#1a1a1a] border border-gray-700/40 rounded-xl flex items-center gap-4 group hover:border-cyan-500/50 transition-colors"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-400 group-hover:text-gray-300 flex-shrink-0"
+                  className="h-5 w-5 text-cyan-400 flex-shrink-0 group-hover:text-cyan-300 transition-colors"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -562,10 +657,23 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                     d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                   />
                 </svg>
-                <span className="flex-1">{suggestion}</span>
-          </button>
-            ))}
-          </div>
+                <div className="relative flex-1 overflow-hidden">
+                  <AnimatePresence mode="wait">
+                    <motion.span
+                      key={currentSuggestionIndex}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.35 }}
+                      className="block text-sm text-white/90"
+                    >
+                      {currentSuggestion}
+                    </motion.span>
+                  </AnimatePresence>
+                </div>
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         // Estado conversacional: input compacto en línea

@@ -3,6 +3,8 @@
 **Última actualización:** 2025-11-07  
 **Archivo principal:** `api/chat.ts`
 
+> **Estado general:** Todo lo descrito aquí está **implementado** en el flujo actual del backend. Cualquier idea futura se marcará explícitamente como "Pendiente" hasta que se entregue.
+
 Este documento explica específicamente cómo OpenAI genera las respuestas, qué instrucciones recibe, y qué se aplica al formato de la respuesta final.
 
 ---
@@ -21,6 +23,10 @@ Este documento explica específicamente cómo OpenAI genera las respuestas, qué
 
 ## 🔄 Flujo de Generación de Respuesta
 
+**Estado:** Implementado (coordinado principalmente en `api/chat.ts`).
+
+**Explicación sencilla:** Primero entendemos qué necesita la persona, luego pedimos datos reales (productos, comparaciones, etc.) y, con toda esa información, OpenAI responde siguiendo un guion fijo.
+
 ### Proceso Completo
 
 ```
@@ -29,9 +35,9 @@ Este documento explica específicamente cómo OpenAI genera las respuestas, qué
 2. Sistema detecta intención y tipo de búsqueda
    ↓
 3. Primera llamada a OpenAI:
-   - System Prompt base (desde Supabase)
-   - Instrucciones adicionales según tipo de consulta
-   - Mensaje del usuario con contexto extraído
+   - Prompt base cargado desde Supabase
+   - Instrucciones extra según el tipo de consulta
+   - Mensaje del usuario y, si procede, parte del historial
    ↓
 4. OpenAI decide llamar a función (ej: search_products)
    ↓
@@ -43,14 +49,11 @@ Este documento explica específicamente cómo OpenAI genera las respuestas, qué
    - Instrucciones según intención del usuario
    - Instrucciones según número de resultados
    ↓
-7. Segunda llamada a OpenAI:
-   - System Prompt + Contexto Enriquecido
-   - Historial de conversación
-   - Resultado de la función ejecutada
+7. Según el caso:
+   - **Respuesta rápida/estructurada** (sin segunda llamada) cuando los resultados son muy precisos
+   - **Segunda llamada a OpenAI** con el contexto enriquecido y el resultado de la función
    ↓
-8. OpenAI genera respuesta final usando TODAS las instrucciones
-   ↓
-9. Sistema procesa y formatea respuesta final
+8. OpenAI (o el backend) genera la respuesta final y el sistema la devuelve formateada
 ```
 
 > **Nota:** solo se envían los dos últimos mensajes relevantes del historial cuando el mensaje actual parece ser una continuación (`más barato`, `ese`, `otra opción`, etc.). Esto reduce tokens sin perder contexto útil.
@@ -59,17 +62,21 @@ Este documento explica específicamente cómo OpenAI genera las respuestas, qué
 
 ## 🎯 Instrucciones del System Prompt
 
+**Estado:** Implementado. Las reglas se generan cada vez antes de llamar al modelo.
+
+**Resumen en lenguaje claro:** El prompt base define cómo debe comportarse el asistente y, dependiendo de lo que el usuario pregunte, añadimos instrucciones adicionales que le obligan a buscar datos reales antes de responder.
+
 ### Prompt Base (desde Supabase)
 
-El prompt base se carga desde la tabla `system_prompts` en Supabase. Este prompt define el rol y comportamiento general del asistente.
-
-**Ubicación en código:** Líneas 96-116 de `api/chat.ts`
+- **Estado:** Implementado.
+- **Qué hace:** Carga el prompt activo desde la tabla `system_prompts` y rellena variables con `processPrompt()`.
+- **Referencia:** Bloque inicial de `api/chat.ts` (≈ línea 90).
 
 ### Instrucciones Adicionales según Tipo de Consulta
 
 #### 1. Para Preguntas sobre Productos (NO comparación)
-
-**Ubicación:** Líneas 406-412
+- **Estado:** Implementado.
+- **Referencia:** Detección de intención y ajuste del prompt (≈ líneas 390-450).
 
 ```typescript
 if (isProductQuery && !isComparisonQuery) {
@@ -89,8 +96,8 @@ NO respondas directamente sin buscar en la base de datos.`;
 ```
 
 #### 2. Para Preguntas de Comparación
-
-**Ubicación:** Líneas 403-405
+- **Estado:** Implementado.
+- **Referencia:** Mismo bloque de detección (≈ líneas 390-450).
 
 ```typescript
 if (isComparisonQuery) {
@@ -101,17 +108,25 @@ Extrae los nombres de los productos del mensaje y úsalos en product_names.`;
 }
 ```
 
+### Detección de categoría más inteligente (2025-11)
+
+- **Qué cambia:** Antes se buscaba una palabra clave exacta; ahora combinamos puntuaciones por frases completas, coincidencias parciales y sinónimos normalizados para cada categoría (`CATEGORY_PATTERNS`).
+- **Cómo funciona:** El mensaje se normaliza (acentos fuera, minúsculas), se generan *ngrams* y se evalúa cada patrón. Coincidencias en frases aportan más puntos; también se consideran variantes (`ahumar`, `ahumador`, `smoking`) y sinónimos de subcategorías.
+- **Confianza:** Solo se devuelve una categoría cuando la puntuación supera un umbral; además almacenamos `matchedKeywords` para reusar el lenguaje del usuario al construir la query.
+- **Integración:** El resultado se fusiona con la categoría sugerida por la comprensión semántica ligera. Si ambos coinciden, se prioriza; si difieren, se usa la opción con mayor confianza (`mergeIntentSignals`, `selectSearchTermCandidate`).
+- **Referencia:** Lógica en `api/chat.ts` (≈ líneas 1180-1270 para el uso y 2430-2548 para el detector).
+
 ---
 
 ## 📝 Contexto Enriquecido para OpenAI
 
-Después de ejecutar una función, el sistema prepara un contexto enriquecido que se añade al system prompt antes de la segunda llamada a OpenAI.
+**Estado:** Implementado (≈ líneas 750-1050 de `api/chat.ts`).
 
-**Ubicación:** Líneas 603-800 de `api/chat.ts`
+**En palabras sencillas:** Si OpenAI llamó a alguna función, empaquetamos los resultados y añadimos instrucciones muy concretas para guiar la respuesta.
 
 ### Estructura del Contexto Enriquecido
 
-El contexto enriquecido incluye:
+El contexto incluye:
 
 1. **Instrucciones críticas generales** (si no es comparación)
 2. **Instrucciones específicas por intención** (buy, info, compare)
@@ -119,15 +134,15 @@ El contexto enriquecido incluye:
 4. **Productos encontrados formateados**
 5. **Sugerencias** (si no hay resultados)
 
-> **Optimización aplicada:** el contexto completo se reduce a un máximo de ~1500 caracteres y se limpia con `promptReducer()` para eliminar líneas duplicadas antes de la segunda llamada a OpenAI.
+> **Optimización aplicada:** `promptReducer()` elimina líneas duplicadas y se respeta `MAX_CONTEXT_CHAR_LENGTH = 1500` caracteres antes de enviarlo al modelo.
 
 ---
 
 ## 🎨 Instrucciones Específicas por Tipo de Función
 
-### 1. Para `compare_products` (Comparación)
+**Estado:** Implementado. Se añaden al contexto según la función elegida.
 
-**Ubicación:** Líneas 607-625
+### 1. Para `compare_products` (Comparación) — **Implementado** (≈ líneas 760-820)
 
 ```
 📊 INSTRUCCIONES PARA COMPARAR:
@@ -138,9 +153,7 @@ El contexto enriquecido incluye:
 • Evita repetir especificaciones sin contexto; interpreta qué implican para el usuario.
 ```
 
-### 2. Para Otras Funciones (search_products, etc.)
-
-**Ubicación:** Líneas 627-648
+### 2. Para Otras Funciones (search_products, etc.) — **Implementado** (≈ líneas 820-870)
 
 ```
 📋 INSTRUCCIONES PRINCIPALES:
@@ -155,18 +168,16 @@ El contexto enriquecido incluye:
 
 ## 🎯 Instrucciones según Intención del Usuario
 
-### Intención: `buy` (Comprar)
+**Estado:** Implementado. `detectUserIntent()` devuelve `buy`, `info`, `compare` o `search` y aplica estos textos.
 
-**Ubicación:** Líneas 636-641
+### Intención: `buy` (Comprar) — **Implementado** (≈ líneas 830-880)
 
 ```
 ⚠️ INTENCIÓN DETECTADA: El usuario quiere COMPRAR
 • Destaca el precio y sugiere usar el enlace para completar la compra.
 ```
 
-### Intención: `info` (Información)
-
-**Ubicación:** Líneas 642-647
+### Intención: `info` (Información) — **Implementado** (≈ líneas 830-880)
 
 ```
 ⚠️ INTENCIÓN DETECTADA: El usuario busca INFORMACIÓN
@@ -177,18 +188,16 @@ El contexto enriquecido incluye:
 
 ## 📊 Instrucciones según Número de Resultados
 
-### Múltiples Productos (2+)
+**Estado:** Implementado. Se añaden en el contexto según la cantidad de productos encontrados.
 
-**Ubicación:** Líneas 664-665
+### Múltiples Productos (2+) — **Implementado** (≈ líneas 870-900)
 
 ```
 ⚠️ IMPORTANTE: Has encontrado múltiples productos (ya ordenados por relevancia). 
 Presenta los más relevantes primero.
 ```
 
-### Un Solo Producto
-
-**Ubicación:** Líneas 666-676
+### Un Solo Producto — **Implementado** (≈ líneas 880-920)
 
 ```
 ✅ Has encontrado un producto específico. Preséntalo con todos sus detalles.
@@ -197,9 +206,7 @@ Presenta los más relevantes primero.
 Asegúrate de mencionar el nombre completo.
 ```
 
-### Sin Resultados (con categoría detectada)
-
-**Ubicación:** Líneas 685-697
+### Sin Resultados (con categoría detectada) — **Implementado** (≈ líneas 900-950)
 
 ```
 ⚠️ No hay coincidencias exactas en la categoría "[CATEGORÍA]". Construye una respuesta breve así:
@@ -209,9 +216,7 @@ Asegúrate de mencionar el nombre completo.
 • Invita al usuario a dar más detalles para continuar la búsqueda.
 ```
 
-### Sin Resultados (sin categoría)
-
-**Ubicación:** Líneas 699-713
+### Sin Resultados (sin categoría) — **Implementado** (≈ líneas 900-980)
 
 ```
 ⚠️ No hay productos que coincidan exactamente con la búsqueda. Responde del siguiente modo:
@@ -231,9 +236,10 @@ Los resultados se adjuntan en el contexto como `search_suggestions` y `alternati
 
 ## 📦 Formato de Productos para OpenAI
 
-Los productos se formatean antes de enviarse a OpenAI usando la función `formatProductsForPrompt()`.
+**Estado:** Implementado. La función `formatProductsForPrompt()` prepara hasta cinco productos antes de enviarlos a OpenAI.
 
-**Ubicación:** Líneas 1796-1910 de `api/chat.ts`
+- **Referencia:** Alrededor de las líneas 2230-2310 de `api/chat.ts`.
+- **Resumen sencillo:** Siempre generamos bloques con un producto destacado, alternativas y un resumen del resto para que OpenAI solo tenga que redactarlo.
 
 ### Formato para Un Producto
 
@@ -281,6 +287,8 @@ Los productos se formatean antes de enviarse a OpenAI usando la función `format
 ---
 
 ## 🎯 Formato de Respuesta Esperado
+
+**Estado:** Implementado. OpenAI recibe instrucciones para seguir este esquema siempre que conteste productos o comparaciones.
 
 OpenAI debe generar respuestas siguiendo este formato:
 
@@ -332,15 +340,16 @@ Si necesitas Y, el [Producto B] es más adecuado.
 
 ## ⚠️ Casos Especiales
 
-### Respuesta rápida sin segunda llamada
+### 1. Respuestas sin segunda llamada — **Implementado**
 
-Cuando `search_products` devuelve un único producto con `relevanceScore ≥ 320` y la intención no es `compare`, el sistema genera una respuesta directa sin realizar la segunda llamada a OpenAI. El contenido se construye con `buildQuickResponse()` y se envía inmediatamente al frontend junto con el producto destacado.
+Cuando la información es suficientemente precisa, el backend responde directamente sin volver a consultar a OpenAI:
 
-**Ventaja:** reduce la latencia en búsquedas muy precisas y mantiene los mismos datos en analytics (se guarda como `quick_response: true`).
+- **Quick Response (`buildQuickResponse`)**: Se activa si `search_products` devuelve exactamente un producto con `relevanceScore ≥ 220` y la intención no es `compare`. El backend arma el mensaje con un único bloque destacado.
+- **Structured Response (`buildStructuredResponse`)**: Se activa cuando `search_products` o `search_products_by_category` devuelven entre 1 y 5 productos (no comparación). Se generan todos los bloques (`RECOMENDADO`, `ALTERNATIVAS`, etc.) desde el backend.
 
-### 1. Comparación con Productos Encontrados
+Ambos caminos están implementados alrededor de las líneas 660-760 y reducen la latencia. Los mensajes se guardan en analytics con las banderas `quick_response` o `structured_response`.
 
-**Ubicación:** Líneas 652-663
+### 2. Comparación con Productos Encontrados — **Implementado** (≈ líneas 760-820)
 
 Si se encuentran 2+ productos para comparar:
 ```
@@ -355,9 +364,7 @@ Si se encuentra solo 1 producto:
 ⚠️ Solo se encontró un producto. Explica sus características y menciona que no se pudo encontrar el otro producto para comparar.
 ```
 
-### 2. Producto que No Coincide Exactamente
-
-**Ubicación:** Líneas 670-675
+### 3. Producto que No Coincide Exactamente — **Implementado** (≈ líneas 880-920)
 
 ```
 ⚠️ Nota: El producto encontrado puede no coincidir exactamente con la búsqueda. 
@@ -368,9 +375,7 @@ Asegúrate de mencionar el nombre completo.
 
 ## 🔄 Manejo de Fallbacks
 
-Si OpenAI no genera respuesta o genera respuesta vacía, el sistema usa fallbacks.
-
-**Ubicación:** Líneas 959-1006 de `api/chat.ts`
+**Estado:** Implementado (≈ líneas 1100-1250). Se activa cuando la segunda llamada falla o devuelve un mensaje vacío.
 
 ### Fallback con Productos Encontrados
 
@@ -402,6 +407,7 @@ if (functionResult.product && functionResult.found) {
 
 ## ⏱ Seguimiento de rendimiento
 
+- **Estado:** Implementado.
 - `console.time('openai_call_1')` mide la primera llamada a la LLM.
 - `console.time('openai_call_2')` mide la segunda llamada (cuando existe).
 
@@ -410,6 +416,8 @@ Estos logs permiten validar la mejora de latencia después de las optimizaciones
 ---
 
 ## 📋 Resumen de Instrucciones que Aplican a la Respuesta
+
+**Estado:** Implementado. Estas reglas se inyectan siempre en el contexto o en las respuestas rápidas.
 
 ### Siempre Aplican:
 1. ✅ Presentar productos con estructura clara: Nombre, Precio, Categoría, Descripción, URL
@@ -438,12 +446,13 @@ Estos logs permiten validar la mejora de latencia después de las optimizaciones
 
 ## 🔍 Ubicaciones en el Código
 
-- **System Prompt base**: Líneas 96-116
-- **Instrucciones adicionales**: Líneas 400-413
-- **Contexto enriquecido**: Líneas 603-800
-- **Formato de productos**: Líneas 1796-1910
-- **Fallbacks**: Líneas 959-1006
+Las líneas cambian con frecuencia; usa estos rangos de referencia:
 
----
+- **System Prompt base:** ≈ línea 90
+- **Instrucciones adicionales y detección de intención:** ≈ líneas 390-450
+- **Decisión de respuesta rápida/estructurada:** ≈ líneas 650-760
+- **Contexto enriquecido:** ≈ líneas 750-1050
+- **Fallbacks y guardado en analytics:** ≈ líneas 1100-1250
+- **Formato de productos (`formatProductsForPrompt`):** ≈ líneas 2230-2310
 
-**Nota:** Este documento debe actualizarse cada vez que se modifiquen las instrucciones que recibe OpenAI para generar respuestas.
+> **Pendiente:** No hay desarrollos planificados sin implementar. Cualquier cambio futuro se documentará aquí con el estado "Pendiente" hasta que esté en producción.

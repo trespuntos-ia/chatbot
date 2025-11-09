@@ -18,6 +18,754 @@ function processPrompt(prompt: any): string {
   return processedPrompt;
 }
 
+const FUNCTION_LABELS: Record<string, string> = {
+  search_products: 'Búsqueda de productos (Supabase)',
+  get_product_by_sku: 'Consulta por SKU (Supabase)',
+  get_similar_products: 'Productos similares (Supabase)',
+  get_product_recommendations: 'Recomendaciones de productos (Supabase)',
+  compare_products: 'Comparación de productos (Supabase)',
+  search_products_by_category: 'Búsqueda por categoría (Supabase)',
+  get_product_categories: 'Listado de categorías (Supabase)',
+  clarify_search_intent: 'Sugerencias de búsqueda (Supabase)',
+  get_products_by_price_range: 'Búsqueda por precio (Supabase)',
+  get_product_specifications: 'Especificaciones de producto (Supabase)',
+  get_popular_products: 'Productos destacados (Supabase)',
+  search_web_content: 'Contenido web indexado',
+};
+
+function getFunctionLabel(functionName: string): string {
+  return FUNCTION_LABELS[functionName] || `Función ${functionName}`;
+}
+
+const SEMANTIC_UNDERSTANDING_DEFAULT_MODEL =
+  process.env.OPENAI_COMPREHENSION_MODEL || 'gpt-4o-mini';
+
+type SemanticUnderstanding = {
+  product_focus?: boolean;
+  intent?: 'buy' | 'compare' | 'info' | 'search' | 'support' | 'other';
+  confidence?: number;
+  categories?: string[];
+  search_terms?: string[];
+  summary?: string;
+};
+
+type IntentResult = {
+  intent: 'buy' | 'compare' | 'info' | 'search';
+  urgency: 'high' | 'medium' | 'low';
+  source?: 'heuristic' | 'semantic' | 'merged';
+  confidence?: number;
+};
+
+type CategoryDetectionResult = {
+  category: string;
+  subcategory?: string;
+  score: number;
+  confidence: number;
+  matchedKeywords: string[];
+  patternId: string;
+  priority: number;
+};
+
+type CategoryPattern = {
+  id: string;
+  category: string;
+  subcategory?: string;
+  keywords: string[];
+  phrases?: string[];
+  priority?: number;
+  boosts?: string[];
+};
+
+const CATEGORY_PATTERNS: CategoryPattern[] = [
+  {
+    id: 'ahumadores',
+    category: 'Maquinaria cocina y mixología',
+    subcategory: 'Ahumadores gastronómicos',
+    keywords: [
+      'ahumador',
+      'ahumadores',
+      'ahumar',
+      'ahumado',
+      'ahumados',
+      'ahumado en frio',
+      'ahumado en frío',
+      'brasa',
+      'showcooking',
+      'braseado',
+      'smoker',
+      'smoking',
+      'smoke',
+      'pistola de ahumado',
+      'ahumado aladin',
+      'smoked',
+      'aromatizar',
+      'campana de humo'
+    ],
+    phrases: [
+      'pistola de ahumado',
+      'ahumador portátil',
+      'ahumador portatil',
+      'ahumador aladin',
+      'ahumado en sala',
+      'ahumado en mesa',
+      'ahumado gastronómico',
+      'ahumado gastronomico'
+    ],
+    priority: 1.4
+  },
+  {
+    id: 'maquinaria_general',
+    category: 'Maquinaria cocina y mixología',
+    keywords: [
+      'maquinaria',
+      'maquina',
+      'máquina',
+      'equipo',
+      'equipamiento',
+      'industrial',
+      'robot',
+      'horno',
+      'hornos',
+      'abatidor',
+      'abatidores',
+      'pasteurizador',
+      'pasteurizar',
+      'amasadora',
+      'amasadoras',
+      'amasar',
+      'batidora',
+      'batidoras',
+      'licuadora',
+      'licuadoras',
+      'procesadora',
+      'procesadoras',
+      'sous vide',
+      'roner',
+      'thermomix',
+      'termomix',
+      'vaporera',
+      'robot de cocina',
+      'maquina profesional',
+      'equipo profesional',
+      'equipo industrial',
+      'maquina de cocina',
+      'cocción al vacío',
+      'coccion al vacio'
+    ],
+    phrases: [
+      'equipo profesional',
+      'equipo de cocina',
+      'maquinaria para cocina',
+      'maquinaria profesional',
+      'maquinaria industrial',
+      'maquina de cocina profesional',
+      'equipo para restaurante'
+    ],
+    priority: 1.2
+  },
+  {
+    id: 'mixologia',
+    category: 'Técnicas cocina y mixología',
+    keywords: [
+      'mixologia',
+      'mixología',
+      'mixologist',
+      'bartender',
+      'cocteleria',
+      'coctelería',
+      'coctel',
+      'cóctel',
+      'cocktail',
+      'coctelera',
+      'cocteleras',
+      'shaker',
+      'shakers',
+      'jigger',
+      'muddler',
+      'bitter',
+      'angostura',
+      'garnish',
+      'decoracion de cocteles',
+      'clarificado',
+      'esferas',
+      'cocteles',
+      'barra',
+      'bar tools',
+      'bartools'
+    ],
+    phrases: [
+      'técnicas de mixología',
+      'tecnicas de mixologia',
+      'equipamiento de bar',
+      'herramientas de bar'
+    ],
+    priority: 1.15
+  },
+  {
+    id: 'herramientas_corte',
+    category: 'Herramientas',
+    keywords: [
+      'cuchillo',
+      'cuchillos',
+      'cuchillera',
+      'cuchillería',
+      'cuchilleria',
+      'corte',
+      'cortar',
+      'filetear',
+      'pelador',
+      'peladores',
+      'pelar',
+      'rallador',
+      'ralladores',
+      'rallar',
+      'mandolina',
+      'mandolinas',
+      'pinzas',
+      'pinza',
+      'espátula',
+      'espatula',
+      'espátulas',
+      'espatulas',
+      'espumadera',
+      'espumaderas',
+      'colador',
+      'coladores',
+      'tamiz',
+      'tamices',
+      'raspador',
+      'raspadores',
+      'cucharon',
+      'cucharón',
+      'cucharones',
+      'cucharilla',
+      'cucharillas',
+      'rodillo',
+      'rodillos'
+    ],
+    phrases: [
+      'herramientas de corte',
+      'herramientas de cocina',
+      'utensilios de chef',
+      'kit de cuchillos',
+      'batería de cocina profesional'
+    ]
+  },
+  {
+    id: 'utensilios_general',
+    category: 'Utensilios',
+    keywords: [
+      'utensilio',
+      'utensilios',
+      'espátula',
+      'espatula',
+      'espátulas',
+      'espatulas',
+      'cucharón',
+      'cucharon',
+      'cucharones',
+      'cucharilla',
+      'cucharillas',
+      'pinza',
+      'pinzas',
+      'manga',
+      'boquilla',
+      'boquillas',
+      'pincel',
+      'pinceles',
+      'termometro',
+      'termómetro',
+      'termómetros',
+      'termometros',
+      'medidor',
+      'medidores',
+      'rallador',
+      'ralladores',
+      'espumadera',
+      'espumaderas',
+      'colador',
+      'coladores',
+      'tamiz',
+      'tamices',
+      'tamizador',
+      'molde',
+      'moldes',
+      'cortapasta',
+      'corta pasta',
+      'cortador',
+      'cortadores',
+      'bandeja',
+      'bandejas'
+    ],
+    phrases: [
+      'kit de utensilios',
+      'set de utensilios',
+      'utensilios profesionales'
+    ]
+  },
+  {
+    id: 'vajilla',
+    category: 'Vajilla',
+    keywords: [
+      'vajilla',
+      'plato',
+      'platos',
+      'copa',
+      'copas',
+      'vaso',
+      'vasos',
+      'taza',
+      'tazas',
+      'cuenco',
+      'cuencos',
+      'bowl',
+      'bowls',
+      'fuente',
+      'fuentes',
+      'bandeja',
+      'bandejas',
+      'presentación',
+      'presentacion',
+      'emplatado',
+      'servir',
+      'servicio',
+      'vajillas',
+      'plato de postre',
+      'plato llano',
+      'plato hondo',
+      'cubertería',
+      'cuberteria',
+      'cubierto',
+      'cubiertos',
+      'servilleta',
+      'servilletas',
+      'bandeja gastronorm',
+      'gastronorm'
+    ],
+    phrases: [
+      'platos de presentación',
+      'presentación de platos',
+      'servicio de mesa',
+      'vajilla profesional',
+      'menaje de mesa'
+    ],
+    priority: 1.05
+  },
+  {
+    id: 'reposteria',
+    category: 'Repostería',
+    keywords: [
+      'repostería',
+      'reposteria',
+      'pastelería',
+      'pasteleria',
+      'pastel',
+      'pasteles',
+      'tarta',
+      'tartas',
+      'cupcake',
+      'cupcakes',
+      'magdalena',
+      'magdalenas',
+      'mousse',
+      'ganache',
+      'merengue',
+      'fondant',
+      'glaseado',
+      'glasear',
+      'boquilla',
+      'boquillas',
+      'manga pastelera',
+      'mangas pasteleras',
+      'chocolate',
+      'decora',
+      'decoración de tartas',
+      'decoracion de tartas'
+    ],
+    phrases: [
+      'manga pastelera',
+      'decoración de pastelería',
+      'decoracion de pasteleria',
+      'repostería creativa'
+    ],
+    priority: 1.1
+  },
+  {
+    id: 'chocolate',
+    category: 'Chocolate',
+    keywords: [
+      'chocolate',
+      'chocolates',
+      'bombon',
+      'bombón',
+      'bombones',
+      'cacao',
+      'ganache',
+      'atemperar',
+      'templa',
+      'templar',
+      'atemp',
+      'temperar',
+      'molde de chocolate',
+      'molde chocolat',
+      'policarbonato',
+      'refinador',
+      'molino de cacao',
+      'molinos de cacao'
+    ],
+    phrases: [
+      'temperado de chocolate',
+      'atemperado de chocolate',
+      'trabajo con chocolate'
+    ],
+    priority: 1.08
+  },
+  {
+    id: 'textil',
+    category: 'Textil',
+    keywords: [
+      'textil',
+      'textiles',
+      'mantel',
+      'manteles',
+      'servilleta',
+      'servilletas',
+      'delantal',
+      'delantales',
+      'uniforme',
+      'uniformes',
+      'chaqueta',
+      'chaquetas',
+      'cofia',
+      'cofias',
+      'paño',
+      'panos',
+      'pañitos'
+    ],
+    phrases: [
+      'uniforme de cocina',
+      'ropa de cocina',
+      'indumentaria de chef'
+    ]
+  },
+  {
+    id: 'limpieza',
+    category: 'Limpieza',
+    keywords: [
+      'limpieza',
+      'limpiar',
+      'detergente',
+      'detergentes',
+      'desinfectante',
+      'desinfectantes',
+      'sanitizante',
+      'sanitizantes',
+      'higiene',
+      'desengrasante',
+      'desengrasantes',
+      'lavavajillas',
+      'lavaplatos',
+      'lejía',
+      'lejia',
+      'cloro',
+      'desinfeccion',
+      'desinfección'
+    ],
+    phrases: [
+      'productos de limpieza',
+      'limpieza profesional',
+      'desinfección de cocina',
+      'desinfeccion de cocina'
+    ]
+  },
+  {
+    id: 'almacenamiento',
+    category: 'Almacenamiento',
+    keywords: [
+      'almacenamiento',
+      'contenedor',
+      'contenedores',
+      'envase',
+      'envases',
+      'caja',
+      'cajas',
+      'bote',
+      'botes',
+      'tupper',
+      'tuppers',
+      'taper',
+      'tapadera',
+      'tapaderas',
+      'tapa',
+      'tapas',
+      'gastronorm',
+      'cubilote',
+      'cubilotes',
+      'bandeja gastronorm',
+      'bandejas gastronorm',
+      'recipiente',
+      'recipientes',
+      'vacío',
+      'vacio'
+    ],
+    phrases: [
+      'almacenamiento de alimentos',
+      'recipientes herméticos',
+      'recipientes hermeticos',
+      'conservación de alimentos',
+      'conservacion de alimentos'
+    ]
+  },
+  {
+    id: 'decoracion',
+    category: 'Decoración',
+    keywords: [
+      'decoracion',
+      'decoración',
+      'decorar',
+      'decorativo',
+      'decorativos',
+      'centro de mesa',
+      'centros de mesa',
+      'garnish',
+      'presentación',
+      'presentacion',
+      'emplatado',
+      'presentar',
+      'ornamento',
+      'ornamentos'
+    ],
+    phrases: [
+      'decoración de platos',
+      'decoracion de platos',
+      'presentación de mesa',
+      'presentacion de mesa'
+    ]
+  },
+  {
+    id: 'bebidas',
+    category: 'Bebidas',
+    keywords: [
+      'bebida',
+      'bebidas',
+      'coctel',
+      'cóctel',
+      'cocktail',
+      'refresco',
+      'refrescos',
+      'jugo',
+      'jugos',
+      'zumo',
+      'zumos',
+      'batido',
+      'batidos',
+      'smoothie',
+      'smoothies',
+      'infusion',
+      'infusión',
+      'infusiones',
+      'te',
+      'té',
+      'cafe',
+      'café',
+      'barra',
+      'barista'
+    ],
+    phrases: [
+      'bebidas calientes',
+      'bebidas frías',
+      'bebidas frias',
+      'linea de bebidas'
+    ]
+  },
+  {
+    id: 'desechables',
+    category: 'Desechables',
+    keywords: [
+      'desechable',
+      'desechables',
+      'descartable',
+      'descartables',
+      'un solo uso',
+      'take away',
+      'para llevar',
+      'plástico',
+      'plástico desechable',
+      'cartón desechable',
+      'envase desechable',
+      'vaso desechable',
+      'cubiertos desechables',
+      'biodegradable',
+      'compostable'
+    ],
+    phrases: [
+      'vajilla desechable',
+      'envases para llevar',
+      'packaging desechable'
+    ]
+  },
+  {
+    id: 'packaging',
+    category: 'Packaging y presentación',
+    keywords: [
+      'packaging',
+      'embalaje',
+      'empaque',
+      'empaques',
+      'envoltorio',
+      'envoltorios',
+      'caja',
+      'cajas',
+      'bolsa',
+      'bolsas',
+      'etiqueta',
+      'etiquetas',
+      'stickers',
+      'tarro',
+      'tarros',
+      'frasco',
+      'frascos',
+      'tapa',
+      'tapas'
+    ],
+    phrases: [
+      'packaging gastronómico',
+      'packaging gastronomico',
+      'presentación para llevar',
+      'presentacion para llevar'
+    ]
+  },
+  {
+    id: 'congelacion',
+    category: 'Congelación y frío',
+    keywords: [
+      'congelador',
+      'congeladores',
+      'congelar',
+      'congelación',
+      'congelacion',
+      'frigorifico',
+      'frigorífico',
+      'refrigerado',
+      'refrigeración',
+      'refrigeracion',
+      'abatidor',
+      'abatidores',
+      'camara frigorifica',
+      'cámara frigorífica'
+    ],
+    phrases: [
+      'equipos de frío',
+      'equipos de frio',
+      'cadena de frio',
+      'cadena de frío'
+    ],
+    priority: 1.1
+  },
+  {
+    id: 'panaderia',
+    category: 'Panadería',
+    keywords: [
+      'panaderia',
+      'panadería',
+      'pan',
+      'hogaza',
+      'baguette',
+      'brioche',
+      'masa madre',
+      'amasado',
+      'amasar',
+      'fermentar',
+      'fermentadora',
+      'fermentadoras'
+    ],
+    phrases: [
+      'productos de panadería',
+      'hornear pan',
+      'procesos de panadería'
+    ],
+    priority: 1.05
+  },
+  {
+    id: 'heladeria',
+    category: 'Heladería',
+    keywords: [
+      'heladeria',
+      'heladería',
+      'helado',
+      'helados',
+      'sorbete',
+      'sorbetes',
+      'gelato',
+      'pacojet',
+      'granizado',
+      'granizados'
+    ],
+    phrases: [
+      'maquina de helados',
+      'maquina heladera',
+      'equipos de heladería',
+      'equipos de heladeria'
+    ],
+    priority: 1.15
+  }
+];
+
+type CompiledCategoryPattern = CategoryPattern & {
+  normalizedKeywords: string[];
+  normalizedPhrases: string[];
+};
+
+const COMPILED_CATEGORY_PATTERNS: CompiledCategoryPattern[] = CATEGORY_PATTERNS.map(pattern => ({
+  ...pattern,
+  normalizedKeywords: expandCategoryKeywords(pattern.keywords),
+  normalizedPhrases: (pattern.phrases || [])
+    .map(phrase => normalizeText(phrase))
+    .filter(Boolean)
+}));
+
+function expandCategoryKeywords(words: string[]): string[] {
+  const expanded = new Set<string>();
+
+  const addVariant = (term: string) => {
+    if (!term) return;
+    expanded.add(term);
+    if (term.length > 3) {
+      if (!term.endsWith('s')) {
+        expanded.add(`${term}s`);
+      }
+      if (!term.endsWith('es')) {
+        expanded.add(`${term}es`);
+      }
+      if (term.endsWith('s')) {
+        expanded.add(term.replace(/s$/, ''));
+      }
+      if (term.endsWith('es')) {
+        expanded.add(term.replace(/es$/, ''));
+      }
+    }
+  };
+
+  words.forEach(word => {
+    if (!word) {
+      return;
+    }
+
+    const normalized = normalizeText(word);
+    if (!normalized) {
+      return;
+    }
+
+    addVariant(normalized);
+
+    if (normalized.includes(' ')) {
+      normalized.split(/\s+/).forEach(part => addVariant(part));
+    }
+  });
+
+  return Array.from(expanded).filter(Boolean);
+}
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
@@ -68,6 +816,18 @@ export default async function handler(
 
     // Capturar tiempo de inicio para medir tiempo de respuesta
     const startTime = Date.now();
+    const timingSteps: { name: string; duration_ms: number }[] = [];
+    const recordStep = (name: string, start: number) => {
+      const duration = Date.now() - start;
+      timingSteps.push({
+        name,
+        duration_ms: duration < 0 ? 0 : duration,
+      });
+    };
+    const buildTimings = () => ({
+      total_ms: Date.now() - startTime,
+      steps: timingSteps.map(step => ({ ...step })),
+    });
 
     // Obtener datos de la request
     const {
@@ -94,12 +854,14 @@ export default async function handler(
     }
 
     // 1. Cargar el prompt activo desde Supabase
+    const promptFetchStart = Date.now();
     const { data: activePrompts, error: promptError } = await supabase
       .from('system_prompts')
       .select('*, prompt_variables(*)')
       .eq('is_active', true)
       .limit(1)
       .single();
+    recordStep('Carga de prompt (Supabase)', promptFetchStart);
 
     if (promptError || !activePrompts) {
       res.status(500).json({
@@ -386,18 +1148,59 @@ export default async function handler(
       }
     ];
 
-    // 5. Detectar intención del usuario ANTES de detectar si es query de productos
-    const userIntent = detectUserIntent(message);
+    // 5. Comprensión semántica previa (opcional con modelo ligero)
+    const enableSemanticUnderstanding = config?.enableSemanticUnderstanding !== false;
+    let semanticUnderstanding: SemanticUnderstanding | null = null;
+
+    if (enableSemanticUnderstanding) {
+      const semanticStart = Date.now();
+      try {
+        semanticUnderstanding = await analyzeMessageUnderstanding(openai, message, {
+          model: config?.semanticUnderstandingModel,
+          timeoutMs: config?.semanticUnderstandingTimeoutMs
+        });
+      } catch (semanticError) {
+        console.warn('[Chat API] Semantic understanding failed:', semanticError);
+      } finally {
+        recordStep('Comprensión semántica (OpenAI)', semanticStart);
+      }
+    }
+
+    // 6. Detectar intención del usuario combinando heurísticas + comprensión semántica
+    const heuristicIntent = detectUserIntent(message);
+    const semanticIntent = normalizeSemanticIntent(semanticUnderstanding?.intent);
+    const userIntent = mergeIntentSignals(
+      heuristicIntent,
+      semanticIntent,
+      semanticUnderstanding?.confidence
+    );
     const isComparisonQuery = userIntent.intent === 'compare';
     
-    // 6. Detectar categoría en el mensaje
-    const detectedCategory = detectCategoryInMessage(message);
-    
-    // 7. Detectar si el mensaje es sobre productos para forzar búsqueda
+    // 7. Detectar categoría y término de búsqueda con señales semánticas adicionales
+    const semanticCategory = selectSemanticCategory(semanticUnderstanding);
+    const categoryDetection = detectCategoryInMessage(message);
+    const detectedCategory = semanticCategory || categoryDetection?.category || null;
+    const detectedSubcategory = categoryDetection?.subcategory;
+    const categoryMatchedKeywords = categoryDetection?.matchedKeywords || [];
+
+    const heuristicSearchTerm = extractSearchTermFromMessage(message);
+    const searchTermForQuery = selectSearchTermCandidate(
+      heuristicSearchTerm,
+      semanticUnderstanding?.search_terms || [],
+      categoryMatchedKeywords
+    );
+    const searchTermForInstructions =
+      searchTermForQuery || heuristicSearchTerm || categoryMatchedKeywords[0];
+
+    // 8. Detectar si el mensaje es sobre productos para forzar búsqueda
     // PERO solo si NO es una pregunta de comparación
-    const isProductQuery = detectProductQuery(message) && !isComparisonQuery;
-    
-    // 8. Preparar mensajes para OpenAI (con historial limitado)
+    const semanticProductFocus =
+      semanticUnderstanding?.product_focus === true &&
+      (semanticUnderstanding?.confidence ?? 0) >= 0.45;
+    const isProductQuery =
+      (semanticProductFocus || detectProductQuery(message)) && !isComparisonQuery;
+
+    // 9. Preparar mensajes para OpenAI (con historial limitado)
     // Añadir instrucción adicional al system prompt si es una pregunta sobre productos
     let enhancedSystemPrompt = systemPrompt;
     if (isComparisonQuery) {
@@ -426,6 +1229,7 @@ export default async function handler(
     // 9. Llamar a OpenAI (con timeout para evitar errores de Vercel)
     // Si es una pregunta sobre productos, forzar el uso de herramientas
     let completion;
+    let openaiCall1Start = 0;
     try {
       // Si es una pregunta sobre productos, forzar búsqueda
       let toolChoice: any = 'auto';
@@ -436,9 +1240,11 @@ export default async function handler(
       } else if (isProductQuery) {
         if (detectedCategory) {
           // Si hay categoría detectada, forzar búsqueda en esa categoría con términos relevantes
-          const searchTerm = extractSearchTermFromMessage(message);
-          const categoryQuery = buildCategorySearchQuery(searchTerm, detectedCategory);
-          const instructionQuery = categoryQuery || searchTerm;
+          const categoryQuery = searchTermForInstructions
+            ? buildCategorySearchQuery(searchTermForInstructions, detectedCategory)
+            : undefined;
+          const fallbackInstruction = detectedSubcategory || categoryMatchedKeywords[0];
+          const instructionQuery = categoryQuery || searchTermForInstructions || fallbackInstruction;
 
           messages[messages.length - 1] = {
             role: 'user',
@@ -450,6 +1256,12 @@ export default async function handler(
           };
           if (categoryQuery) {
             categoryFunctionArgs.query = categoryQuery;
+          } else if (searchTermForQuery) {
+            categoryFunctionArgs.query = searchTermForQuery;
+          } else if (detectedSubcategory) {
+            categoryFunctionArgs.query = detectedSubcategory;
+          } else if (categoryMatchedKeywords.length > 0) {
+            categoryFunctionArgs.query = categoryMatchedKeywords[0];
           }
 
           toolChoice = {
@@ -461,12 +1273,14 @@ export default async function handler(
           };
         } else {
           // Extraer término de búsqueda del mensaje para añadirlo como contexto
-          const searchTerm = extractSearchTermFromMessage(message);
           // Añadir el término de búsqueda al mensaje del usuario para que OpenAI lo use
-          if (searchTerm && searchTerm !== message.trim()) {
+          if (
+            searchTermForInstructions &&
+            searchTermForInstructions !== message.trim()
+          ) {
             messages[messages.length - 1] = {
               role: 'user',
-              content: `${message}\n\n[IMPORTANTE: Busca productos relacionados con "${searchTerm}" usando la función search_products]`
+              content: `${message}\n\n[IMPORTANTE: Busca productos relacionados con "${searchTermForInstructions}" usando la función search_products]`
             };
           }
           // Forzar el uso de search_products
@@ -479,6 +1293,7 @@ export default async function handler(
         }
       }
       
+      openaiCall1Start = Date.now();
       console.time('openai_call_1');
       completion = await Promise.race([
         openai.chat.completions.create({
@@ -497,7 +1312,11 @@ export default async function handler(
         )
       ]) as any;
       console.timeEnd('openai_call_1');
+      recordStep('Consulta a OpenAI (1)', openaiCall1Start);
     } catch (openaiError) {
+      if (openaiCall1Start) {
+        recordStep('Consulta a OpenAI (1) - error', openaiCall1Start);
+      }
       console.error('OpenAI API error:', openaiError);
       res.status(500).json({
         success: false,
@@ -556,6 +1375,7 @@ export default async function handler(
 
       // Ejecutar la función
       let functionResult: any;
+      const functionExecutionStart = Date.now();
 
       switch (functionName) {
         case 'search_products':
@@ -602,6 +1422,8 @@ export default async function handler(
           });
           return;
       }
+
+      recordStep(getFunctionLabel(functionName), functionExecutionStart);
 
       // Detectar intención del usuario (ya la tenemos, pero recalcular por si cambió)
       const userIntent = detectUserIntent(message);
@@ -652,9 +1474,11 @@ export default async function handler(
         }
       }
 
-      const searchTermForResult = (functionArgs && typeof functionArgs.query === 'string' && functionArgs.query.trim().length > 0)
-        ? functionArgs.query.trim()
-        : extractSearchTermFromMessage(message);
+      const searchTermForResult = selectSearchTermCandidate(
+        (functionArgs && typeof functionArgs.query === 'string') ? functionArgs.query : undefined,
+        semanticUnderstanding?.search_terms || [],
+        [searchTermForQuery, heuristicSearchTerm, ...(categoryMatchedKeywords || [])]
+      );
 
       if (shouldUseQuickResponse(functionName, functionResult, userIntent)) {
         const product = functionResult.products[0];
@@ -667,6 +1491,7 @@ export default async function handler(
         totalTokens = firstCallTokens || 0;
 
         const responseTime = Date.now() - startTime;
+        const saveAnalyticsStart = Date.now();
         const conversationId = await saveConversationToAnalytics(
           supabase,
           sessionId || 'default',
@@ -679,6 +1504,18 @@ export default async function handler(
           responseTime,
           totalTokens
         );
+        recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
+
+        const finalTimings = buildTimings();
+        const assistantMessage = {
+          role: 'assistant',
+          content: quickMessage,
+          function_calls: [toolCall],
+          products: functionResult.products,
+          sources: ['products_db'],
+          quick_response: true,
+          response_timings: finalTimings
+        };
 
         res.status(200).json({
           success: true,
@@ -689,15 +1526,9 @@ export default async function handler(
           conversation_history: [
             ...conversationHistory,
             { role: 'user', content: message },
-            {
-              role: 'assistant',
-              content: quickMessage,
-              function_calls: [toolCall],
-              products: functionResult.products,
-              sources: ['products_db'],
-              quick_response: true
-            }
-          ]
+            assistantMessage
+          ],
+          timings: finalTimings
         });
         return;
       }
@@ -714,6 +1545,7 @@ export default async function handler(
         totalTokens = firstCallTokens || 0;
 
         const responseTime = Date.now() - startTime;
+        const saveAnalyticsStart = Date.now();
         const conversationId = await saveConversationToAnalytics(
           supabase,
           sessionId || 'default',
@@ -726,6 +1558,18 @@ export default async function handler(
           responseTime,
           totalTokens
         );
+        recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
+
+        const finalTimings = buildTimings();
+        const assistantMessage = {
+          role: 'assistant',
+          content: structuredMessage,
+          function_calls: [toolCall],
+          products: functionResult.products,
+          sources: ['products_db'],
+          structured_response: true,
+          response_timings: finalTimings
+        };
 
         res.status(200).json({
           success: true,
@@ -736,15 +1580,9 @@ export default async function handler(
           conversation_history: [
             ...conversationHistory,
             { role: 'user', content: message },
-            {
-              role: 'assistant',
-              content: structuredMessage,
-              function_calls: [toolCall],
-              products: functionResult.products,
-              sources: ['products_db'],
-              structured_response: true
-            }
-          ]
+            assistantMessage
+          ],
+          timings: finalTimings
         });
         return;
       }
@@ -768,7 +1606,7 @@ export default async function handler(
         enrichedContext += '\n\n📋 INSTRUCCIONES PRINCIPALES:\n';
         enrichedContext += '• Usa la estructura fija: Nombre en negrita, Precio, Categoría (si aplica), Descripción corta (1 frase), Enlace.\n';
         enrichedContext += '• Ordena la respuesta en bloques: 🏆 RECOMENDADO (1 producto), 🔁 ALTERNATIVAS (siguientes 2), 💡 PUEDE INTERESARTE (resto).\n';
-        enrichedContext += '• Presenta siempre el precio si existe y abre con “He encontrado X productos relacionados con [término]”.\n';
+        enrichedContext += '• Presenta siempre el precio si existe y abre con "He encontrado X productos relacionados con [término]"\n';
         enrichedContext += '• Si el producto no coincide exactamente, sugiere alternativas dentro de la misma categoría.\n\n';
         
         // Añadir instrucciones según la intención detectada
@@ -999,6 +1837,7 @@ export default async function handler(
       let secondCompletion: any = null;
       let secondCallTokens = 0;
       
+      let openaiCall2Start = 0;
       try {
         // Limitar el tamaño de functionResult para mayor velocidad (OPTIMIZADO)
         let limitedFunctionResult = functionResult;
@@ -1051,6 +1890,7 @@ export default async function handler(
         const totalMessagesSize = JSON.stringify(finalMessages).length;
         console.log(`Calling OpenAI second completion. Total messages size: ${totalMessagesSize} bytes`);
         
+        openaiCall2Start = Date.now();
         console.time('openai_call_2');
         secondCompletion = await Promise.race([
           openai.chat.completions.create({
@@ -1069,6 +1909,7 @@ export default async function handler(
           )
         ]) as any;
         console.timeEnd('openai_call_2');
+        recordStep('Consulta a OpenAI (2)', openaiCall2Start);
         
         // Capturar tokens de la segunda llamada
         if (secondCompletion?.usage) {
@@ -1088,6 +1929,9 @@ export default async function handler(
           contentLength: secondCompletion?.choices?.[0]?.message?.content?.length || 0
         });
       } catch (openaiError) {
+        if (openaiCall2Start) {
+          recordStep('Consulta a OpenAI (2) - error', openaiCall2Start);
+        }
         console.error('OpenAI second completion error:', openaiError);
         // Asegurar que totalTokens esté definido incluso si falla
         totalTokens = firstCallTokens || 0;
@@ -1100,7 +1944,9 @@ export default async function handler(
           }).join('\n');
           
           const fallbackMessage = `He encontrado ${functionResult.products.length} producto(s) relacionado(s) con tu búsqueda:\n\n${productList}${functionResult.products.length > 5 ? `\n\nY ${functionResult.products.length - 5} producto(s) más disponible(s).` : ''}\n\n¿Te gustaría más información sobre alguno de estos productos?`;
-          
+
+          const finalTimings = buildTimings();
+
           res.status(200).json({
             success: true,
             message: fallbackMessage,
@@ -1114,16 +1960,20 @@ export default async function handler(
                 role: 'assistant',
                 content: fallbackMessage,
                 function_calls: [toolCall],
-                sources: ['products_db']
+                sources: ['products_db'],
+                response_timings: finalTimings
               }
-            ]
+            ],
+            timings: finalTimings
           });
           return;
         }
         
         // Si no hay productos, generar mensaje de error más útil
         const errorFallbackMessage = 'He consultado la base de datos pero no encontré resultados específicos. ¿Podrías ser más específico en tu búsqueda? Por ejemplo, menciona la categoría o características que buscas.';
-        
+
+        const finalTimings = buildTimings();
+
         res.status(200).json({
           success: true,
           message: errorFallbackMessage,
@@ -1137,9 +1987,11 @@ export default async function handler(
               role: 'assistant',
               content: errorFallbackMessage,
               function_calls: [toolCall],
-              sources: ['products_db']
+              sources: ['products_db'],
+              response_timings: finalTimings
             }
-          ]
+          ],
+          timings: finalTimings
         });
         return;
       }
@@ -1152,6 +2004,8 @@ export default async function handler(
           const productNames = functionResult.products.slice(0, 5).map((p: any) => p.name).join(', ');
           const fallbackMessage = `Encontré ${functionResult.products.length} producto(s): ${productNames}${functionResult.products.length > 5 ? ' y más...' : ''}. ¿Te gustaría más información sobre alguno de estos productos?`;
           
+          const finalTimings = buildTimings();
+
           res.status(200).json({
             success: true,
             message: fallbackMessage,
@@ -1165,9 +2019,11 @@ export default async function handler(
                 role: 'assistant',
                 content: fallbackMessage,
                 function_calls: [toolCall],
-                sources: ['products_db']
+                sources: ['products_db'],
+                response_timings: finalTimings
               }
-            ]
+            ],
+            timings: finalTimings
           });
           return;
         }
@@ -1177,6 +2033,8 @@ export default async function handler(
           ? `He encontrado ${functionResult.products.length} producto(s) pero hubo un problema al generar la respuesta. Por favor, intenta de nuevo.`
           : 'He consultado la base de datos pero no encontré resultados específicos. ¿Podrías ser más específico en tu búsqueda?';
         
+        const finalTimings = buildTimings();
+
         res.status(200).json({
           success: true,
           message: errorFallbackMessage,
@@ -1190,9 +2048,11 @@ export default async function handler(
               role: 'assistant',
               content: errorFallbackMessage,
               function_calls: [toolCall],
-              sources: ['products_db']
+              sources: ['products_db'],
+              response_timings: finalTimings
             }
-          ]
+          ],
+          timings: finalTimings
         });
         return;
       }
@@ -1231,25 +2091,29 @@ export default async function handler(
         if (!fallbackMessage || fallbackMessage.trim().length === 0) {
           fallbackMessage = 'He procesado tu consulta. ¿Hay algo más específico que te gustaría saber?';
         }
-          
-          res.status(200).json({
-            success: true,
-            message: fallbackMessage,
-            function_called: functionName,
-            function_result: functionResult,
-            fallback: true,
-            conversation_history: [
-              ...conversationHistory,
-              { role: 'user', content: message },
-              {
-                role: 'assistant',
-                content: fallbackMessage,
-                function_calls: [toolCall],
-                sources: ['products_db']
-              }
-            ]
-          });
-          return;
+
+        const finalTimings = buildTimings();
+
+        res.status(200).json({
+          success: true,
+          message: fallbackMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          fallback: true,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content: fallbackMessage,
+              function_calls: [toolCall],
+              sources: ['products_db'],
+              response_timings: finalTimings
+            }
+          ],
+          timings: finalTimings
+        });
+        return;
       }
 
       // Determinar fuentes de información
@@ -1292,6 +2156,7 @@ export default async function handler(
 
       // Guardar conversación en analytics
       const responseTime = Date.now() - startTime;
+      const saveAnalyticsStart = Date.now();
       const conversationId = await saveConversationToAnalytics(
         supabase,
         sessionId || 'default',
@@ -1304,10 +2169,14 @@ export default async function handler(
         responseTime,
         totalTokens // Pasar tokens totales
       );
+      recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
 
       // Asegurar que el mensaje en la respuesta también esté presente
       // Usar nombre diferente para evitar conflicto con responseMessage de la línea 474
       const finalResponseMessage = safeFinalMessage || finalMessage || 'He procesado tu consulta.';
+
+      const finalTimings = buildTimings();
+      assistantMessage.response_timings = finalTimings;
 
       res.status(200).json({
         success: true,
@@ -1319,7 +2188,8 @@ export default async function handler(
           ...conversationHistory,
           { role: 'user', content: message },
           assistantMessage
-        ]
+        ],
+        timings: finalTimings
       });
     } else {
       // 10. Respuesta directa (sin función)
@@ -1334,6 +2204,7 @@ export default async function handler(
 
       // Guardar conversación en analytics
       const responseTime = Date.now() - startTime;
+      const saveAnalyticsStart = Date.now();
       const conversationId = await saveConversationToAnalytics(
         supabase,
         sessionId || 'default',
@@ -1346,6 +2217,10 @@ export default async function handler(
         responseTime,
         firstCallTokens // Solo primera llamada cuando no hay función
       );
+      recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
+
+      const finalTimings = buildTimings();
+      assistantMessage.response_timings = finalTimings;
 
       res.status(200).json({
         success: true,
@@ -1355,7 +2230,8 @@ export default async function handler(
           ...conversationHistory,
           { role: 'user', content: message },
           assistantMessage
-        ]
+        ],
+        timings: finalTimings
       });
     }
   } catch (error) {
@@ -1551,164 +2427,426 @@ function extractSearchTermFromMessage(message: string): string {
 const MAX_CONTEXT_CHAR_LENGTH = 1500;
 const QUICK_RESPONSE_SCORE_THRESHOLD = 220;
 
-function detectCategoryInMessage(message: string): string | null {
-  const lowerMessage = message.toLowerCase();
-  
-  // Mapa de palabras clave de categorías comunes (palabra clave -> categoría)
-  const categoryKeywords: { [key: string]: string } = {
-    // Vajilla y platos
-    'plato': 'Vajilla',
-    'platos': 'Vajilla',
-    'vajilla': 'Vajilla',
-    'copa': 'Vajilla',
-    'copas': 'Vajilla',
-    'vaso': 'Vajilla',
-    'vasos': 'Vajilla',
-    'cubierto': 'Vajilla',
-    'cubiertos': 'Vajilla',
-    'cuchillo': 'Vajilla',
-    'cuchillos': 'Vajilla',
-    'tenedor': 'Vajilla',
-    'tenedores': 'Vajilla',
-    'cuchara': 'Vajilla',
-    'cucharas': 'Vajilla',
-    'servilleta': 'Vajilla',
-    'servilletas': 'Vajilla',
-    'tapa': 'Vajilla',
-    'tapas': 'Vajilla',
-    'presentación': 'Vajilla',
-    'presentacion': 'Vajilla',
-    'presentaciones': 'Vajilla',
-    'bandeja': 'Vajilla',
-    'bandejas': 'Vajilla',
-    'fuente': 'Vajilla',
-    'fuentes': 'Vajilla',
-    'platillo': 'Vajilla',
-    'platillos': 'Vajilla',
-    
-    // Herramientas
-    'herramienta': 'Herramientas',
-    'herramientas': 'Herramientas',
-    'utensilio': 'Utensilios',
-    'utensilios': 'Utensilios',
-    'cuchillo de cocina': 'Herramientas',
-    'tijeras': 'Herramientas',
-    'pelador': 'Herramientas',
-    'rallador': 'Herramientas',
-    
-    // Equipamiento
-    'equipamiento': 'Equipamiento',
-    'equipo': 'Equipamiento',
-    'máquina': 'Equipamiento',
-    'maquina': 'Equipamiento',
-    'aparato': 'Equipamiento',
-    'aparatos': 'Equipamiento',
-    
-    // Cocina
-    'sartén': 'Cocina',
-    'sarten': 'Cocina',
-    'sartenes': 'Cocina',
-    'olla': 'Cocina',
-    'ollas': 'Cocina',
-    'cacerola': 'Cocina',
-    'cacerolas': 'Cocina',
-    'plancha': 'Cocina',
-    'planchas': 'Cocina',
-    
-    // Postres y repostería
-    'postre': 'Repostería',
-    'postres': 'Repostería',
-    'repostería': 'Repostería',
-    'reposteria': 'Repostería',
-    'dulce': 'Repostería',
-    'dulces': 'Repostería',
-    'pastelero': 'Pastelería',
-    'pastelera': 'Pastelería',
-    'pastelería': 'Pastelería',
-    'pasteleria': 'Pastelería',
-    'repostero': 'Pastelería',
-    'repostera': 'Pastelería',
-    'pastel': 'Pastelería',
-    'pasteles': 'Pastelería',
-    'cupcake': 'Pastelería',
-    'cupcakes': 'Pastelería',
-    'tarta': 'Pastelería',
-    'tartas': 'Pastelería',
-    'bizcocho': 'Pastelería',
-    'bizcochos': 'Pastelería',
-    'bombón': 'Chocolate',
-    'bombon': 'Chocolate',
-    'bombones': 'Chocolate',
-    'chocolate': 'Chocolate',
-    'chocolates': 'Chocolate',
-    'chocolatero': 'Chocolate',
-    'chocolatera': 'Chocolate',
-    'cacao': 'Chocolate',
-    'ganache': 'Chocolate',
-    'atemperar': 'Chocolate',
-    'templar': 'Chocolate',
-    'refinar': 'Maquinaria',
-    'refinador': 'Maquinaria',
-    'refinadora': 'Maquinaria',
-    'refinadoras': 'Maquinaria',
-    'molino': 'Maquinaria',
-    'molinos': 'Maquinaria',
-    
-    // Bebidas
-    'bebida': 'Bebidas',
-    'bebidas': 'Bebidas',
-    'coctel': 'Bebidas',
-    'cóctel': 'Bebidas',
-    'cocktail': 'Bebidas',
-    'cerveza': 'Bebidas',
-    'vino': 'Bebidas',
-    
-    // Textil
-    'textil': 'Textil',
-    'textiles': 'Textil',
-    'tela': 'Textil',
-    'telas': 'Textil',
-    'ropa': 'Textil',
-    'mantel': 'Textil',
-    'manteles': 'Textil',
-    'delantal': 'Textil',
-    'delantales': 'Textil',
-    
-    // Limpieza
-    'limpieza': 'Limpieza',
-    'limpiar': 'Limpieza',
-    'detergente': 'Limpieza',
-    'detergentes': 'Limpieza',
-    'desinfectante': 'Limpieza',
-    
-    // Almacenamiento
-    'almacenamiento': 'Almacenamiento',
-    'contenedor': 'Almacenamiento',
-    'contenedores': 'Almacenamiento',
-    'recipiente': 'Almacenamiento',
-    'recipientes': 'Almacenamiento',
-    'tupper': 'Almacenamiento',
-    'tapper': 'Almacenamiento',
-    
-    // Decoración
-    'decoración': 'Decoración',
-    'decoracion': 'Decoración',
-    'decorativo': 'Decoración',
-    'decorativos': 'Decoración',
-    'centro de mesa': 'Decoración',
-    'centro de mesas': 'Decoración',
-  };
-  
-  // Buscar palabras clave de categorías
-  for (const [keyword, category] of Object.entries(categoryKeywords)) {
-    // Buscar como palabra completa (con límites de palabra)
-    const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (regex.test(lowerMessage)) {
-      return category;
+function buildNgrams(tokens: string[], size: number): Set<string> {
+  const result = new Set<string>();
+  if (tokens.length < size) {
+    return result;
+  }
+
+  for (let i = 0; i <= tokens.length - size; i++) {
+    result.add(tokens.slice(i, i + size).join(' '));
+  }
+
+  return result;
+}
+
+function detectCategoryInMessage(message: string): CategoryDetectionResult | null {
+  const normalizedMessage = normalizeText(message);
+  if (!normalizedMessage) {
+    return null;
+  }
+
+  const tokens = normalizedMessage.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  const tokenSet = new Set(tokens);
+  const bigrams = buildNgrams(tokens, 2);
+  const trigrams = buildNgrams(tokens, 3);
+
+  let best: CategoryDetectionResult | null = null;
+
+  for (const pattern of COMPILED_CATEGORY_PATTERNS) {
+    let score = 0;
+    const matches = new Set<string>();
+
+    pattern.normalizedPhrases.forEach(phrase => {
+      if (phrase && normalizedMessage.includes(phrase)) {
+        score += 8;
+        matches.add(phrase);
+      }
+    });
+
+    pattern.normalizedKeywords.forEach(keyword => {
+      if (!keyword) {
+        return;
+      }
+
+      if (keyword.includes(' ')) {
+        if (normalizedMessage.includes(keyword)) {
+          score += keyword.split(' ').length >= 2 ? 6 : 4;
+          matches.add(keyword);
+        }
+        return;
+      }
+
+      if (tokenSet.has(keyword)) {
+        score += 4;
+        matches.add(keyword);
+        return;
+      }
+
+      if (bigrams.has(keyword) || trigrams.has(keyword)) {
+        score += 3.5;
+        matches.add(keyword);
+        return;
+      }
+
+      const prefixMatch = Array.from(tokenSet).some(token => token.startsWith(keyword) && keyword.length >= 4);
+      if (prefixMatch) {
+        score += 2.5;
+        matches.add(keyword);
+        return;
+      }
+
+      if (normalizedMessage.includes(keyword) && keyword.length >= 5) {
+        score += 1.5;
+        matches.add(keyword);
+      }
+    });
+
+    if (pattern.boosts) {
+      pattern.boosts.forEach(boostKeyword => {
+        const normalizedBoost = normalizeText(boostKeyword);
+        if (normalizedBoost && normalizedMessage.includes(normalizedBoost)) {
+          score += 1;
+          matches.add(normalizedBoost);
+        }
+      });
+    }
+
+    if (matches.size === 0) {
+      continue;
+    }
+
+    const priority = pattern.priority ?? 1;
+    const adjustedScore = score * priority;
+    const baseForConfidence = 7 + Math.max(matches.size - 1, 0) * 2;
+    const confidence = Math.min(1, adjustedScore / (baseForConfidence * priority));
+
+    if (!best || adjustedScore > best.score) {
+      best = {
+        category: pattern.category,
+        subcategory: pattern.subcategory,
+        score: adjustedScore,
+        confidence,
+        matchedKeywords: Array.from(matches),
+        patternId: pattern.id,
+        priority
+      };
+    } else if (adjustedScore === best.score && priority > best.priority) {
+      best = {
+        category: pattern.category,
+        subcategory: pattern.subcategory,
+        score: adjustedScore,
+        confidence,
+        matchedKeywords: Array.from(matches),
+        patternId: pattern.id,
+        priority
+      };
     }
   }
-  
+
+  if (!best) {
+    return null;
+  }
+
+  if (best.score < 5 && best.confidence < 0.45) {
+    return null;
+  }
+
+  return best;
+}
+
+async function analyzeMessageUnderstanding(
+  openai: OpenAI,
+  message: string,
+  options: { model?: string | null; timeoutMs?: number } = {}
+): Promise<SemanticUnderstanding | null> {
+  const model = options.model || SEMANTIC_UNDERSTANDING_DEFAULT_MODEL;
+  if (!model) {
   return null;
+  }
+
+  const timeoutMs = options.timeoutMs ?? 5000;
+
+  const systemPrompt =
+    'Eres un asistente que clasifica mensajes de clientes para un chatbot de productos gastronómicos. ' +
+    'Debes analizar TODO el mensaje tal como está escrito. ' +
+    'Responde SIEMPRE con un JSON válido usando este esquema: ' +
+    '{"product_focus": boolean, "intent": "buy"|"compare"|"info"|"search"|"support"|"other", "confidence": number between 0 and 1, ' +
+    '"categories": string[] (máximo 3 elementos, puede ser []), "search_terms": string[] (máximo 3 términos clave relevantes ordenados por importancia), ' +
+    '"summary": string corta explicando de qué trata el mensaje}. ' +
+    'El campo "product_focus" debe ser true solo si el usuario está claramente interesado en productos específicos o categorías del catálogo. ' +
+    'Si no estás seguro, deja "product_focus": false y un confidence bajo. ' +
+    'Los valores deben ir sin comentarios adicionales.';
+
+  try {
+    const completionPromise = openai.chat.completions.create({
+      model,
+      temperature: 0,
+      max_tokens: 300,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message }
+      ]
+    });
+
+    const completion = (await Promise.race([
+      completionPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Semantic understanding timeout')), timeoutMs)
+      )
+    ])) as Awaited<typeof completionPromise>;
+
+    const rawContent = completion.choices?.[0]?.message?.content?.trim();
+    if (!rawContent) {
+      return null;
+    }
+
+    const sanitizedContent = rawContent.replace(/```json|```/gi, '').trim();
+    let parsed: any;
+    try {
+      parsed = JSON.parse(sanitizedContent);
+    } catch (parseError) {
+      console.warn('Failed to parse semantic understanding JSON:', sanitizedContent);
+      return null;
+    }
+
+    const result: SemanticUnderstanding = {};
+
+    if (typeof parsed.product_focus === 'boolean') {
+      result.product_focus = parsed.product_focus;
+    } else if (typeof parsed.productFocus === 'boolean') {
+      result.product_focus = parsed.productFocus;
+    }
+
+    const intentCandidate = parsed.intent || parsed.primary_intent || parsed.intent_label;
+    if (typeof intentCandidate === 'string') {
+      result.intent = intentCandidate.trim().toLowerCase();
+    }
+
+    if (typeof parsed.confidence === 'number') {
+      result.confidence = Math.max(0, Math.min(1, parsed.confidence));
+    } else if (typeof parsed.intent_confidence === 'number') {
+      result.confidence = Math.max(0, Math.min(1, parsed.intent_confidence));
+    }
+
+    if (Array.isArray(parsed.categories)) {
+      result.categories = parsed.categories
+        .filter((cat: unknown) => typeof cat === 'string')
+        .map((cat: string) => cat.trim())
+        .filter((cat: string) => cat.length > 0)
+        .slice(0, 3);
+    }
+
+    if (Array.isArray(parsed.search_terms || parsed.searchTerms)) {
+      const rawTerms = parsed.search_terms || parsed.searchTerms;
+      result.search_terms = rawTerms
+        .filter((term: unknown) => typeof term === 'string')
+        .map((term: string) => term.trim())
+        .filter((term: string) => term.length > 0)
+        .slice(0, 3);
+    }
+
+    if (typeof parsed.summary === 'string') {
+      result.summary = parsed.summary.trim();
+    }
+
+    return result;
+  } catch (error) {
+    console.warn('Semantic understanding request failed:', error);
+    return null;
+  }
+}
+
+function normalizeSemanticIntent(intent?: string | null): IntentResult['intent'] | undefined {
+  if (!intent || typeof intent !== 'string') {
+    return undefined;
+  }
+
+  const normalized = intent.trim().toLowerCase();
+
+  if (['buy', 'purchase', 'comprar', 'venta', 'purchase_intent'].includes(normalized)) {
+    return 'buy';
+  }
+  if (['compare', 'comparison', 'comparar', 'comparacion', 'comparación'].includes(normalized)) {
+    return 'compare';
+  }
+  if (['info', 'informacion', 'información', 'information', 'learn', 'details'].includes(normalized)) {
+    return 'info';
+  }
+  if (['search', 'buscar', 'explore', 'browse', 'general'].includes(normalized)) {
+    return 'search';
+  }
+
+  return undefined;
+}
+
+function deriveUrgencyFromIntent(intent: IntentResult['intent']): IntentResult['urgency'] {
+  switch (intent) {
+    case 'buy':
+      return 'high';
+    case 'info':
+      return 'low';
+    default:
+      return 'medium';
+  }
+}
+
+function mergeIntentSignals(
+  heuristicIntent: IntentResult,
+  semanticIntent: IntentResult['intent'] | undefined,
+  semanticConfidence?: number | null
+): IntentResult {
+  if (!semanticIntent) {
+    return { ...heuristicIntent, source: heuristicIntent.source ?? 'heuristic' };
+  }
+
+  const confidence = typeof semanticConfidence === 'number'
+    ? Math.max(0, Math.min(1, semanticConfidence))
+    : undefined;
+
+  if (!confidence || confidence < 0.45) {
+    return { ...heuristicIntent, source: heuristicIntent.source ?? 'heuristic' };
+  }
+
+  const baseUrgency = deriveUrgencyFromIntent(semanticIntent);
+
+  if (semanticIntent === heuristicIntent.intent) {
+    return {
+      ...heuristicIntent,
+      source: confidence >= 0.7 ? 'semantic' : (heuristicIntent.source ?? 'heuristic'),
+      confidence: confidence
+    };
+  }
+
+  if (confidence >= 0.75) {
+    return {
+      intent: semanticIntent,
+      urgency: baseUrgency,
+      source: 'semantic',
+      confidence
+    };
+  }
+
+  if (heuristicIntent.intent === 'search' && semanticIntent !== 'search' && confidence >= 0.55) {
+    return {
+      intent: semanticIntent,
+      urgency: baseUrgency,
+      source: 'merged',
+      confidence
+    };
+  }
+
+  return { ...heuristicIntent, source: heuristicIntent.source ? heuristicIntent.source : 'heuristic', confidence };
+}
+
+function selectSemanticCategory(semanticUnderstanding: SemanticUnderstanding | null): string | null {
+  if (!semanticUnderstanding || !semanticUnderstanding.categories || semanticUnderstanding.categories.length === 0) {
+    return null;
+  }
+
+  const category = semanticUnderstanding.categories.find(cat => typeof cat === 'string' && cat.trim().length > 0);
+  if (!category) {
+    return null;
+  }
+
+  return formatCategoryName(category);
+}
+
+function formatCategoryName(category: string): string {
+  const trimmed = category.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return trimmed
+    .split(/\s+/)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function selectSearchTermCandidate(
+  primaryCandidate?: string | null,
+  semanticTerms: string[] = [],
+  additionalCandidates: Array<string | null | undefined> = []
+): string | undefined {
+  const candidateSet = new Set<string>();
+
+  const pushCandidate = (term?: string | null) => {
+    const cleaned = cleanSearchTermCandidate(term);
+    if (cleaned) {
+      candidateSet.add(cleaned);
+    }
+  };
+
+  pushCandidate(primaryCandidate);
+  semanticTerms.forEach(term => pushCandidate(term));
+  additionalCandidates.forEach(item => pushCandidate(item ?? undefined));
+
+  if (candidateSet.size === 0) {
+    return undefined;
+  }
+
+  const sortedCandidates = Array.from(candidateSet)
+    .map(term => ({ term, score: scoreSearchTerm(term) }))
+    .sort((a, b) => b.score - a.score);
+
+  return sortedCandidates[0]?.term;
+}
+
+function cleanSearchTermCandidate(term?: string | null): string | undefined {
+  if (!term || typeof term !== 'string') {
+    return undefined;
+  }
+
+  const sanitized = term
+    .replace(/[\n\r]+/g, ' ')
+    .replace(/[\[\](){}"“"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!sanitized) {
+    return undefined;
+  }
+
+  const wordCount = sanitized.split(/\s+/).length;
+  if (wordCount > 12) {
+    return sanitized.split(/\s+/).slice(0, 12).join(' ');
+  }
+
+  if (sanitized.length > 120) {
+    return sanitized.slice(0, 120).trim();
+  }
+
+  if (sanitized.length < 3 && !/\d/.test(sanitized)) {
+    return undefined;
+  }
+
+  return sanitized;
+}
+
+function scoreSearchTerm(term: string): number {
+  const wordCount = term.split(/\s+/).length;
+  const lengthScore = Math.min(term.length, 120);
+  const uniqueChars = new Set(term.replace(/\s+/g, '').toLowerCase()).size;
+
+  let score = wordCount * 10 + lengthScore + uniqueChars;
+
+  if (/\d/.test(term)) {
+    score += 15;
+  }
+  if (term.includes('-')) {
+    score += 5;
+  }
+  if (wordCount > 1) {
+    score += 5;
+  }
+
+  return score;
 }
 
 function buildCategorySearchQuery(searchTerm: string, category: string): string | undefined {
@@ -1955,10 +3093,7 @@ function buildStructuredResponse(
 }
 
 // Función para detectar intención del usuario
-function detectUserIntent(message: string): {
-  intent: 'buy' | 'compare' | 'info' | 'search';
-  urgency: 'high' | 'medium' | 'low';
-} {
+function detectUserIntent(message: string): IntentResult {
   const lowerMessage = message.toLowerCase();
   
   // Palabras clave de compra
@@ -1984,16 +3119,16 @@ function detectUserIntent(message: string): {
   
   // Detectar intención
   if (buyKeywords.some(k => lowerMessage.includes(k))) {
-    return { intent: 'buy', urgency: 'high' };
+    return { intent: 'buy', urgency: 'high', source: 'heuristic' };
   }
   if (compareKeywords.some(k => lowerMessage.includes(k))) {
-    return { intent: 'compare', urgency: 'medium' };
+    return { intent: 'compare', urgency: 'medium', source: 'heuristic' };
   }
   if (infoKeywords.some(k => lowerMessage.includes(k))) {
-    return { intent: 'info', urgency: 'low' };
+    return { intent: 'info', urgency: 'low', source: 'heuristic' };
   }
   
-  return { intent: 'search', urgency: 'medium' };
+  return { intent: 'search', urgency: 'medium', source: 'heuristic' };
 }
 
 // Función para generar sugerencias de búsqueda cuando no hay resultados
@@ -2372,6 +3507,15 @@ const CATEGORY_STOP_WORDS = new Set([
   'repostería', 'reposteria'
 ]);
 
+function escapeSupabaseFilterValue(value: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    return value;
+  }
+
+  const escapedBackslash = value.replace(/\\/g, '\\\\');
+  return escapedBackslash.replace(/([,()])/g, '\\$1');
+}
+
 // Función para buscar productos (optimizada con búsqueda flexible)
 async function searchProducts(supabase: any, params: any) {
   // Seleccionar solo campos necesarios (incluyendo imagen)
@@ -2411,20 +3555,22 @@ async function searchProducts(supabase: any, params: any) {
         
         // Para cada variación, buscar en cada campo
         uniqueVariations.forEach(variation => {
+          const safeVariation = escapeSupabaseFilterValue(variation);
           // Buscar en nombre (con variaciones)
-          conditions.push(`name.ilike.%${variation}%`);
+          conditions.push(`name.ilike.%${safeVariation}%`);
           // Buscar en descripción
-          conditions.push(`description.ilike.%${variation}%`);
+          conditions.push(`description.ilike.%${safeVariation}%`);
           // Buscar en SKU
-          conditions.push(`sku.ilike.%${variation}%`);
+          conditions.push(`sku.ilike.%${safeVariation}%`);
         });
       });
       
       // También buscar la frase completa sin variaciones (para coincidencias exactas)
       if (searchTerm.length > 3) {
-        conditions.push(`name.ilike.%${searchTerm}%`);
-        conditions.push(`description.ilike.%${searchTerm}%`);
-        conditions.push(`sku.ilike.%${searchTerm}%`);
+        const safePhrase = escapeSupabaseFilterValue(searchTerm);
+        conditions.push(`name.ilike.%${safePhrase}%`);
+        conditions.push(`description.ilike.%${safePhrase}%`);
+        conditions.push(`sku.ilike.%${safePhrase}%`);
       }
         
       if (conditions.length > 0) {
@@ -2859,7 +4005,8 @@ async function searchProductsByCategory(supabase: any, params: any) {
   
   // Búsqueda de texto adicional si se proporciona
   if (params.query) {
-    query = query.or(`name.ilike.%${params.query}%,description.ilike.%${params.query}%`);
+    const safeQuery = escapeSupabaseFilterValue(params.query);
+    query = query.or(`name.ilike.%${safeQuery}%,description.ilike.%${safeQuery}%`);
   }
   
   const limit = params.limit || 15;

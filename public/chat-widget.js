@@ -47,6 +47,46 @@
     return div.innerHTML;
   }
 
+  function formatDuration(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) {
+      return '0 ms';
+    }
+    if (ms < 1000) {
+      return `${Math.round(ms)} ms`;
+    }
+    const seconds = ms / 1000;
+    return `${seconds.toFixed(seconds >= 10 ? 1 : 2)} s`;
+  }
+
+  function renderTimingCard(timings) {
+    if (!timings || typeof timings.total_ms !== 'number') {
+      return '';
+    }
+
+    const steps = Array.isArray(timings.steps) ? timings.steps : [];
+
+    const stepsHtml = steps.length > 0
+      ? `<div style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px; color: #cbd5f5;">
+          ${steps.map(step => {
+            const stepName = escapeHtml(String(step?.name ?? 'Paso'));
+            const duration = formatDuration(typeof step?.duration_ms === 'number' ? step.duration_ms : 0);
+            return `<div style="display: flex; justify-content: space-between; gap: 12px; align-items: center;">
+                      <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${stepName}</span>
+                      <span style="white-space: nowrap; font-variant-numeric: tabular-nums;">${duration}</span>
+                    </div>`;
+          }).join('')}
+        </div>`
+      : '';
+
+    return `<div style="margin-top: 12px; background: linear-gradient(135deg, #1e293b, #0f172a); color: #f8fafc; border-radius: 12px; padding: 12px 14px; font-size: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);">
+      <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: 0.01em;">
+        <span aria-hidden="true">⏱️</span>
+        <span>Tiempo total: ${formatDuration(timings.total_ms)}</span>
+      </div>
+      ${stepsHtml}
+    </div>`;
+  }
+
   // Cargar mensajes desde localStorage
   function loadMessages() {
     try {
@@ -127,6 +167,10 @@
             // Producto único por SKU
             lastMessage.products = [data.function_result.product];
           }
+        }
+
+        if (lastMessage && data.timings && !lastMessage.response_timings) {
+          lastMessage.response_timings = data.timings;
         }
         
         messages = data.conversation_history;
@@ -343,9 +387,16 @@
         });
         html += '</div>';
 
+        if (message.response_timings) {
+          html += `<div style="padding: 0 4px;">${renderTimingCard(message.response_timings)}</div>`;
+        }
+
         messageDiv.innerHTML = html;
       } else {
         // Mensaje normal
+        const timingHtml = !isUser && message.response_timings
+          ? renderTimingCard(message.response_timings)
+          : '';
         messageDiv.innerHTML = `
           <div style="display: flex; ${isUser ? 'justify-content: flex-end;' : 'justify-content: flex-start;'}">
             <div style="max-width: 85%; border-radius: 16px; padding: 12px 16px; ${
@@ -354,6 +405,7 @@
                 : 'background: #f1f5f9; color: #334155;'
             }">
               <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">${isUser ? escapeHtml(message.content) : parseMarkdown(message.content, false)}</div>
+              ${timingHtml ? `<div style="margin-top: 12px;">${timingHtml}</div>` : ''}
             </div>
           </div>
         `;
