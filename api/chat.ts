@@ -1316,6 +1316,11 @@ const SEARCH_TERM_OVERRIDES: { pattern: RegExp; term: string }[] = [
   }
 ];
 
+const STRICT_MATCH_TERMS = new Set([
+  'aladin station',
+  'isi gourmet whip 1l'
+]);
+
 function extractSearchTermFromMessage(message: string): string {
 
   for (const override of SEARCH_TERM_OVERRIDES) {
@@ -2625,6 +2630,24 @@ async function searchProducts(supabase: any, params: any) {
     ...product,
     image: product.image_url || product.image || ''
   }));
+
+  if (searchTerm) {
+    const normalizedQuery = normalizeText(searchTerm);
+    if (STRICT_MATCH_TERMS.has(normalizedQuery)) {
+      const strictMatches = mappedProducts.filter((product: any) => {
+        const normalizedName = normalizeText(product.name || '');
+        return normalizedName.includes(normalizedQuery);
+      });
+      if (strictMatches.length > 0) {
+        return {
+          products: strictMatches,
+          total: strictMatches.length,
+          limit: strictMatches.length,
+          offset: 0
+        };
+      }
+    }
+  }
 
   return {
     products: mappedProducts,
