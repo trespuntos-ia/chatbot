@@ -2286,6 +2286,18 @@ function generateWordVariations(word: string): string[] {
   
   // Variaciones comunes en español
   const commonVariations: { [key: string]: string[] } = {
+    'ahumador': ['ahumadores', 'ahumar', 'smoker', 'smoking', 'pistola', 'aladin', 'super aladin'],
+    'ahumadores': ['ahumador', 'ahumar', 'smoker', 'smoking', 'pistola', 'aladin', 'super aladin'],
+    'ahumar': ['ahumador', 'ahumadores', 'smoker', 'smoking', 'pistola', 'aladin', 'super aladin'],
+    'smoker': ['ahumador', 'ahumadores', 'ahumar', 'smoking', 'pistola', 'aladin', 'super aladin'],
+    'smoking': ['ahumador', 'ahumadores', 'ahumar', 'smoker', 'pistola', 'aladin', 'super aladin'],
+    'pistola': ['ahumador', 'ahumadores', 'ahumar', 'smoker', 'smoking', 'aladin', 'super aladin'],
+    'aladin': ['super aladin', 'ahumador', 'ahumadores', 'pistola', 'smoker', 'smoking'],
+    'super aladin': ['aladin', 'ahumador', 'pistola', 'smoker', 'smoking'],
+    'portatil': ['portátil', 'portable', 'portatiles', 'portátiles'],
+    'portátiles': ['portatil', 'portable'],
+    'portátil': ['portatil', 'portable', 'portátiles'],
+    'portable': ['portatil', 'portátil'],
     'cierre': ['cierra', 'cerrar', 'cierre'],
     'cierra': ['cierre', 'cerrar', 'cierra'],
     'cerrar': ['cierre', 'cierra', 'cerrar'],

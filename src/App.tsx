@@ -7,8 +7,14 @@ type AppView = 'landing' | 'dashboard';
 
 const resolveViewFromLocation = (): AppView => {
   if (typeof window === 'undefined') return 'dashboard';
-  const { pathname } = window.location;
-  return pathname === '/landing' ? 'landing' : 'dashboard';
+  const { pathname, search } = window.location;
+
+  if (pathname === '/landing') {
+    return 'landing';
+  }
+
+  const params = new URLSearchParams(search);
+  return params.get('view') === 'landing' ? 'landing' : 'dashboard';
 };
 
 function App() {
@@ -23,15 +29,26 @@ function App() {
     return () => window.removeEventListener('popstate', syncViewWithLocation);
   }, [syncViewWithLocation]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname === '/landing') {
+      const url = new URL(window.location.href);
+      url.pathname = '/';
+      url.searchParams.set('view', 'landing');
+      window.history.replaceState({}, '', url.toString());
+      setView('landing');
+    }
+  }, []);
+
   const switchView = (target: AppView) => {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
+    url.pathname = '/';
     if (target === 'landing') {
-      url.pathname = '/landing';
+      url.searchParams.set('view', 'landing');
     } else {
-      url.pathname = '/';
+      url.searchParams.delete('view');
     }
-    url.search = '';
     window.history.pushState({}, '', url.toString());
     setView(target);
   };
