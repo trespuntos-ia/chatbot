@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
 import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
@@ -60,41 +59,17 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
   const [error, setError] = useState<string>('');
   const [sessionId, setSessionId] = useState<string>('');
   const [suggestedQueries, setSuggestedQueries] = useState<string[]>([]);
-  const [currentSuggestionIndex, setCurrentSuggestionIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const hasSentFirstMessage = useRef(false);
 
   // Determinar si estamos en estado inicial (sin mensajes)
   const isInitialState = messages.length === 0;
-  const currentSuggestion =
-    suggestedQueries.length > 0
-      ? suggestedQueries[Math.min(currentSuggestionIndex, suggestedQueries.length - 1)]
-      : '';
 
   // Cargar sugerencias al montar
   useEffect(() => {
     loadSuggestedQueries();
   }, []);
-
-  useEffect(() => {
-    setCurrentSuggestionIndex(0);
-  }, [suggestedQueries]);
-
-  useEffect(() => {
-    if (!isInitialState || suggestedQueries.length <= 1) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setCurrentSuggestionIndex((prev) => {
-        const nextIndex = prev + 1;
-        return nextIndex >= suggestedQueries.length ? 0 : nextIndex;
-      });
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [isInitialState, suggestedQueries]);
 
   const loadSuggestedQueries = async () => {
     try {
@@ -322,7 +297,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0b1220]">
+    <div className="flex flex-col h-full bg-[#202020]">
       {/* Mensajes */}
       <div className="flex-1 overflow-y-auto space-y-4 px-6 py-6">
         {/* Mensajes de la conversación */}
@@ -581,14 +556,14 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
             onKeyPress={handleKeyPress}
               placeholder="Pregunta cualquier cosa..."
             disabled={isLoading}
-              rows={3}
-              className="w-full min-h-[70px] px-6 py-4 pr-[120px] bg-white/5 border border-white/10 rounded-[32px] focus:ring-2 focus:ring-cyan-400/80 focus:border-transparent resize-none disabled:opacity-50 disabled:cursor-not-allowed text-white/90 placeholder-white/40 text-base leading-relaxed shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
+              rows={4}
+              className="w-full min-h-[100px] px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500"
           />
 
             {/* Botones en fila inferior dentro del textarea */}
-            <div className="absolute bottom-4 right-4 flex items-center gap-2">
+            <div className="absolute bottom-3 right-3 flex items-center gap-2">
           <button
-                className="p-3 text-white/60 hover:text-white rounded-full bg-white/5 hover:bg-white/10 transition"
+                className="p-2 text-gray-400 hover:text-white hover:bg-[#202020] rounded-lg transition"
                 aria-label="Micrófono"
                 title="Micrófono (próximamente)"
               >
@@ -610,10 +585,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
               <button
                 onClick={handleSendMessage}
                 disabled={isLoading || !inputMessage.trim()}
-                className={`p-3 rounded-full transition shadow-lg ${
+                className={`p-2 rounded-lg transition ${
                   inputMessage.trim() && !isLoading
-                    ? 'bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500 text-white hover:brightness-110'
-                    : 'bg-white/10 text-white/35 border border-white/10 cursor-not-allowed shadow-none'
+                    ? 'bg-cyan-500 text-black hover:bg-cyan-400'
+                    : 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 }`}
                 aria-label="Enviar"
               >
@@ -635,17 +610,17 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
             </div>
           </div>
 
-          {/* Sugerencias animadas - se muestran de una en una en loop */}
-          {currentSuggestion && (
-            <div className="mt-6">
-              <p className="text-xs uppercase tracking-[0.35em] text-white/35 mb-3">Ejemplos</p>
+          {/* Sugerencias de búsqueda - siempre visibles debajo del input */}
+          <div className="mt-4 space-y-2">
+            {suggestedQueries.map((suggestion, idx) => (
               <button
-                onClick={() => handleSuggestionClick(currentSuggestion)}
-                className="w-full text-left px-5 py-4 bg-white/5 border border-white/10 rounded-2xl flex items-center gap-4 group hover:border-cyan-500/50 transition-colors backdrop-blur-sm"
+                key={idx}
+                onClick={() => handleSuggestionClick(suggestion)}
+                className="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-[#2a2a2a] hover:text-white transition-colors rounded-lg flex items-center gap-3 group"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5 text-cyan-400 flex-shrink-0 group-hover:text-cyan-300 transition-colors drop-shadow-[0_0_12px_rgba(56,189,248,0.45)]"
+                  className="h-4 w-4 text-gray-400 group-hover:text-gray-300 flex-shrink-0"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -657,23 +632,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                     d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                   />
                 </svg>
-                <div className="relative flex-1 overflow-hidden">
-                  <AnimatePresence mode="wait">
-                    <motion.span
-                      key={currentSuggestionIndex}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.35 }}
-                      className="block text-sm text-white/85"
-                    >
-                      {currentSuggestion}
-                    </motion.span>
-                  </AnimatePresence>
-                </div>
-              </button>
-            </div>
-          )}
+                <span className="flex-1">{suggestion}</span>
+          </button>
+            ))}
+          </div>
         </div>
       ) : (
         // Estado conversacional: input compacto en línea
@@ -687,10 +649,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
               onKeyPress={handleKeyPress}
               placeholder="Escribe tu pregunta..."
               disabled={isLoading}
-              className="flex-1 px-5 py-3 bg-white/5 border border-white/10 rounded-[26px] focus:ring-2 focus:ring-cyan-400/70 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed text-white/90 placeholder-white/40 text-sm shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]"
+              className="flex-1 px-4 py-3 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500 text-sm"
             />
             <button
-              className="p-3 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition"
+              className="p-3 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded-lg transition"
               aria-label="Micrófono"
               title="Micrófono (próximamente)"
             >
@@ -712,10 +674,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
             <button
               onClick={handleSendMessage}
               disabled={isLoading || !inputMessage.trim()}
-              className={`p-3 rounded-full transition shadow-lg ${
+              className={`p-3 rounded-lg transition ${
                 inputMessage.trim() && !isLoading
-                  ? 'bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500 text-white hover:brightness-110'
-                  : 'bg-white/10 text-white/35 border border-white/10 cursor-not-allowed shadow-none'
+                  ? 'bg-cyan-500 text-black hover:bg-cyan-400'
+                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
               }`}
               aria-label="Enviar"
             >

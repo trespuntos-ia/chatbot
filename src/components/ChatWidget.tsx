@@ -1,14 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
-import {
-  Sparkles,
-  Maximize2,
-  Minimize2,
-  X,
-  Mic,
-  Send,
-  Search
-} from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { Chat } from './Chat';
 import { DEFAULT_CHAT_CONFIG } from '../services/chatService';
 import { useChat } from '../contexts/ChatContext';
@@ -23,10 +15,6 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
   const { clearMessages } = useChat();
-  const defaultSuggestion = useMemo(
-    () => 'Busco un ahumador portátil para showcooking en sala',
-    []
-  );
 
   // Función para limpiar el chat
   const handleClearChat = () => {
@@ -45,77 +33,6 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     // Si expande manualmente, también marcar para evitar conflictos
     setHasAutoExpanded(true);
   };
-
-  const handleOpenFromCollapsed = () => {
-    setIsExpanded(true);
-    setHasAutoExpanded(true);
-  };
-
-  const collapsedView = (
-    <div className="relative flex flex-col rounded-[40px] border border-white/8 bg-[#0b1220]/90 shadow-[0_35px_120px_-40px_rgba(6,13,26,0.9)] backdrop-blur-2xl px-6 py-7 text-white">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-white">ChefCopilot</h2>
-          <p className="mt-1 text-sm text-white/65">
-            Tu asesor experto en cocina profesional
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={handleOpenFromCollapsed}
-            className="p-2 rounded-full hover:bg-white/10 transition text-white/70 hover:text-white"
-            aria-label="Expandir"
-            type="button"
-          >
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button
-            onClick={() => setIsOpen(false)}
-            className="p-2 rounded-full hover:bg-white/10 transition text-white/70 hover:text-white"
-            aria-label="Cerrar"
-            type="button"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-6">
-        <div className="relative flex items-center gap-3 rounded-[24px] border border-white/10 bg-white/4 px-5 py-4 shadow-inner">
-          <input
-            type="text"
-            placeholder="Pregunta cualquier cosa..."
-            className="flex-1 bg-transparent text-base text-white placeholder:text-white/40 focus:outline-none cursor-pointer"
-            onFocus={handleOpenFromCollapsed}
-            readOnly
-          />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleOpenFromCollapsed}
-              className="p-2 rounded-full hover:bg-white/10 transition text-white/70 hover:text-white"
-              aria-label="Hablar"
-              type="button"
-            >
-              <Mic className="h-5 w-5" />
-            </button>
-            <button
-              onClick={handleOpenFromCollapsed}
-              className="p-2 rounded-full bg-white/15 hover:bg-white/25 transition text-white"
-              aria-label="Enviar"
-              type="button"
-            >
-              <Send className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5 flex items-center gap-2 text-sm text-white/55">
-        <Search className="h-4 w-4" />
-        <span>{defaultSuggestion}</span>
-      </div>
-    </div>
-  );
 
   return (
     <>
@@ -217,107 +134,142 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
       )}
 
       {/* Modal flotante - esquina superior derecha */}
-      <div
+      <div 
         className={`fixed z-50 transition-all duration-300 ${
-          isOpen
-            ? (isExpanded
-                ? 'top-0 right-0 md:top-10 md:right-10 w-full md:w-[880px] h-full md:h-[calc(100vh-5rem)] opacity-100 pointer-events-auto'
-                : 'bottom-14 right-14 w-full max-w-[420px] opacity-100 pointer-events-auto')
+          isOpen 
+            ? (isExpanded 
+                ? 'top-0 right-0 md:top-6 md:right-6 w-full md:w-[800px] h-full md:h-[calc(100vh-3rem)] opacity-100 pointer-events-auto' 
+                : 'top-6 right-6 w-full md:w-[400px] h-[650px] opacity-100 pointer-events-auto')
             : 'opacity-0 pointer-events-none invisible'
         }`}
       >
-        {isExpanded ? (
-          <div className="relative flex h-full flex-col overflow-hidden rounded-[32px] border border-white/8 bg-[#0b1220]/95 shadow-[0_40px_140px_-40px_rgba(3,8,18,0.9)] backdrop-blur-2xl">
-            <div className="absolute inset-0 bg-white/6 pointer-events-none" style={{ maskImage: 'radial-gradient(circle at top, rgba(0,0,0,0.75), transparent 60%)' }} />
-            <div className="absolute inset-0 border border-white/10 rounded-[32px] pointer-events-none mix-blend-screen" />
+        {/* Contenedor principal con esquinas redondeadas y sombra */}
+        <div className={`bg-[#202020] shadow-2xl flex flex-col h-full overflow-hidden border border-gray-700/50 ${
+          isExpanded ? 'md:rounded-2xl' : 'rounded-2xl'
+        }`}>
+          {/* Header con botones de control */}
+          <div className="px-6 py-4 border-b border-gray-700/50">
+            {/* Primera fila: botones y título */}
+            <div className="flex items-center justify-between mb-3">
+              {/* Botón cerrar (X) - esquina superior izquierda */}
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  setIsExpanded(false);
+                }}
+                className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
+                aria-label="Cerrar"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
 
-            {/* Header */}
-            <div className="relative border-b border-white/10 px-6 py-5">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10">
-                    <Sparkles className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
-                    <p className="text-xs text-white/60">
-                      Tu asesor experto en cocina profesional
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleToggleExpand}
-                    className="p-2 rounded-lg hover:bg-white/10 transition text-white/60 hover:text-white"
-                    aria-label={isExpanded ? 'Contraer' : 'Expandir'}
-                    type="button"
-                  >
-                    {isExpanded ? (
-                      <Minimize2 className="h-5 w-5" />
-                    ) : (
-                      <Maximize2 className="h-5 w-5" />
-                    )}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleClearChat();
-                    }}
-                    className="p-2 rounded-lg hover:bg-white/10 transition text-white/60 hover:text-white"
-                    aria-label="Limpiar conversación"
-                    title="Limpiar conversación"
-                    type="button"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsOpen(false);
-                      setIsExpanded(false);
-                    }}
-                    className="p-2 rounded-lg hover:bg-white/10 transition text-white/60 hover:text-white"
-                    aria-label="Cerrar"
-                    type="button"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
+              {/* Logo y descripción de ChefCopilot - alineado a la izquierda */}
+              <div className="flex-1 text-left ml-4">
+                <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
+                <p className="text-xs text-gray-400">Tu asesor experto en cocina profesional</p>
               </div>
-              <p className="mt-3 text-xs text-white/55 leading-relaxed">
+
+              {/* Botones de control - esquina superior derecha */}
+              <div className="flex items-center gap-2">
+              <button
+                onClick={handleToggleExpand}
+                className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
+                aria-label={isExpanded ? "Contraer" : "Expandir"}
+              >
+                {isExpanded ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+                    />
+                  </svg>
+                )}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClearChat();
+                }}
+                className="p-2 hover:bg-[#2a2a2a] rounded-lg transition text-gray-400 hover:text-white"
+                aria-label="Limpiar conversación"
+                title="Limpiar conversación"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+              </button>
+              </div>
+            </div>
+            
+            {/* Segunda fila: texto descriptivo */}
+            <div className="text-left">
+              <p className="text-xs text-gray-400">
                 Explora productos, técnicas, accesorios o platos con un asistente que habla tu idioma culinario.
               </p>
             </div>
-
-            {/* Contenido del chat */}
-            <div className="flex-1 overflow-hidden">
-              <Chat
-                config={config}
-                isExpanded={isExpanded}
-                onFirstMessage={() => {
-                  if (!isExpanded && !hasAutoExpanded) {
-                    setIsExpanded(true);
-                    setHasAutoExpanded(true);
-                  }
-                }}
-              />
-            </div>
           </div>
-        ) : (
-          collapsedView
-        )}
+
+          {/* Contenido del chat */}
+          <div className="flex-1 overflow-hidden">
+            <Chat 
+              config={config}
+              isExpanded={isExpanded}
+              onFirstMessage={() => {
+                if (!isExpanded && !hasAutoExpanded) {
+                  setIsExpanded(true);
+                  setHasAutoExpanded(true);
+                }
+              }}
+            />
+          </div>
+        </div>
       </div>
     </>
   );

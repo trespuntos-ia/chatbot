@@ -37,6 +37,25 @@ function getFunctionLabel(functionName: string): string {
   return FUNCTION_LABELS[functionName] || `Función ${functionName}`;
 }
 
+const SEMANTIC_UNDERSTANDING_DEFAULT_MODEL =
+  process.env.OPENAI_COMPREHENSION_MODEL || 'gpt-4o-mini';
+
+type SemanticUnderstanding = {
+  product_focus?: boolean;
+  intent?: 'buy' | 'compare' | 'info' | 'search' | 'support' | 'other';
+  confidence?: number;
+  categories?: string[];
+  search_terms?: string[];
+  summary?: string;
+};
+
+type IntentResult = {
+  intent: 'buy' | 'compare' | 'info' | 'search';
+  urgency: 'high' | 'medium' | 'low';
+  source?: 'heuristic' | 'semantic' | 'merged';
+  confidence?: number;
+};
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
@@ -281,10 +300,6 @@ export default async function handler(
               type: 'string',
               description: 'Nombre de la categoría (ej: "Cocina", "Herramientas", "Hogar").'
             },
-            subcategory: {
-              type: 'string',
-              description: 'Nombre de la subcategoría específica dentro de la categoría (opcional).'
-            },
             query: {
               type: 'string',
               description: 'Texto de búsqueda adicional para filtrar dentro de la categoría (opcional).'
@@ -423,16 +438,54 @@ export default async function handler(
       }
     ];
 
-    // 5. Detectar intención del usuario con heurística básica
-    const userIntent = detectUserIntent(message);
-    const isComparisonQuery = userIntent.intent === 'compare';
-    
-    // 6. Detectar si el mensaje es sobre productos para forzar búsqueda
-    // PERO solo si NO es una pregunta de comparación
-    const isProductQuery =
-      detectProductQuery(message) && !isComparisonQuery;
+    // 5. Comprensión semántica previa (opcional con modelo ligero)
+    const enableSemanticUnderstanding = config?.enableSemanticUnderstanding !== false;
+    let semanticUnderstanding: SemanticUnderstanding | null = null;
 
-    // 7. Preparar mensajes para OpenAI (con historial limitado)
+    if (enableSemanticUnderstanding) {
+      const semanticStart = Date.now();
+      try {
+        semanticUnderstanding = await analyzeMessageUnderstanding(openai, message, {
+          model: config?.semanticUnderstandingModel,
+          timeoutMs: config?.semanticUnderstandingTimeoutMs
+        });
+      } catch (semanticError) {
+        console.warn('[Chat API] Semantic understanding failed:', semanticError);
+      } finally {
+        recordStep('Comprensión semántica (OpenAI)', semanticStart);
+      }
+    }
+
+    // 6. Detectar intención del usuario combinando heurísticas + comprensión semántica
+    const heuristicIntent = detectUserIntent(message);
+    const semanticIntent = normalizeSemanticIntent(semanticUnderstanding?.intent);
+    const userIntent = mergeIntentSignals(
+      heuristicIntent,
+      semanticIntent,
+      semanticUnderstanding?.confidence
+    );
+    const isComparisonQuery = userIntent.intent === 'compare';
+
+    // 7. Detectar categoría y término de búsqueda con señales semánticas adicionales
+    const semanticCategory = selectSemanticCategory(semanticUnderstanding);
+    const detectedCategory = semanticCategory || detectCategoryInMessage(message);
+
+    const heuristicSearchTerm = extractSearchTermFromMessage(message);
+    const searchTermForQuery = selectSearchTermCandidate(
+      heuristicSearchTerm,
+      semanticUnderstanding?.search_terms || []
+    );
+    const searchTermForInstructions = searchTermForQuery || heuristicSearchTerm;
+
+    // 8. Detectar si el mensaje es sobre productos para forzar búsqueda
+    // PERO solo si NO es una pregunta de comparación
+    const semanticProductFocus =
+      semanticUnderstanding?.product_focus === true &&
+      (semanticUnderstanding?.confidence ?? 0) >= 0.45;
+    const isProductQuery =
+      (semanticProductFocus || detectProductQuery(message)) && !isComparisonQuery;
+
+    // 9. Preparar mensajes para OpenAI (con historial limitado)
     // Añadir instrucción adicional al system prompt si es una pregunta sobre productos
     let enhancedSystemPrompt = systemPrompt;
     if (isComparisonQuery) {
@@ -463,15 +516,63 @@ export default async function handler(
     let completion;
     let openaiCall1Start = 0;
     try {
+      // Si es una pregunta sobre productos, forzar búsqueda
       let toolChoice: any = 'auto';
+      if (isComparisonQuery) {
+        // Para comparaciones, NO forzar search_products, dejar que OpenAI elija compare_products
+        // O extraer nombres y llamar directamente
+        toolChoice = 'auto'; // Dejar que OpenAI elija compare_products automáticamente
+      } else if (isProductQuery) {
+        if (detectedCategory) {
+          // Si hay categoría detectada, forzar búsqueda en esa categoría con términos relevantes
+          const categoryQuery = searchTermForInstructions
+            ? buildCategorySearchQuery(searchTermForInstructions, detectedCategory)
+            : undefined;
+          const instructionQuery = categoryQuery || searchTermForInstructions;
 
-      if (isProductQuery && heuristicSearchTerm && heuristicSearchTerm !== message.trim()) {
-        messages[messages.length - 1] = {
-          role: 'user',
-          content: `${message}\n\n[Nota: Si necesitas datos reales de productos, puedes usar la función search_products con "${heuristicSearchTerm}"]`
-        };
+          messages[messages.length - 1] = {
+            role: 'user',
+            content: `${message}\n\n[IMPORTANTE: El usuario pregunta sobre "${detectedCategory}". DEBES usar search_products_by_category con category="${detectedCategory}"${instructionQuery ? ` y query="${instructionQuery}"` : ''} para buscar productos relevantes dentro de esa categoría.]`
+          };
+
+          const categoryFunctionArgs: any = {
+            category: detectedCategory
+          };
+          if (categoryQuery) {
+            categoryFunctionArgs.query = categoryQuery;
+          } else if (searchTermForQuery) {
+            categoryFunctionArgs.query = searchTermForQuery;
+          }
+
+          toolChoice = {
+            type: 'function' as const,
+            function: {
+              name: 'search_products_by_category',
+              arguments: JSON.stringify(categoryFunctionArgs)
+            }
+          };
+        } else {
+          // Extraer término de búsqueda del mensaje para añadirlo como contexto
+          // Añadir el término de búsqueda al mensaje del usuario para que OpenAI lo use
+          if (
+            searchTermForInstructions &&
+            searchTermForInstructions !== message.trim()
+          ) {
+            messages[messages.length - 1] = {
+              role: 'user',
+              content: `${message}\n\n[IMPORTANTE: Busca productos relacionados con "${searchTermForInstructions}" usando la función search_products]`
+            };
+          }
+          // Forzar el uso de search_products
+          toolChoice = { 
+            type: 'function' as const, 
+            function: { 
+              name: 'search_products'
+            } 
+          };
+        }
       }
-
+      
       openaiCall1Start = Date.now();
       console.time('openai_call_1');
       completion = await Promise.race([
@@ -610,10 +711,374 @@ export default async function handler(
       // Si no hay resultados, intentar generar alternativas automáticas
       if (
         functionName === 'search_products' &&
-        (!functionResult.products || functionResult.products.length === 0)
+        (!functionResult.products || functionResult.products.length === 0) &&
+        functionArgs && typeof functionArgs.query === 'string' && functionArgs.query.trim().length > 0 &&
+        functionArgs.query.trim().length >= 6
       ) {
-        console.log('No products found for query', functionArgs?.query);
+        try {
+          const originalQuery = functionArgs.query.trim();
+          const clarifyResult = await clarifySearchIntent(supabase, { original_query: originalQuery });
+
+          const suggestionQueries = (clarifyResult?.suggestions || [])
+            .map((q: string) => q.trim())
+            .filter((q: string) => q.length > 0 && q.toLowerCase() !== originalQuery.toLowerCase());
+
+          const alternativeProducts: any[] = [];
+          const seenProductIds = new Set<string>();
+
+          for (const suggestion of suggestionQueries) {
+            const altResult = await searchProducts(supabase, { query: suggestion, limit: 3 });
+            if (altResult?.products && altResult.products.length > 0) {
+              altResult.products.forEach((product: any) => {
+                const key = String(product.id || product.sku || product.name);
+                if (!seenProductIds.has(key) && alternativeProducts.length < 5) {
+                  seenProductIds.add(key);
+                  alternativeProducts.push(product);
+                }
+              });
+            }
+
+            if (alternativeProducts.length >= 5) {
+              break;
+            }
+          }
+
+          if (suggestionQueries.length > 0) {
+            functionResult.search_suggestions = suggestionQueries;
+          }
+          if (alternativeProducts.length > 0) {
+            functionResult.alternative_products = alternativeProducts;
+          }
+        } catch (alternativeSearchError) {
+          console.error('Alternative search attempt failed:', alternativeSearchError);
+        }
       }
+
+      const searchTermForResult = selectSearchTermCandidate(
+        (functionArgs && typeof functionArgs.query === 'string') ? functionArgs.query : undefined,
+        semanticUnderstanding?.search_terms || [],
+        [searchTermForQuery, heuristicSearchTerm]
+      );
+
+      if (shouldUseQuickResponse(functionName, functionResult, userIntent)) {
+        const product = functionResult.products[0];
+        const quickMessage = buildQuickResponse(
+          product,
+          searchTermForResult,
+          userIntent
+        );
+
+        totalTokens = firstCallTokens || 0;
+
+        const responseTime = Date.now() - startTime;
+        const saveAnalyticsStart = Date.now();
+        const conversationId = await saveConversationToAnalytics(
+          supabase,
+          sessionId || 'default',
+          message,
+          quickMessage,
+          functionName,
+          functionResult.products,
+          functionArgs?.category || functionArgs?.subcategory,
+          model,
+          responseTime,
+          totalTokens
+        );
+        recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
+
+        const finalTimings = buildTimings();
+        const assistantMessage = {
+          role: 'assistant',
+          content: quickMessage,
+          function_calls: [toolCall],
+          products: functionResult.products,
+          sources: ['products_db'],
+          quick_response: true,
+          response_timings: finalTimings
+        };
+
+        res.status(200).json({
+          success: true,
+          message: quickMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          conversation_id: conversationId,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            assistantMessage
+          ],
+          timings: finalTimings
+        });
+        return;
+      }
+
+      if (shouldUseStructuredResponse(functionName, functionResult, userIntent)) {
+        const structuredMessage = buildStructuredResponse(
+          functionResult.products,
+          searchTermForResult,
+          userIntent,
+          functionArgs?.category || functionArgs?.subcategory || detectedCategory,
+          functionResult.total
+        );
+
+        totalTokens = firstCallTokens || 0;
+
+        const responseTime = Date.now() - startTime;
+        const saveAnalyticsStart = Date.now();
+        const conversationId = await saveConversationToAnalytics(
+          supabase,
+          sessionId || 'default',
+          message,
+          structuredMessage,
+          functionName,
+          functionResult.products,
+          functionArgs?.category || functionArgs?.subcategory,
+          model,
+          responseTime,
+          totalTokens
+        );
+        recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
+
+        const finalTimings = buildTimings();
+        const assistantMessage = {
+          role: 'assistant',
+          content: structuredMessage,
+          function_calls: [toolCall],
+          products: functionResult.products,
+          sources: ['products_db'],
+          structured_response: true,
+          response_timings: finalTimings
+        };
+
+        res.status(200).json({
+          success: true,
+          message: structuredMessage,
+          function_called: functionName,
+          function_result: functionResult,
+          conversation_id: conversationId,
+          conversation_history: [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            assistantMessage
+          ],
+          timings: finalTimings
+        });
+        return;
+      }
+
+      // Pasar userIntent a searchProducts si es search_products
+      if (functionName === 'search_products' && functionArgs) {
+        functionArgs.userIntent = userIntent;
+      }
+
+      // Preparar contexto enriquecido con instrucciones de validación
+      let enrichedContext = '';
+      
+      // Si es una comparación, usar instrucciones específicas para comparación
+      if (functionName === 'compare_products') {
+        enrichedContext += '\n\n📊 INSTRUCCIONES PARA COMPARAR:\n';
+        enrichedContext += '• Explica las diferencias clave entre los productos (precio, uso, características técnicas).\n';
+        enrichedContext += '• Ofrece un resumen inicial y después una comparación punto por punto.\n';
+        enrichedContext += '• Cierra con una recomendación clara de cuándo elegir cada opción.\n';
+        enrichedContext += '• Evita repetir especificaciones sin contexto; interpreta qué implican para el usuario.\n\n';
+      } else {
+        enrichedContext += '\n\n📋 INSTRUCCIONES PRINCIPALES:\n';
+        enrichedContext += '• Usa la estructura fija: Nombre en negrita, Precio, Categoría (si aplica), Descripción corta (1 frase), Enlace.\n';
+        enrichedContext += '• Ordena la respuesta en bloques: 🏆 RECOMENDADO (1 producto), 🔁 ALTERNATIVAS (siguientes 2), 💡 PUEDE INTERESARTE (resto).\n';
+        enrichedContext += '• Presenta siempre el precio si existe y abre con "He encontrado X productos relacionados con [término]"\n';
+        enrichedContext += '• Si el producto no coincide exactamente, sugiere alternativas dentro de la misma categoría.\n\n';
+        
+        // Añadir instrucciones según la intención detectada
+        if (userIntent.intent === 'buy') {
+          enrichedContext += '• Intención de compra: destaca el precio y anima a usar el enlace para completar la adquisición.\n';
+        } else if (userIntent.intent === 'info') {
+          enrichedContext += '• Intención informativa: incluye características técnicas y aclara para qué sirve cada producto.\n';
+        }
+      }
+      
+      // Añadir instrucciones específicas según el caso
+      if (functionName === 'compare_products') {
+        // Instrucciones específicas para comparación
+        if (functionResult.products && functionResult.products.length >= 2) {
+          enrichedContext += `\n✅ Has encontrado ${functionResult.products.length} productos para comparar.\n`;
+          enrichedContext += 'IMPORTANTE: DEBES crear una comparación detallada explicando las diferencias entre estos productos.\n';
+          enrichedContext += 'NO solo listes los productos. Explica QUÉ los hace diferentes.\n';
+          enrichedContext += `Productos a comparar: ${functionResult.products.map((p: any) => p.name).join(', ')}\n`;
+        } else if (functionResult.products && functionResult.products.length === 1) {
+          enrichedContext += '\n⚠️ Solo se encontró un producto. Explica sus características y menciona que no se pudo encontrar el otro producto para comparar.\n';
+        } else {
+          enrichedContext += '\n⚠️ No se encontraron productos para comparar. Informa al usuario amablemente.\n';
+        }
+      } else if (functionResult.products && functionResult.products.length > 1) {
+        enrichedContext += '\n⚠️ IMPORTANTE: Has encontrado múltiples productos (ya ordenados por relevancia). Presenta los más relevantes primero.\n';
+      } else if (functionResult.products && functionResult.products.length === 1) {
+        const product = functionResult.products[0];
+        enrichedContext += '\n✅ Has encontrado un producto específico. Preséntalo con todos sus detalles.\n';
+        // Verificar si el nombre coincide exactamente con la búsqueda
+        if (functionArgs.query && typeof functionArgs.query === 'string') {
+          const searchTerm = functionArgs.query.toLowerCase().trim();
+          const productName = product.name.toLowerCase();
+          if (!productName.includes(searchTerm) && !searchTerm.includes(productName.split(' ')[0])) {
+            enrichedContext += '⚠️ Nota: El producto encontrado puede no coincidir exactamente con la búsqueda. Asegúrate de mencionar el nombre completo.\n';
+          }
+        }
+        
+        // Buscar contenido web adicional para el producto encontrado (solo si no hay múltiples productos)
+        // Esto se hace después de la primera respuesta para no bloquear
+        // Por ahora, el contenido web se busca directamente en la función search_web_content
+      } else if (functionResult.products && functionResult.products.length === 0) {
+        // Detectar si hay una categoría detectada o consultada
+        const categoryConsulted = functionArgs.category || detectedCategory;
+        
+        const noResultIntro = categoryConsulted
+          ? `No hay coincidencias exactas en la categoría "${categoryConsulted}".`
+          : 'No hay productos que coincidan exactamente con la búsqueda.';
+
+        enrichedContext += `\n⚠️ ${noResultIntro} Construye una respuesta breve con estos pasos:\n`;
+        enrichedContext += '• Muestra empatía y ofrece ayuda inmediata.\n';
+        if (categoryConsulted) {
+          enrichedContext += `• Pregunta qué tipo de ${categoryConsulted.toLowerCase()} necesita (material, tamaño, uso).\n`;
+        }
+        enrichedContext += '• Usa las sugerencias generadas para proponer términos o categorías nuevas.\n';
+        enrichedContext += '• Invita al usuario a detallar mejor la necesidad para que puedas refinar la búsqueda.\n';
+
+        if (functionResult.search_suggestions && functionResult.search_suggestions.length > 0) {
+          enrichedContext += '\n🔄 SUGERENCIAS AUTOMÁTICAS:\n';
+          functionResult.search_suggestions.slice(0, 5).forEach((suggestion: string, idx: number) => {
+            enrichedContext += `   ${idx + 1}. ${suggestion}\n`;
+          });
+          enrichedContext += 'Incluye estas opciones como propuestas concretas.\n';
+        }
+
+        if (functionResult.alternative_products && functionResult.alternative_products.length > 0) {
+          enrichedContext += '\n🧾 PRODUCTOS ALTERNATIVOS DISPONIBLES:\n';
+          functionResult.alternative_products.slice(0, 3).forEach((product: any, idx: number) => {
+            const priceInfo = product.price ? ` - ${product.price}` : '';
+            const categoryInfo = product.category ? ` (${product.category})` : '';
+            enrichedContext += `   ${idx + 1}. ${product.name}${priceInfo}${categoryInfo}\n`;
+          });
+          enrichedContext += 'Preséntalos como opciones sugeridas si encajan con la necesidad.\n';
+        }
+        
+        // Generar sugerencias automáticas mejoradas
+        if (functionArgs.query && typeof functionArgs.query === 'string') {
+          const suggestions = await generateSearchSuggestions(supabase, functionArgs.query);
+          if (suggestions.length > 0) {
+            enrichedContext += '\n💡 SUGERENCIAS DE BÚSQUEDA ALTERNATIVAS:\n';
+            suggestions.slice(0, 5).forEach((suggestion, idx) => {
+              enrichedContext += `   ${idx + 1}. "${suggestion}"\n`;
+            });
+            enrichedContext += '\nPuedes sugerir al usuario que pruebe con estos términos de forma amigable.\n';
+          }
+          
+          // Buscar productos similares por categorías relacionadas (OPTIMIZADO - más rápido)
+          enrichedContext += '\n🔍 BÚSQUEDA AUTOMÁTICA DE PRODUCTOS SIMILARES:\n';
+          enrichedContext += 'Intenta buscar productos en categorías relacionadas o con términos similares.\n';
+          
+          // Buscar categorías relacionadas de forma más eficiente (con timeout para no bloquear)
+          // Hacer esto en paralelo con otras operaciones si es posible, o con timeout corto
+          try {
+            // Usar Promise.race para limitar el tiempo de búsqueda a máximo 2 segundos
+            const categoriesQuery = supabase
+              .from('products')
+              .select('category')
+              .not('category', 'is', null)
+              .limit(10); // Reducir límite para ser más rápido
+            
+            const categoriesResult: { data?: any[] | null } | null = await Promise.race([
+              categoriesQuery,
+              new Promise<{ data: null }>((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout')), 2000)
+              )
+            ]).catch(() => ({ data: null }));
+            
+            if (categoriesResult && categoriesResult.data && Array.isArray(categoriesResult.data) && categoriesResult.data.length > 0) {
+              const uniqueCategories = [...new Set(categoriesResult.data.map((c: any) => c.category))];
+              const normalizedQuery = normalizeText(functionArgs.query);
+              
+              // Buscar categorías que contengan palabras de la búsqueda (más rápido)
+              const queryWords = normalizedQuery.split(' ').filter(w => w.length > 3);
+              const relatedCategories = uniqueCategories.filter((cat: string) => {
+                const normalizedCat = normalizeText(cat);
+                return queryWords.some(word => normalizedCat.includes(word));
+              });
+              
+              if (relatedCategories.length > 0) {
+                enrichedContext += `\nCategorías relacionadas encontradas: ${relatedCategories.slice(0, 3).join(', ')}\n`;
+                enrichedContext += 'Puedes sugerir al usuario que busque en estas categorías.\n';
+              }
+            }
+          } catch (error) {
+            // Silenciar errores de timeout - no es crítico
+            // No bloquear la respuesta si esto falla
+          }
+        }
+        
+        // Instrucción para generar respuesta con OpenAI cuando no hay resultados
+        enrichedContext += '\n\n⚠️ IMPORTANTE: Como no hay resultados, genera una respuesta empática y útil usando OpenAI.\n';
+        enrichedContext += 'No uses respuestas genéricas. Sé específico y ofrece alternativas concretas.\n';
+      }
+      
+      // Formatear productos para mejor presentación (OPTIMIZADO - menos productos)
+      if (functionResult.products && functionResult.products.length > 0) {
+        enrichedContext += '\n\n📦 PRODUCTOS ENCONTRADOS (formateados para mejor presentación):\n';
+        enrichedContext += formatProductsForPrompt(functionResult.products, 3); // Reducido de 5 a 3 para mayor velocidad
+        enrichedContext += '\n\nUsa esta información formateada para crear una respuesta clara y estructurada.\n';
+      }
+      
+      // Scraping desactivado temporalmente - comentado para evitar FUNCTION_INVOCATION_FAILED
+      // TODO: Reactivar cuando se implemente scraping asíncrono o con mejor manejo de errores
+      /*
+      if (functionResult.products && functionResult.products.length > 0) {
+        const productsWithWebData = functionResult.products.filter((p: any) => p.webData);
+        if (productsWithWebData.length > 0) {
+          enrichedContext += '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
+          productsWithWebData.forEach((product: any, idx: number) => {
+            enrichedContext += `\nProducto ${idx + 1}: ${product.name}\n`;
+            if (product.webData?.description) {
+              enrichedContext += `- Descripción completa: ${product.webData.description}\n`;
+            }
+            if (product.webData?.features && product.webData.features.length > 0) {
+              enrichedContext += `- Características: ${product.webData.features.join(', ')}\n`;
+            }
+            if (product.webData?.specifications) {
+              const specs = Object.entries(product.webData.specifications)
+                .slice(0, 5)
+                .map(([key, value]) => `${key}: ${value}`)
+                .join(', ');
+              if (specs) {
+                enrichedContext += `- Especificaciones: ${specs}\n`;
+              }
+            }
+            if (product.webData?.availableColors && product.webData.availableColors.length > 0) {
+              enrichedContext += `- Colores disponibles: ${product.webData.availableColors.join(', ')}\n`;
+            }
+          });
+        }
+      } else if (functionResult.product && functionResult.product.webData) {
+        const product = functionResult.product;
+        enrichedContext += '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
+        if (product.webData.description) {
+          enrichedContext += `- Descripción completa: ${product.webData.description}\n`;
+        }
+        if (product.webData.features && product.webData.features.length > 0) {
+          enrichedContext += `- Características: ${product.webData.features.join(', ')}\n`;
+        }
+        if (product.webData.specifications) {
+          const specs = Object.entries(product.webData.specifications)
+            .slice(0, 5)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join(', ');
+          if (specs) {
+            enrichedContext += `- Especificaciones: ${specs}\n`;
+          }
+        }
+        if (product.webData.availableColors && product.webData.availableColors.length > 0) {
+          enrichedContext += `- Colores disponibles: ${product.webData.availableColors.join(', ')}\n`;
+        }
+      }
+      */
 
       // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
       // Limitar el tamaño del contexto enriquecido para mayor velocidad (OPTIMIZADO)
@@ -1240,137 +1705,166 @@ function extractSearchTermFromMessage(message: string): string {
 
 // Función para detectar categorías comunes en el mensaje
 const MAX_CONTEXT_CHAR_LENGTH = 1500;
+const QUICK_RESPONSE_SCORE_THRESHOLD = 220;
 
-function buildNgrams(tokens: string[], size: number): Set<string> {
-  const result = new Set<string>();
-  if (tokens.length < size) {
-    return result;
-  }
-
-  for (let i = 0; i <= tokens.length - size; i++) {
-    result.add(tokens.slice(i, i + size).join(' '));
-  }
-
-  return result;
-}
-
-function detectCategoryInMessage(message: string): CategoryDetectionResult | null {
-  const normalizedMessage = normalizeText(message);
-  if (!normalizedMessage) {
-    return null;
-  }
-
-  const tokens = normalizedMessage.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) {
-    return null;
-  }
-
-  const tokenSet = new Set(tokens);
-  const bigrams = buildNgrams(tokens, 2);
-  const trigrams = buildNgrams(tokens, 3);
-
-  let best: CategoryDetectionResult | null = null;
-
-  for (const pattern of COMPILED_CATEGORY_PATTERNS) {
-    let score = 0;
-    const matches = new Set<string>();
-
-    pattern.normalizedPhrases.forEach(phrase => {
-      if (phrase && normalizedMessage.includes(phrase)) {
-        score += 8;
-        matches.add(phrase);
-      }
-    });
-
-    pattern.normalizedKeywords.forEach(keyword => {
-      if (!keyword) {
-        return;
-      }
-
-      if (keyword.includes(' ')) {
-        if (normalizedMessage.includes(keyword)) {
-          score += keyword.split(' ').length >= 2 ? 6 : 4;
-          matches.add(keyword);
-        }
-        return;
-      }
-
-      if (tokenSet.has(keyword)) {
-        score += 4;
-        matches.add(keyword);
-        return;
-      }
-
-      if (bigrams.has(keyword) || trigrams.has(keyword)) {
-        score += 3.5;
-        matches.add(keyword);
-        return;
-      }
-
-      const prefixMatch = Array.from(tokenSet).some(token => token.startsWith(keyword) && keyword.length >= 4);
-      if (prefixMatch) {
-        score += 2.5;
-        matches.add(keyword);
-        return;
-      }
-
-      if (normalizedMessage.includes(keyword) && keyword.length >= 5) {
-        score += 1.5;
-        matches.add(keyword);
-      }
-    });
-
-    if (pattern.boosts) {
-      pattern.boosts.forEach(boostKeyword => {
-        const normalizedBoost = normalizeText(boostKeyword);
-        if (normalizedBoost && normalizedMessage.includes(normalizedBoost)) {
-          score += 1;
-          matches.add(normalizedBoost);
-        }
-      });
+function detectCategoryInMessage(message: string): string | null {
+  const lowerMessage = message.toLowerCase();
+  
+  // Mapa de palabras clave de categorías comunes (palabra clave -> categoría)
+  const categoryKeywords: { [key: string]: string } = {
+    // Vajilla y platos
+    'plato': 'Vajilla',
+    'platos': 'Vajilla',
+    'vajilla': 'Vajilla',
+    'copa': 'Vajilla',
+    'copas': 'Vajilla',
+    'vaso': 'Vajilla',
+    'vasos': 'Vajilla',
+    'cubierto': 'Vajilla',
+    'cubiertos': 'Vajilla',
+    'cuchillo': 'Vajilla',
+    'cuchillos': 'Vajilla',
+    'tenedor': 'Vajilla',
+    'tenedores': 'Vajilla',
+    'cuchara': 'Vajilla',
+    'cucharas': 'Vajilla',
+    'servilleta': 'Vajilla',
+    'servilletas': 'Vajilla',
+    'tapa': 'Vajilla',
+    'tapas': 'Vajilla',
+    'presentación': 'Vajilla',
+    'presentacion': 'Vajilla',
+    'presentaciones': 'Vajilla',
+    'bandeja': 'Vajilla',
+    'bandejas': 'Vajilla',
+    'fuente': 'Vajilla',
+    'fuentes': 'Vajilla',
+    'platillo': 'Vajilla',
+    'platillos': 'Vajilla',
+    
+    // Herramientas
+    'herramienta': 'Herramientas',
+    'herramientas': 'Herramientas',
+    'utensilio': 'Utensilios',
+    'utensilios': 'Utensilios',
+    'cuchillo de cocina': 'Herramientas',
+    'tijeras': 'Herramientas',
+    'pelador': 'Herramientas',
+    'rallador': 'Herramientas',
+    
+    // Equipamiento
+    'equipamiento': 'Equipamiento',
+    'equipo': 'Equipamiento',
+    'máquina': 'Equipamiento',
+    'maquina': 'Equipamiento',
+    'aparato': 'Equipamiento',
+    'aparatos': 'Equipamiento',
+    
+    // Cocina
+    'sartén': 'Cocina',
+    'sarten': 'Cocina',
+    'sartenes': 'Cocina',
+    'olla': 'Cocina',
+    'ollas': 'Cocina',
+    'cacerola': 'Cocina',
+    'cacerolas': 'Cocina',
+    'plancha': 'Cocina',
+    'planchas': 'Cocina',
+    
+    // Postres y repostería
+    'postre': 'Repostería',
+    'postres': 'Repostería',
+    'repostería': 'Repostería',
+    'reposteria': 'Repostería',
+    'dulce': 'Repostería',
+    'dulces': 'Repostería',
+    'pastelero': 'Pastelería',
+    'pastelera': 'Pastelería',
+    'pastelería': 'Pastelería',
+    'pasteleria': 'Pastelería',
+    'repostero': 'Pastelería',
+    'repostera': 'Pastelería',
+    'pastel': 'Pastelería',
+    'pasteles': 'Pastelería',
+    'cupcake': 'Pastelería',
+    'cupcakes': 'Pastelería',
+    'tarta': 'Pastelería',
+    'tartas': 'Pastelería',
+    'bizcocho': 'Pastelería',
+    'bizcochos': 'Pastelería',
+    'bombón': 'Chocolate',
+    'bombon': 'Chocolate',
+    'bombones': 'Chocolate',
+    'chocolate': 'Chocolate',
+    'chocolates': 'Chocolate',
+    'chocolatero': 'Chocolate',
+    'chocolatera': 'Chocolate',
+    'cacao': 'Chocolate',
+    'ganache': 'Chocolate',
+    'atemperar': 'Chocolate',
+    'templar': 'Chocolate',
+    'refinar': 'Maquinaria',
+    'refinador': 'Maquinaria',
+    'refinadora': 'Maquinaria',
+    'refinadoras': 'Maquinaria',
+    'molino': 'Maquinaria',
+    'molinos': 'Maquinaria',
+    
+    // Bebidas
+    'bebida': 'Bebidas',
+    'bebidas': 'Bebidas',
+    'coctel': 'Bebidas',
+    'cóctel': 'Bebidas',
+    'cocktail': 'Bebidas',
+    'cerveza': 'Bebidas',
+    'vino': 'Bebidas',
+    
+    // Textil
+    'textil': 'Textil',
+    'textiles': 'Textil',
+    'tela': 'Textil',
+    'telas': 'Textil',
+    'ropa': 'Textil',
+    'mantel': 'Textil',
+    'manteles': 'Textil',
+    'delantal': 'Textil',
+    'delantales': 'Textil',
+    
+    // Limpieza
+    'limpieza': 'Limpieza',
+    'limpiar': 'Limpieza',
+    'detergente': 'Limpieza',
+    'detergentes': 'Limpieza',
+    'desinfectante': 'Limpieza',
+    
+    // Almacenamiento
+    'almacenamiento': 'Almacenamiento',
+    'contenedor': 'Almacenamiento',
+    'contenedores': 'Almacenamiento',
+    'recipiente': 'Almacenamiento',
+    'recipientes': 'Almacenamiento',
+    'tupper': 'Almacenamiento',
+    'tapper': 'Almacenamiento',
+    
+    // Decoración
+    'decoración': 'Decoración',
+    'decoracion': 'Decoración',
+    'decorativo': 'Decoración',
+    'decorativos': 'Decoración',
+    'centro de mesa': 'Decoración',
+    'centro de mesas': 'Decoración',
+  };
+  
+  // Buscar palabras clave de categorías
+  for (const [keyword, category] of Object.entries(categoryKeywords)) {
+    // Buscar como palabra completa (con límites de palabra)
+    const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(lowerMessage)) {
+      return category;
     }
-
-    if (matches.size === 0) {
-      continue;
-    }
-
-    const priority = pattern.priority ?? 1;
-    const adjustedScore = score * priority;
-    const baseForConfidence = 7 + Math.max(matches.size - 1, 0) * 2;
-    const confidence = Math.min(1, adjustedScore / (baseForConfidence * priority));
-
-    if (!best || adjustedScore > best.score) {
-      best = {
-        category: pattern.category,
-        subcategory: pattern.subcategory,
-        score: adjustedScore,
-        confidence,
-        matchedKeywords: Array.from(matches),
-        patternId: pattern.id,
-        priority
-      };
-    } else if (adjustedScore === best.score && priority > best.priority) {
-      best = {
-        category: pattern.category,
-        subcategory: pattern.subcategory,
-        score: adjustedScore,
-        confidence,
-        matchedKeywords: Array.from(matches),
-        patternId: pattern.id,
-        priority
-      };
-    }
   }
-
-  if (!best) {
-    return null;
-  }
-
-  if (best.score < 5 && best.confidence < 0.45) {
-    return null;
-  }
-
-  return best;
+  
+  return null;
 }
 
 async function analyzeMessageUnderstanding(
@@ -1558,6 +2052,31 @@ function mergeIntentSignals(
   return { ...heuristicIntent, source: heuristicIntent.source ? heuristicIntent.source : 'heuristic', confidence };
 }
 
+function selectSemanticCategory(semanticUnderstanding: SemanticUnderstanding | null): string | null {
+  if (!semanticUnderstanding || !semanticUnderstanding.categories || semanticUnderstanding.categories.length === 0) {
+    return null;
+  }
+
+  const category = semanticUnderstanding.categories.find(cat => typeof cat === 'string' && cat.trim().length > 0);
+  if (!category) {
+    return null;
+  }
+
+  return formatCategoryName(category);
+}
+
+function formatCategoryName(category: string): string {
+  const trimmed = category.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return trimmed
+    .split(/\s+/)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 function selectSearchTermCandidate(
   primaryCandidate?: string | null,
   semanticTerms: string[] = [],
@@ -1737,6 +2256,150 @@ function promptReducer(text: string): string {
   return filteredLines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
+function buildQuickResponse(product: any, searchTerm: string | undefined, userIntent?: { intent: string }): string {
+  const description = (product.description || '').replace(/\s+/g, ' ').trim();
+  const descriptionPreview = description.length > 160 ? `${description.substring(0, 160)}...` : (description || 'Sin descripción disponible');
+
+  const lines: string[] = [];
+  if (searchTerm && searchTerm.trim().length > 0) {
+    lines.push(`He encontrado un resultado muy relevante para "${searchTerm.trim()}"`);
+  } else {
+    lines.push('He encontrado un producto muy relevante para tu búsqueda');
+  }
+  lines.push('');
+  lines.push(`🏆 **${product.name}**`);
+  lines.push(`💰 Precio: ${product.price || 'No disponible'}`);
+  if (product.category) {
+    lines.push(`📦 Categoría: ${product.category}`);
+  }
+  lines.push(`📝 ${descriptionPreview}`);
+  if (product.product_url) {
+    lines.push(`🔗 [Ver producto](${product.product_url})`);
+  }
+
+  if (userIntent?.intent === 'buy') {
+    lines.push('');
+    lines.push('🛒 Consejo: Haz clic en el enlace para ver detalles o solicitar asistencia con la compra.');
+  }
+
+  lines.push('');
+  lines.push('¿Quieres que te cuente más detalles o te muestre alternativas?');
+
+  return lines.join('\n');
+}
+
+function shouldUseQuickResponse(functionName: string, functionResult: any, userIntent: { intent: string }): boolean {
+  if (functionName !== 'search_products') {
+    return false;
+  }
+
+  if (!functionResult || !Array.isArray(functionResult.products) || functionResult.products.length !== 1) {
+    return false;
+  }
+
+  if (userIntent.intent === 'compare') {
+    return false;
+  }
+
+  const product = functionResult.products[0];
+  const score = product?.relevanceScore ?? product?.relevance_score ?? 0;
+  return score >= QUICK_RESPONSE_SCORE_THRESHOLD;
+}
+
+function shouldUseStructuredResponse(functionName: string, functionResult: any, userIntent: { intent: string }): boolean {
+  if (functionName !== 'search_products' && functionName !== 'search_products_by_category') {
+    return false;
+  }
+
+  if (!functionResult || !Array.isArray(functionResult.products) || functionResult.products.length === 0) {
+    return false;
+  }
+
+  if (functionResult.products.length > 5) {
+    return false;
+  }
+
+  if (userIntent.intent === 'compare') {
+    return false;
+  }
+
+  return true;
+}
+
+function buildStructuredResponse(
+  products: any[],
+  searchTerm: string | undefined,
+  userIntent: { intent: string },
+  category?: string,
+  total?: number
+): string {
+  const lines: string[] = [];
+  const normalizedCategory = category ? category.toLowerCase() : undefined;
+  const totalCount = typeof total === 'number' && total > 0 ? total : products.length;
+
+  if (searchTerm && searchTerm.trim().length > 0) {
+    if (normalizedCategory) {
+      lines.push(`He encontrado ${totalCount} producto(s) para "${searchTerm.trim()}" en ${category}.`);
+    } else {
+      lines.push(`He encontrado ${totalCount} producto(s) para "${searchTerm.trim()}".`);
+    }
+  } else if (normalizedCategory) {
+    lines.push(`He encontrado ${totalCount} producto(s) destacados en ${category}.`);
+  } else {
+    lines.push(`He encontrado ${totalCount} producto(s) relevantes para tu búsqueda.`);
+  }
+
+  lines.push('');
+
+  const highlight = products[0];
+  const rest = products.slice(1);
+
+  const renderProduct = (product: any, index: number, label?: string) => {
+    const description = (product.description || '').replace(/\s+/g, ' ').trim();
+    const descriptionPreview = description.length > 140 ? `${description.substring(0, 140)}...` : (description || 'Sin descripción disponible');
+    const priceLine = `💰 Precio: ${product.price || 'No disponible'}`;
+    const categoryLine = product.category ? `📦 Categoría: ${product.category}` : undefined;
+    const lines: string[] = [];
+
+    lines.push(`${index}. **${product.name}**${label ? ` — ${label}` : ''}`);
+    lines.push(priceLine);
+    if (categoryLine) {
+      lines.push(categoryLine);
+    }
+    lines.push(`📝 ${descriptionPreview}`);
+    if (product.product_url) {
+      lines.push(`🔗 [Ver producto](${product.product_url})`);
+    }
+    return lines.join('\n');
+  };
+
+  lines.push(renderProduct(highlight, 1, 'TOP')); // principal
+
+  if (rest.length > 0) {
+    lines.push('');
+    lines.push('Otras opciones que podrían interesarte:');
+    rest.forEach((product, idx) => {
+      lines.push('');
+      lines.push(renderProduct(product, idx + 2));
+    });
+  }
+
+  if (totalCount > products.length) {
+    lines.push('');
+    lines.push(`Hay ${totalCount - products.length} producto(s) adicionales disponibles en la base de datos.`);
+  }
+
+  if (userIntent.intent === 'buy') {
+    lines.push('');
+    lines.push('🛒 Si alguno encaja con lo que necesitas, dime y te paso más detalles o te ayudo con el proceso de compra.');
+  } else {
+    lines.push('');
+    lines.push('¿Quieres más detalles, comparar alternativas o ver otros tipos de productos?');
+  }
+
+  return lines.join('\n');
+}
+
 // Función para detectar intención del usuario
 function detectUserIntent(message: string): IntentResult {
   const lowerMessage = message.toLowerCase();
@@ -1778,56 +2441,60 @@ function detectUserIntent(message: string): IntentResult {
 
 // Función para generar sugerencias de búsqueda cuando no hay resultados
 async function generateSearchSuggestions(supabase: any, originalQuery: string): Promise<string[]> {
-  const trimmedQuery = (originalQuery || '').trim();
-  if (!trimmedQuery || trimmedQuery.length < 3) {
+  try {
+    const suggestions: string[] = [];
+    const words = originalQuery.split(/\s+/).filter(w => w.length > 2);
+    
+    // Generar variaciones de palabras
+    words.forEach(word => {
+      const variations = generateWordVariations(word);
+      variations.forEach(variation => {
+        if (variation !== word && variation.length > 2) {
+          const newQuery = originalQuery.replace(word, variation);
+          if (newQuery !== originalQuery && !suggestions.includes(newQuery)) {
+            suggestions.push(newQuery);
+          }
+        }
+      });
+    });
+    
+    // Buscar categorías similares
+    const { data: categories } = await supabase
+      .from('products')
+      .select('category')
+      .not('category', 'is', null)
+      .limit(50);
+    
+    if (categories && categories.length > 0) {
+      const uniqueCategories = [...new Set(categories.map((c: any) => c.category))];
+      const normalizedQuery = normalizeText(originalQuery);
+      
+      // Buscar categorías que contengan palabras de la búsqueda
+      uniqueCategories.forEach((cat: string) => {
+        const normalizedCat = normalizeText(cat);
+        if (normalizedCat.includes(normalizedQuery) || normalizedQuery.includes(normalizedCat.split(' ')[0])) {
+          if (!suggestions.includes(cat)) {
+            suggestions.push(cat);
+          }
+        }
+      });
+    }
+    
+    // Si no hay suficientes sugerencias, crear búsquedas más amplias
+    if (suggestions.length < 3 && words.length > 1) {
+      words.forEach((_, index) => {
+        const shorterQuery = words.filter((_, i) => i !== index).join(' ');
+        if (shorterQuery.length > 0 && !suggestions.includes(shorterQuery)) {
+          suggestions.push(shorterQuery);
+        }
+      });
+    }
+    
+    return suggestions.slice(0, 5);
+  } catch (error) {
+    console.error('Error generating search suggestions:', error);
     return [];
   }
-
-  const normalizedQuery = normalizeText(trimmedQuery);
-  const words = normalizedQuery.split(/\s+/).filter(Boolean);
-
-  const variations = new Set<string>();
-  words.forEach(word => {
-    variations.add(word);
-    if (word.length > 4) {
-      variations.add(word.slice(0, -1));
-      variations.add(word.slice(0, -2));
-    }
-  });
-
-  const tokens = Array.from(variations);
-  const suggestions: string[] = [];
-
-  if (tokens.length > 1) {
-    for (let i = 0; i < tokens.length; i++) {
-      const partial = tokens.filter((_, idx) => idx !== i).join(' ');
-      if (partial.length >= 3) {
-        suggestions.push(partial);
-      }
-    }
-  }
-
-  const singleTerms = tokens.filter(t => t.length >= 3 && !suggestions.includes(t));
-  suggestions.push(...singleTerms);
-
-  const limitedSuggestions = suggestions.slice(0, 5);
-
-  const relatedCategories = await supabase
-    .from('products')
-    .select('category')
-    .ilike('category', `%${trimmedQuery}%`)
-    .limit(5);
-
-  if (relatedCategories?.data) {
-    relatedCategories.data.forEach((row: any) => {
-      const category = row.category?.trim();
-      if (category && !limitedSuggestions.includes(category)) {
-        limitedSuggestions.push(category);
-      }
-    });
-  }
-
-  return limitedSuggestions.slice(0, 5);
 }
 
 // Tabla de sinónimos técnicos y equivalencias
@@ -2148,15 +2815,6 @@ const CATEGORY_STOP_WORDS = new Set([
   'repostería', 'reposteria'
 ]);
 
-function escapeSupabaseFilterValue(value: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    return value;
-  }
-
-  const escapedBackslash = value.replace(/\\/g, '\\\\');
-  return escapedBackslash.replace(/([,()])/g, '\\$1');
-}
-
 // Función para buscar productos (optimizada con búsqueda flexible)
 async function searchProducts(supabase: any, params: any) {
   // Seleccionar solo campos necesarios (incluyendo imagen)
@@ -2196,22 +2854,20 @@ async function searchProducts(supabase: any, params: any) {
         
         // Para cada variación, buscar en cada campo
         uniqueVariations.forEach(variation => {
-          const safeVariation = escapeSupabaseFilterValue(variation);
           // Buscar en nombre (con variaciones)
-          conditions.push(`name.ilike.%${safeVariation}%`);
+          conditions.push(`name.ilike.%${variation}%`);
           // Buscar en descripción
-          conditions.push(`description.ilike.%${safeVariation}%`);
+          conditions.push(`description.ilike.%${variation}%`);
           // Buscar en SKU
-          conditions.push(`sku.ilike.%${safeVariation}%`);
+          conditions.push(`sku.ilike.%${variation}%`);
         });
       });
       
       // También buscar la frase completa sin variaciones (para coincidencias exactas)
       if (searchTerm.length > 3) {
-        const safePhrase = escapeSupabaseFilterValue(searchTerm);
-        conditions.push(`name.ilike.%${safePhrase}%`);
-        conditions.push(`description.ilike.%${safePhrase}%`);
-        conditions.push(`sku.ilike.%${safePhrase}%`);
+        conditions.push(`name.ilike.%${searchTerm}%`);
+        conditions.push(`description.ilike.%${searchTerm}%`);
+        conditions.push(`sku.ilike.%${searchTerm}%`);
       }
         
       if (conditions.length > 0) {
@@ -2646,12 +3302,7 @@ async function searchProductsByCategory(supabase: any, params: any) {
   
   // Búsqueda de texto adicional si se proporciona
   if (params.query) {
-    const safeQuery = escapeSupabaseFilterValue(params.query);
-    query = query.or(`name.ilike.%${safeQuery}%,description.ilike.%${safeQuery}%`);
-  }
-  
-  if (params.subcategory) {
-    query = query.ilike('subcategory', `%${params.subcategory}%`);
+    query = query.or(`name.ilike.%${params.query}%,description.ilike.%${params.query}%`);
   }
   
   const limit = params.limit || 15;
