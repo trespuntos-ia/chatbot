@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ProductsReport } from './ProductsReport';
 import { Connections } from './Connections';
 import { ChatConfig } from './ChatConfig';
@@ -15,7 +15,7 @@ interface AdminSection {
   id: string;
   label: string;
   description: string;
-  content: JSX.Element;
+  content: ReactNode;
 }
 
 export function AdminPage() {
