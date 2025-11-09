@@ -322,7 +322,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
   };
 
   return (
-    <div className="flex flex-col h-full bg-transparent">
+    <div className="flex flex-col h-full bg-[#202020]">
       {/* Mensajes */}
       <div className="flex-1 overflow-y-auto space-y-4 px-6 py-6">
         {/* Mensajes de la conversación */}
