@@ -80,12 +80,21 @@ export interface ResponseTimings {
   steps: ResponseTimingStep[];
 }
 
+export interface ExtraProduct {
+  name: string;
+  price?: string | null;
+  product_url?: string | null;
+  sku?: string | null;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   function_calls?: any[];
   function_result?: any;
   products?: Product[]; // Productos encontrados en esta respuesta
+  extra_products?: ExtraProduct[]; // Productos adicionales (formato texto)
+  extra_count?: number; // Cantidad total de productos adicionales
   sources?: MessageSource[]; // Fuentes de información utilizadas
   conversation_id?: string | null; // ID de la conversación para feedback
   feedback_submitted?: boolean; // Si el usuario ya envió feedback para este mensaje

@@ -1335,12 +1335,17 @@ const SEARCH_TERM_OVERRIDES: { pattern: RegExp; term: string }[] = [
   {
     pattern: /sif[oó]n\s+i?si\s+gourmet\s+whip.*(un\s+litro|1\s*l|1\s+litro)?/i,
     term: 'iSi Gourmet Whip 1L'
+  },
+  {
+    pattern: /paellera\s+mini\s+tapa/i,
+    term: 'Paellera Mini Tapa'
   }
 ];
 
 const STRICT_MATCH_TERMS = new Set([
   'aladin station',
-  'isi gourmet whip 1l'
+  'isi gourmet whip 1l',
+  'paellera mini tapa'
 ]);
 
 function extractSearchTermFromMessage(message: string): string {
