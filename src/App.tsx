@@ -1,12 +1,12 @@
-import { Dashboard } from './components/Dashboard';
 import { ChatWidget } from './components/ChatWidget';
 import { ChatProvider } from './contexts/ChatContext';
 
 function App() {
   return (
     <ChatProvider>
-      <Dashboard />
-      <ChatWidget />
+      <div className="min-h-screen bg-[#f5f6f8]">
+        <ChatWidget />
+      </div>
     </ChatProvider>
   );
 }

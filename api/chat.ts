@@ -1359,7 +1359,6 @@ function extractSearchTermFromMessage(message: string): string {
 }
 
 // Función para detectar categorías comunes en el mensaje
-const MAX_CONTEXT_CHAR_LENGTH = 1500;
 const QUICK_RESPONSE_SCORE_THRESHOLD = 220;
 
 function detectCategoryInMessage(message: string): string | null {
