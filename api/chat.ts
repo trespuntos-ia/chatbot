@@ -2490,8 +2490,8 @@ async function searchProducts(supabase: any, params: any) {
           });
 
           const minWordsRequired = requiredWords.length > 0
-            ? Math.max(1, Math.min(requiredWords.length, Math.ceil(requiredWords.length * 0.6)))
-            : Math.max(1, Math.ceil(relevantWords.length * 0.6));
+            ? Math.max(1, Math.min(requiredWords.length, Math.ceil(requiredWords.length * 0.5)))
+            : Math.max(1, Math.ceil(relevantWords.length * 0.5));
           
         sortedData = sortedData.filter((product: any) => {
           // Combinar todos los campos de texto donde buscar
