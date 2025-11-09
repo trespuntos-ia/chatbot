@@ -127,6 +127,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_55%)]" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_right,_rgba(37,99,235,0.18),_transparent_60%)]" />
           <div className="absolute inset-0 bg-[linear-gradient(140deg,_rgba(5,10,19,0.96)_0%,_rgba(11,18,34,0.94)_45%,_rgba(4,9,20,0.98)_100%)]" />
+          <div className="absolute inset-0 backdrop-blur-[12px]" />
         </div>
       )}
       {/* Botón animado "Abrir Asistente" - aparece cuando el modal está cerrado */}
@@ -231,14 +232,14 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
         className={`fixed z-50 transition-all duration-300 ${
           isOpen 
             ? (isExpanded 
-                ? 'top-0 right-0 md:top-6 md:right-6 w-full md:w-[800px] h-full md:h-[calc(100vh-3rem)] opacity-100 pointer-events-auto' 
+                ? 'top-0 right-0 md:top-0 md:right-0 w-full md:w-full h-full md:h-full opacity-100 pointer-events-auto overflow-hidden' 
                 : 'top-6 right-6 w-full md:w-[400px] h-[650px] opacity-100 pointer-events-auto')
             : 'opacity-0 pointer-events-none invisible'
         }`}
       >
         {/* Contenedor principal con esquinas redondeadas y sombra */}
-        <div className={`flex flex-col h-full overflow-hidden border border-gray-700/50 shadow-[0_30px_120px_-40px_rgba(8,12,24,0.85)] ${
-          isExpanded ? 'md:rounded-2xl' : 'rounded-2xl'
+        <div className={`flex flex-col h-full overflow-hidden border border-gray-700/50 shadow-[0_30px_120px_-40px_rgba(8,12,24,0.85)] transition-all duration-300 ${
+          isExpanded ? 'md:rounded-none rounded-none' : 'rounded-2xl'
         } ${isExpanded ? 'bg-[linear-gradient(160deg,_rgba(9,13,23,0.95)_0%,_rgba(7,12,25,0.92)_60%,_rgba(3,7,18,0.96)_100%)]' : 'bg-[#202020]'}`}>
           {/* Header con hero interactivo */}
           <div className="px-6 py-6 border-b border-gray-700/50 bg-gradient-to-br from-[#18181b] via-[#15161b] to-[#11121a]">

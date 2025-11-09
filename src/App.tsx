@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ChatWidget } from './components/ChatWidget';
 import { ChatProvider } from './contexts/ChatContext';
 import { Dashboard } from './components/Dashboard';
+import { AdminPage } from './components/AdminPage';
 
 type AppView = 'landing' | 'dashboard' | 'admin';
 
@@ -105,8 +106,8 @@ function App() {
           <ChatWidget />
         </div>
       ) : (
-        <div className="relative min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-          <div className="absolute top-6 right-6 z-50 flex gap-3">
+        <div className="relative min-h-screen">
+          <div className="absolute top-6 right-6 z-50 flex flex-wrap gap-3">
             <button
               onClick={() => switchView('dashboard')}
               className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
@@ -122,10 +123,7 @@ function App() {
               Ver landing del chat
             </button>
           </div>
-          <div className="relative z-10">
-            <Dashboard />
-          </div>
-          <div className="absolute inset-0 -z-0 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.12),_transparent_60%)]" />
+          <AdminPage />
         </div>
       )}
     </ChatProvider>
