@@ -21,6 +21,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
   const [currentSuggestionIndex, setCurrentSuggestionIndex] = useState(0);
   const { clearMessages } = useChat();
   const heroInputRef = useRef<HTMLInputElement | null>(null);
+  const [queuedMessage, setQueuedMessage] = useState<{ id: string; text: string } | null>(null);
 
   const openChatWindow = (fullscreen: boolean = false) => {
     setIsOpen(true);
@@ -98,6 +99,11 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     }
   };
 
+  const createQueuedMessage = (text: string) => ({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    text,
+  });
+
   const dispatchHeroMessage = () => {
     const trimmed = heroInput.trim();
 
@@ -105,6 +111,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
       return false;
     }
 
+    setQueuedMessage(createQueuedMessage(trimmed));
     window.dispatchEvent(new CustomEvent('prefill-chat-input', { detail: trimmed }));
     setHeroInput('');
     return true;
@@ -125,17 +132,6 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     });
   };
 
-  const submitPrefilledMessage = () => {
-    window.dispatchEvent(new Event('submit-chat-input'));
-  };
-
-  const scheduleSubmitWithFocus = (delay: number) => {
-    window.setTimeout(() => {
-      submitPrefilledMessage();
-      window.setTimeout(() => focusChatInput(), 75);
-    }, delay);
-  };
-
   const handleHeroSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const hasMessage = dispatchHeroMessage();
@@ -143,9 +139,8 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     if (hasMessage) {
       if (!isExpanded) {
         openChatWindow(false);
-        scheduleSubmitWithFocus(220);
       } else {
-        scheduleSubmitWithFocus(60);
+        requestAnimationFrame(() => focusChatInput());
       }
     }
   };
@@ -156,7 +151,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
     if (hasMessage) {
       openChatWindow(false);
-      scheduleSubmitWithFocus(220);
+      requestAnimationFrame(() => focusChatInput());
     }
   };
 
@@ -501,6 +496,8 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                 <Chat
                   config={config}
                   isExpanded={isExpanded}
+                  queuedMessage={queuedMessage}
+                  onConsumeQueuedMessage={() => setQueuedMessage(null)}
                   onFirstMessage={() => {
                     if (!hasAutoExpanded) {
                       setHasAutoExpanded(true);

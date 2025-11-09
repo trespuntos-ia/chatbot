@@ -1309,6 +1309,10 @@ const SEARCH_TERM_OVERRIDES: { pattern: RegExp; term: string }[] = [
   {
     pattern: /super\s+aladin\s+station/i,
     term: 'Aladin Station'
+  },
+  {
+    pattern: /sif[oó]n\s+i?si\s+gourmet\s+whip.*(un\s+litro|1\s*l|1\s+litro)?/i,
+    term: 'iSi Gourmet Whip 1L'
   }
 ];
 

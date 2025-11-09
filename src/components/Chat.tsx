@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { sendChatMessage } from '../services/chatService';
 import { ProductCard } from './ProductCard';
 import { parseMessageContent, splitMessageWithProducts, findRecommendedProduct } from '../utils/messageParser';
@@ -45,13 +45,20 @@ function TimingDetails({ timings }: { timings?: ResponseTimings }) {
   );
 }
 
+interface QueuedMessage {
+  id: string;
+  text: string;
+}
+
 interface ChatProps {
   config: ChatConfig;
   isExpanded?: boolean;
   onFirstMessage?: () => void;
+  queuedMessage?: QueuedMessage | null;
+  onConsumeQueuedMessage?: () => void;
 }
 
-export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) {
+export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage = null, onConsumeQueuedMessage }: ChatProps) {
   const { messages, setMessages } = useChat();
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -63,6 +70,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const hasSentFirstMessage = useRef(false);
   const handleSendMessageRef = useRef<() => void>(() => {});
+  const lastQueuedIdRef = useRef<string | null>(null);
 
   // Determinar si estamos en estado inicial (sin mensajes)
   const isInitialState = messages.length === 0;
@@ -138,7 +146,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = useCallback(async () => {
     if (!inputMessage.trim() || isLoading) return;
 
     // Notificar primer mensaje
@@ -272,24 +280,32 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
       setIsLoading(false);
       setLoadingStage('');
     }
-  };
+  }, [config, inputMessage, isLoading, messages, onFirstMessage, sessionId, setMessages]);
 
   useEffect(() => {
     handleSendMessageRef.current = () => {
       void handleSendMessage();
     };
-  });
+  }, [handleSendMessage]);
 
   useEffect(() => {
-    const handleExternalSubmit = () => {
-      handleSendMessageRef.current();
-    };
+    if (!queuedMessage || !queuedMessage.text.trim()) {
+      return;
+    }
 
-    window.addEventListener('submit-chat-input', handleExternalSubmit);
-    return () => {
-      window.removeEventListener('submit-chat-input', handleExternalSubmit);
-    };
-  }, []);
+    if (queuedMessage.id === lastQueuedIdRef.current) {
+      return;
+    }
+
+    lastQueuedIdRef.current = queuedMessage.id;
+    setInputMessage(queuedMessage.text);
+    requestAnimationFrame(() => {
+      const inputElement = inputRef.current;
+      inputElement?.focus();
+      handleSendMessageRef.current();
+      onConsumeQueuedMessage?.();
+    });
+  }, [queuedMessage, onConsumeQueuedMessage]);
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
