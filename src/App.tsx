@@ -7,10 +7,8 @@ type AppView = 'landing' | 'dashboard';
 
 const resolveViewFromLocation = (): AppView => {
   if (typeof window === 'undefined') return 'dashboard';
-  const params = new URLSearchParams(window.location.search);
-  const viewParam = params.get('view');
-  if (viewParam === 'landing') return 'landing';
-  return 'dashboard';
+  const { pathname } = window.location;
+  return pathname === '/landing' ? 'landing' : 'dashboard';
 };
 
 function App() {
@@ -28,7 +26,12 @@ function App() {
   const switchView = (target: AppView) => {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
-    url.searchParams.set('view', target);
+    if (target === 'landing') {
+      url.pathname = '/landing';
+    } else {
+      url.pathname = '/';
+    }
+    url.search = '';
     window.history.pushState({}, '', url.toString());
     setView(target);
   };
