@@ -777,22 +777,44 @@ export default async function handler(
         enrichedContext += '\n\n📋 INSTRUCCIONES BÁSICAS PARA PRODUCTOS:\n';
         enrichedContext += '• Empieza con "He encontrado X productos relacionados con [término]".\n';
         enrichedContext += '• Para cada producto, indica nombre, precio (si existe) y una frase breve de valor.\n';
+        enrichedContext += '• Como máximo muestra 6 productos destacados (tarjetas). Si hay más resultados, enuméralos después en texto plano con su enlace y precio.\n';
         enrichedContext += '• Invita al usuario a pedir más detalles o concretar su necesidad.\n';
       }
 
       if (functionResult?.products && Array.isArray(functionResult.products) && functionResult.products.length > 0) {
         enrichedContext += '\n\n🗂️ PRODUCTOS DISPONIBLES:\n';
-        functionResult.products.slice(0, 5).forEach((product: any, index: number) => {
+        functionResult.products.slice(0, 6).forEach((product: any, index: number) => {
           const priceInfo = product.price ? ` - ${product.price}` : '';
           enrichedContext += `${index + 1}. ${product.name}${priceInfo}\n`;
         });
-        if (functionResult.products.length > 5) {
-          enrichedContext += `... y ${functionResult.products.length - 5} producto(s) más.\n`;
+        if (functionResult.products.length > 6) {
+          enrichedContext += `... y ${functionResult.products.length - 6} producto(s) más.\n`;
         }
-      } else if (functionName === 'compare_products') {
-        enrichedContext += '\n\n⚠️ No se encontraron productos suficientes para comparar. Explica la situación y solicita referencias concretas.';
-      } else {
-        enrichedContext += '\n\n⚠️ No se encontraron productos. Muestra empatía y pide al usuario más detalles para volver a intentarlo.';
+      }
+
+      if (functionResult?.extra_products && Array.isArray(functionResult.extra_products) && functionResult.extra_products.length > 0) {
+        enrichedContext += '\n\n📝 OTROS PRODUCTOS EN TEXTO:\n';
+        functionResult.extra_products.slice(0, 15).forEach((product: any) => {
+          const priceInfo = product.price ? ` - ${product.price}` : '';
+          const linkInfo = product.product_url ? ` (${product.product_url})` : '';
+          enrichedContext += `• ${product.name}${priceInfo}${linkInfo}\n`;
+        });
+        if (functionResult.extra_products.length > 15) {
+          enrichedContext += `... y ${functionResult.extra_products.length - 15} adicionales.\n`;
+        }
+      }
+
+      const hasCardProducts =
+        functionResult?.products && Array.isArray(functionResult.products) && functionResult.products.length > 0;
+      const hasExtraProducts =
+        functionResult?.extra_products && Array.isArray(functionResult.extra_products) && functionResult.extra_products.length > 0;
+
+      if (!hasCardProducts && !hasExtraProducts) {
+        if (functionName === 'compare_products') {
+          enrichedContext += '\n\n⚠️ No se encontraron productos suficientes para comparar. Explica la situación y solicita referencias concretas.';
+        } else {
+          enrichedContext += '\n\n⚠️ No se encontraron productos. Muestra empatía y pide al usuario más detalles para volver a intentarlo.';
+        }
       }
 
       const systemPromptWithContext = systemPrompt + enrichedContext;
@@ -2472,12 +2494,12 @@ async function searchProducts(supabase: any, params: any) {
   const searchTerm = params.query && typeof params.query === 'string' ? params.query.trim() : '';
   const words = searchTerm.split(/\s+/).filter(w => w.length > 0);
   const hasMultipleWords = words.length > 1;
-  const limit = Math.min(hasMultipleWords ? baseLimit * 2 : baseLimit, maxLimit); // Reducido de *3 a *2 para mayor velocidad
-  query = query.limit(limit);
+  const fetchLimit = Math.min(hasMultipleWords ? baseLimit * 2 : baseLimit, maxLimit); // Reducido de *3 a *2 para mayor velocidad
+  query = query.limit(fetchLimit);
 
   // Offset
   if (params.offset) {
-    query = query.range(params.offset, params.offset + limit - 1);
+    query = query.range(params.offset, params.offset + fetchLimit - 1);
   }
 
   const { data, error, count } = await query;
@@ -2631,29 +2653,39 @@ async function searchProducts(supabase: any, params: any) {
     image: product.image_url || product.image || ''
   }));
 
+  const MAX_CARD_PRODUCTS = 6;
+  let finalProductList = mappedProducts;
+  let normalizedQuery = '';
+
   if (searchTerm) {
-    const normalizedQuery = normalizeText(searchTerm);
+    normalizedQuery = normalizeText(searchTerm);
     if (STRICT_MATCH_TERMS.has(normalizedQuery)) {
       const strictMatches = mappedProducts.filter((product: any) => {
         const normalizedName = normalizeText(product.name || '');
         return normalizedName.includes(normalizedQuery);
       });
       if (strictMatches.length > 0) {
-        return {
-          products: strictMatches,
-          total: strictMatches.length,
-          limit: strictMatches.length,
-          offset: 0
-        };
+        finalProductList = strictMatches;
       }
     }
   }
 
+  const cardProducts = finalProductList.slice(0, MAX_CARD_PRODUCTS);
+  const extraProductsRaw = finalProductList.slice(MAX_CARD_PRODUCTS);
+  const extraProducts = extraProductsRaw.map((product: any) => ({
+    name: product.name,
+    price: product.price || null,
+    product_url: product.product_url || '',
+    sku: product.sku || null
+  }));
+
   return {
-    products: mappedProducts,
-    total: count || sortedData.length,
-    limit,
-    offset: params.offset || 0
+    products: cardProducts,
+    total: count || finalProductList.length,
+    limit: Math.min(fetchLimit, MAX_CARD_PRODUCTS),
+    offset: params.offset || 0,
+    extra_products: extraProducts,
+    extra_count: extraProducts.length
   };
 }
 

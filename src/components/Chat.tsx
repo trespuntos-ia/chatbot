@@ -69,7 +69,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const hasSentFirstMessage = useRef(false);
-  const handleSendMessageRef = useRef<() => void>(() => {});
+  const handleSendMessageRef = useRef<(overrideMessage?: string) => void>(() => {});
   const lastQueuedIdRef = useRef<string | null>(null);
 
   // Determinar si estamos en estado inicial (sin mensajes)
@@ -146,8 +146,9 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = useCallback(async () => {
-    if (!inputMessage.trim() || isLoading) return;
+  const handleSendMessage = useCallback(async (overrideMessage?: string) => {
+    const messageToSend = (overrideMessage ?? inputMessage).trim();
+    if (!messageToSend || isLoading) return;
 
     // Notificar primer mensaje
     if (!hasSentFirstMessage.current) {
@@ -157,7 +158,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
 
     const userMessage: ChatMessage = {
       role: 'user',
-      content: inputMessage.trim()
+      content: messageToSend
     };
 
     // Añadir mensaje del usuario
@@ -174,7 +175,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
       // Enviar mensaje
       setLoadingStage('Consultando con OpenAI...');
       const response = await sendChatMessage(
-        inputMessage.trim(),
+        messageToSend,
         conversationHistory,
         config,
         sessionId
@@ -283,8 +284,8 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
   }, [config, inputMessage, isLoading, messages, onFirstMessage, sessionId, setMessages]);
 
   useEffect(() => {
-    handleSendMessageRef.current = () => {
-      void handleSendMessage();
+    handleSendMessageRef.current = (overrideMessage?: string) => {
+      void handleSendMessage(overrideMessage);
     };
   }, [handleSendMessage]);
 
@@ -302,7 +303,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
     requestAnimationFrame(() => {
       const inputElement = inputRef.current;
       inputElement?.focus();
-      handleSendMessageRef.current();
+      handleSendMessageRef.current(queuedMessage.text);
       onConsumeQueuedMessage?.();
     });
   }, [queuedMessage, onConsumeQueuedMessage]);
@@ -643,7 +644,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
                 </svg>
               </button>
               <button
-                onClick={handleSendMessage}
+                type="button"
+                onClick={() => {
+                  void handleSendMessage();
+                }}
                 disabled={isLoading || !inputMessage.trim()}
                 className={`p-2 rounded-lg transition ${
                   inputMessage.trim() && !isLoading
@@ -713,6 +717,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
               className="flex-1 px-4 py-3 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500 text-sm"
             />
             <button
+              type="button"
               className="p-3 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded-lg transition"
               aria-label="Micrófono"
               title="Micrófono (próximamente)"
@@ -733,7 +738,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
               </svg>
             </button>
             <button
-              onClick={handleSendMessage}
+              type="button"
+              onClick={() => {
+                void handleSendMessage();
+              }}
               disabled={isLoading || !inputMessage.trim()}
               className={`p-3 rounded-lg transition ${
                 inputMessage.trim() && !isLoading

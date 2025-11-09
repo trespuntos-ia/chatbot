@@ -402,94 +402,98 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                   </div>
                 </div>
 
-                <form onSubmit={handleHeroSubmit} className="mt-6">
-                  <div className="relative flex items-center gap-3 rounded-3xl border border-[#3a3a3a] bg-[#2A2A2A] px-4 py-3 shadow-inner transition focus-within:border-cyan-500/60 focus-within:shadow-cyan-500/10">
-                    <input
-                      type="text"
-                      value={heroInput}
-                      onChange={(event) => setHeroInput(event.target.value)}
-                      placeholder="Pregunta cualquier cosa..."
-                      className="flex-1 bg-transparent text-sm text-white placeholder-white/40 focus:outline-none"
-                      aria-label="Pregunta al asistente"
-                      ref={heroInputRef}
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
-                        title="Micrófono (próximamente)"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                          />
-                        </svg>
-                      </button>
-                      <button
-                        type="submit"
-                        className="rounded-full bg-cyan-500 p-2 text-black shadow-md transition hover:bg-cyan-400"
-                        aria-label="Enviar pregunta"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 19l9 2-9-18-9 18 9-2zm0-9v6"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                </form>
+                {!isExpanded && (
+                  <>
+                    <form onSubmit={handleHeroSubmit} className="mt-6">
+                      <div className="relative flex items-center gap-3 rounded-3xl border border-[#3a3a3a] bg-[#2A2A2A] px-4 py-3 shadow-inner transition focus-within:border-cyan-500/60 focus-within:shadow-cyan-500/10">
+                        <input
+                          type="text"
+                          value={heroInput}
+                          onChange={(event) => setHeroInput(event.target.value)}
+                          placeholder="Pregunta cualquier cosa..."
+                          className="flex-1 bg-transparent text-sm text-white placeholder-white/40 focus:outline-none"
+                          aria-label="Pregunta al asistente"
+                          ref={heroInputRef}
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+                            title="Micrófono (próximamente)"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              className="h-5 w-5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            type="submit"
+                            className="rounded-full bg-cyan-500 p-2 text-black shadow-md transition hover:bg-cyan-400"
+                            aria-label="Enviar pregunta"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              className="h-5 w-5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 19l9 2-9-18-9 18 9-2zm0-9v6"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </form>
 
-                <div className="mt-4 flex min-h-[1.5rem] items-center gap-2 text-sm text-white/70">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4 flex-shrink-0 text-white/60"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                    />
-                  </svg>
-                  <div className="relative h-5 overflow-hidden">
-                    <AnimatePresence mode="wait">
-                      <motion.button
-                        key={currentSuggestion}
-                        initial={{ y: 12, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        exit={{ y: -12, opacity: 0 }}
-                        transition={{ duration: 0.45, ease: 'easeInOut' }}
-                        type="button"
-                        onClick={() => handleSuggestionClick(currentSuggestion)}
-                        className="rounded-full px-3 py-1 text-left text-white/80 ring-offset-[#202020] transition hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/60"
+                    <div className="mt-4 flex min-h-[1.5rem] items-center gap-2 text-sm text-white/70">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-4 w-4 flex-shrink-0 text-white/60"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
                       >
-                        {currentSuggestion}
-                      </motion.button>
-                    </AnimatePresence>
-                  </div>
-                </div>
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                        />
+                      </svg>
+                      <div className="relative h-5 overflow-hidden">
+                        <AnimatePresence mode="wait">
+                          <motion.button
+                            key={currentSuggestion}
+                            initial={{ y: 12, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            exit={{ y: -12, opacity: 0 }}
+                            transition={{ duration: 0.45, ease: 'easeInOut' }}
+                            type="button"
+                            onClick={() => handleSuggestionClick(currentSuggestion)}
+                            className="rounded-full px-3 py-1 text-left text-white/80 ring-offset-[#202020] transition hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/60"
+                          >
+                            {currentSuggestion}
+                          </motion.button>
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="flex-1 overflow-hidden">
