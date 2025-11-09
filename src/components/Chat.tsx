@@ -322,7 +322,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#202020]">
+    <div className="flex flex-col h-full bg-[#0b1220]">
       {/* Mensajes */}
       <div className="flex-1 overflow-y-auto space-y-4 px-6 py-6">
         {/* Mensajes de la conversación */}
@@ -581,14 +581,14 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
             onKeyPress={handleKeyPress}
               placeholder="Pregunta cualquier cosa..."
             disabled={isLoading}
-              rows={4}
-              className="w-full min-h-[100px] px-6 py-4 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500"
+              rows={3}
+              className="w-full min-h-[70px] px-6 py-4 pr-[120px] bg-white/5 border border-white/10 rounded-[32px] focus:ring-2 focus:ring-cyan-400/80 focus:border-transparent resize-none disabled:opacity-50 disabled:cursor-not-allowed text-white/90 placeholder-white/40 text-base leading-relaxed shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
           />
 
             {/* Botones en fila inferior dentro del textarea */}
-            <div className="absolute bottom-3 right-3 flex items-center gap-2">
+            <div className="absolute bottom-4 right-4 flex items-center gap-2">
           <button
-                className="p-2 text-gray-400 hover:text-white hover:bg-[#202020] rounded-lg transition"
+                className="p-3 text-white/60 hover:text-white rounded-full bg-white/5 hover:bg-white/10 transition"
                 aria-label="Micrófono"
                 title="Micrófono (próximamente)"
               >
@@ -610,10 +610,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
               <button
                 onClick={handleSendMessage}
                 disabled={isLoading || !inputMessage.trim()}
-                className={`p-2 rounded-lg transition ${
+                className={`p-3 rounded-full transition shadow-lg ${
                   inputMessage.trim() && !isLoading
-                    ? 'bg-cyan-500 text-black hover:bg-cyan-400'
-                    : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    ? 'bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500 text-white hover:brightness-110'
+                    : 'bg-white/10 text-white/35 border border-white/10 cursor-not-allowed shadow-none'
                 }`}
                 aria-label="Enviar"
               >
@@ -638,14 +638,14 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
           {/* Sugerencias animadas - se muestran de una en una en loop */}
           {currentSuggestion && (
             <div className="mt-6">
-              <p className="text-xs uppercase tracking-widest text-white/40 mb-2">Ejemplos</p>
+              <p className="text-xs uppercase tracking-[0.35em] text-white/35 mb-3">Ejemplos</p>
               <button
                 onClick={() => handleSuggestionClick(currentSuggestion)}
-                className="w-full text-left px-4 py-4 bg-[#1a1a1a] border border-gray-700/40 rounded-xl flex items-center gap-4 group hover:border-cyan-500/50 transition-colors"
+                className="w-full text-left px-5 py-4 bg-white/5 border border-white/10 rounded-2xl flex items-center gap-4 group hover:border-cyan-500/50 transition-colors backdrop-blur-sm"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5 text-cyan-400 flex-shrink-0 group-hover:text-cyan-300 transition-colors"
+                  className="h-5 w-5 text-cyan-400 flex-shrink-0 group-hover:text-cyan-300 transition-colors drop-shadow-[0_0_12px_rgba(56,189,248,0.45)]"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -665,7 +665,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.35 }}
-                      className="block text-sm text-white/90"
+                      className="block text-sm text-white/85"
                     >
                       {currentSuggestion}
                     </motion.span>
@@ -687,10 +687,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
               onKeyPress={handleKeyPress}
               placeholder="Escribe tu pregunta..."
               disabled={isLoading}
-              className="flex-1 px-4 py-3 bg-[#2a2a2a] border border-gray-700/50 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white placeholder-gray-500 text-sm"
+              className="flex-1 px-5 py-3 bg-white/5 border border-white/10 rounded-[26px] focus:ring-2 focus:ring-cyan-400/70 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed text-white/90 placeholder-white/40 text-sm shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]"
             />
             <button
-              className="p-3 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded-lg transition"
+              className="p-3 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition"
               aria-label="Micrófono"
               title="Micrófono (próximamente)"
             >
@@ -712,10 +712,10 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
             <button
               onClick={handleSendMessage}
               disabled={isLoading || !inputMessage.trim()}
-              className={`p-3 rounded-lg transition ${
+              className={`p-3 rounded-full transition shadow-lg ${
                 inputMessage.trim() && !isLoading
-                  ? 'bg-cyan-500 text-black hover:bg-cyan-400'
-                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  ? 'bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500 text-white hover:brightness-110'
+                  : 'bg-white/10 text-white/35 border border-white/10 cursor-not-allowed shadow-none'
               }`}
               aria-label="Enviar"
             >

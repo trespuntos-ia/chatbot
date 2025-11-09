@@ -1,4 +1,8 @@
-import type { SystemPrompt, PromptVariable } from '../types';
+import type {
+  SystemPrompt,
+  PromptVariable,
+  PromptStructuredFields
+} from '../types';
 
 const API_BASE = '/api';
 
@@ -78,7 +82,8 @@ export async function createPrompt(
   prompt: string,
   description?: string,
   variables?: PromptVariable[],
-  isActive: boolean = false
+  isActive: boolean = false,
+  structuredFields?: PromptStructuredFields
 ): Promise<SystemPrompt> {
   try {
     const response = await fetch(`${API_BASE}/prompts`, {
@@ -92,6 +97,7 @@ export async function createPrompt(
         description,
         variables: variables || [],
         is_active: isActive,
+        structured_fields: structuredFields || null,
       }),
     });
 
@@ -124,6 +130,7 @@ export async function updatePrompt(
     description?: string;
     variables?: PromptVariable[];
     is_active?: boolean;
+    structured_fields?: PromptStructuredFields | null;
   }
 ): Promise<SystemPrompt> {
   try {
@@ -196,6 +203,38 @@ export function processPrompt(prompt: SystemPrompt): string {
   }
   
   return processedPrompt;
+}
+
+export interface GeneratePromptPayload extends PromptStructuredFields {}
+
+export async function generateSystemPrompt(
+  fields: GeneratePromptPayload
+): Promise<string> {
+  try {
+    const response = await fetch(`${API_BASE}/generate-system-prompt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(fields)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'No se pudo generar el prompt con IA');
+    }
+
+    const data = await response.json();
+
+    if (data?.success && typeof data.prompt === 'string') {
+      return data.prompt;
+    }
+
+    throw new Error('Respuesta inválida del generador de prompt');
+  } catch (error) {
+    console.error('Error generating system prompt:', error);
+    throw error;
+  }
 }
 
 /**

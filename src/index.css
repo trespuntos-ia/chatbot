@@ -57,4 +57,11 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  background: radial-gradient(at 20% 20%, rgba(30, 64, 175, 0.4) 0%, rgba(14, 23, 42, 0.9) 45%, rgba(5, 10, 19, 1) 100%);
+  color: #ffffff;
+}
+
+#root {
+  min-height: 100vh;
 }

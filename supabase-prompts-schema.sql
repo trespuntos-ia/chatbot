@@ -19,8 +19,12 @@ CREATE TABLE IF NOT EXISTS system_prompts (
   version INTEGER DEFAULT 1,
   created_by TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+  structured_fields JSONB
 );
+
+ALTER TABLE system_prompts
+  ADD COLUMN IF NOT EXISTS structured_fields JSONB;
 
 -- ============================================
 -- TABLA: prompt_variables
@@ -101,19 +105,67 @@ ALTER TABLE system_prompts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prompt_variables ENABLE ROW LEVEL SECURITY;
 
 -- Política para permitir lectura pública
-CREATE POLICY "Allow public read access to prompts" ON system_prompts
-  FOR SELECT USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'system_prompts'
+      AND policyname = 'Allow public read access to prompts'
+  ) THEN
+    CREATE POLICY "Allow public read access to prompts" ON system_prompts
+      FOR SELECT USING (true);
+  END IF;
+END;
+$$;
 
 -- Política para permitir escritura pública (ajusta según necesites)
-CREATE POLICY "Allow public write access to prompts" ON system_prompts
-  FOR ALL USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'system_prompts'
+      AND policyname = 'Allow public write access to prompts'
+  ) THEN
+    CREATE POLICY "Allow public write access to prompts" ON system_prompts
+      FOR ALL USING (true);
+  END IF;
+END;
+$$;
 
 -- Política para variables
-CREATE POLICY "Allow public read access to variables" ON prompt_variables
-  FOR SELECT USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'prompt_variables'
+      AND policyname = 'Allow public read access to variables'
+  ) THEN
+    CREATE POLICY "Allow public read access to variables" ON prompt_variables
+      FOR SELECT USING (true);
+  END IF;
+END;
+$$;
 
-CREATE POLICY "Allow public write access to variables" ON prompt_variables
-  FOR ALL USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'prompt_variables'
+      AND policyname = 'Allow public write access to variables'
+  ) THEN
+    CREATE POLICY "Allow public write access to variables" ON prompt_variables
+      FOR ALL USING (true);
+  END IF;
+END;
+$$;
 
 -- ============================================
 -- PROMPT POR DEFECTO
@@ -199,6 +251,7 @@ COMMENT ON TABLE system_prompts IS 'Prompts del sistema para OpenAI';
 COMMENT ON COLUMN system_prompts.name IS 'Nombre del prompt';
 COMMENT ON COLUMN system_prompts.prompt IS 'Texto completo del prompt';
 COMMENT ON COLUMN system_prompts.is_active IS 'Si es true, este prompt se usa en el chat';
+COMMENT ON COLUMN system_prompts.structured_fields IS 'Campos estructurados utilizados para generar el prompt';
 COMMENT ON TABLE prompt_variables IS 'Variables dinámicas para los prompts';
 COMMENT ON COLUMN prompt_variables.variable_name IS 'Nombre de la variable (ej: {{store_platform}})';
 COMMENT ON COLUMN prompt_variables.variable_value IS 'Valor actual de la variable';

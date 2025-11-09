@@ -37,735 +37,6 @@ function getFunctionLabel(functionName: string): string {
   return FUNCTION_LABELS[functionName] || `Función ${functionName}`;
 }
 
-const SEMANTIC_UNDERSTANDING_DEFAULT_MODEL =
-  process.env.OPENAI_COMPREHENSION_MODEL || 'gpt-4o-mini';
-
-type SemanticUnderstanding = {
-  product_focus?: boolean;
-  intent?: 'buy' | 'compare' | 'info' | 'search' | 'support' | 'other';
-  confidence?: number;
-  categories?: string[];
-  search_terms?: string[];
-  summary?: string;
-};
-
-type IntentResult = {
-  intent: 'buy' | 'compare' | 'info' | 'search';
-  urgency: 'high' | 'medium' | 'low';
-  source?: 'heuristic' | 'semantic' | 'merged';
-  confidence?: number;
-};
-
-type CategoryDetectionResult = {
-  category: string;
-  subcategory?: string;
-  score: number;
-  confidence: number;
-  matchedKeywords: string[];
-  patternId: string;
-  priority: number;
-};
-
-type CategoryPattern = {
-  id: string;
-  category: string;
-  subcategory?: string;
-  keywords: string[];
-  phrases?: string[];
-  priority?: number;
-  boosts?: string[];
-};
-
-const CATEGORY_PATTERNS: CategoryPattern[] = [
-  {
-    id: 'ahumadores',
-    category: 'Maquinaria cocina y mixología',
-    subcategory: 'Ahumadores gastronómicos',
-    keywords: [
-      'ahumador',
-      'ahumadores',
-      'ahumar',
-      'ahumado',
-      'ahumados',
-      'ahumado en frio',
-      'ahumado en frío',
-      'brasa',
-      'showcooking',
-      'braseado',
-      'smoker',
-      'smoking',
-      'smoke',
-      'pistola de ahumado',
-      'ahumado aladin',
-      'smoked',
-      'aromatizar',
-      'campana de humo'
-    ],
-    phrases: [
-      'pistola de ahumado',
-      'ahumador portátil',
-      'ahumador portatil',
-      'ahumador aladin',
-      'ahumado en sala',
-      'ahumado en mesa',
-      'ahumado gastronómico',
-      'ahumado gastronomico'
-    ],
-    priority: 1.4
-  },
-  {
-    id: 'maquinaria_general',
-    category: 'Maquinaria cocina y mixología',
-    keywords: [
-      'maquinaria',
-      'maquina',
-      'máquina',
-      'equipo',
-      'equipamiento',
-      'industrial',
-      'robot',
-      'horno',
-      'hornos',
-      'abatidor',
-      'abatidores',
-      'pasteurizador',
-      'pasteurizar',
-      'amasadora',
-      'amasadoras',
-      'amasar',
-      'batidora',
-      'batidoras',
-      'licuadora',
-      'licuadoras',
-      'procesadora',
-      'procesadoras',
-      'sous vide',
-      'roner',
-      'thermomix',
-      'termomix',
-      'vaporera',
-      'robot de cocina',
-      'maquina profesional',
-      'equipo profesional',
-      'equipo industrial',
-      'maquina de cocina',
-      'cocción al vacío',
-      'coccion al vacio'
-    ],
-    phrases: [
-      'equipo profesional',
-      'equipo de cocina',
-      'maquinaria para cocina',
-      'maquinaria profesional',
-      'maquinaria industrial',
-      'maquina de cocina profesional',
-      'equipo para restaurante'
-    ],
-    priority: 1.2
-  },
-  {
-    id: 'mixologia',
-    category: 'Técnicas cocina y mixología',
-    keywords: [
-      'mixologia',
-      'mixología',
-      'mixologist',
-      'bartender',
-      'cocteleria',
-      'coctelería',
-      'coctel',
-      'cóctel',
-      'cocktail',
-      'coctelera',
-      'cocteleras',
-      'shaker',
-      'shakers',
-      'jigger',
-      'muddler',
-      'bitter',
-      'angostura',
-      'garnish',
-      'decoracion de cocteles',
-      'clarificado',
-      'esferas',
-      'cocteles',
-      'barra',
-      'bar tools',
-      'bartools'
-    ],
-    phrases: [
-      'técnicas de mixología',
-      'tecnicas de mixologia',
-      'equipamiento de bar',
-      'herramientas de bar'
-    ],
-    priority: 1.15
-  },
-  {
-    id: 'herramientas_corte',
-    category: 'Herramientas',
-    keywords: [
-      'cuchillo',
-      'cuchillos',
-      'cuchillera',
-      'cuchillería',
-      'cuchilleria',
-      'corte',
-      'cortar',
-      'filetear',
-      'pelador',
-      'peladores',
-      'pelar',
-      'rallador',
-      'ralladores',
-      'rallar',
-      'mandolina',
-      'mandolinas',
-      'pinzas',
-      'pinza',
-      'espátula',
-      'espatula',
-      'espátulas',
-      'espatulas',
-      'espumadera',
-      'espumaderas',
-      'colador',
-      'coladores',
-      'tamiz',
-      'tamices',
-      'raspador',
-      'raspadores',
-      'cucharon',
-      'cucharón',
-      'cucharones',
-      'cucharilla',
-      'cucharillas',
-      'rodillo',
-      'rodillos'
-    ],
-    phrases: [
-      'herramientas de corte',
-      'herramientas de cocina',
-      'utensilios de chef',
-      'kit de cuchillos',
-      'batería de cocina profesional'
-    ]
-  },
-  {
-    id: 'utensilios_general',
-    category: 'Utensilios',
-    keywords: [
-      'utensilio',
-      'utensilios',
-      'espátula',
-      'espatula',
-      'espátulas',
-      'espatulas',
-      'cucharón',
-      'cucharon',
-      'cucharones',
-      'cucharilla',
-      'cucharillas',
-      'pinza',
-      'pinzas',
-      'manga',
-      'boquilla',
-      'boquillas',
-      'pincel',
-      'pinceles',
-      'termometro',
-      'termómetro',
-      'termómetros',
-      'termometros',
-      'medidor',
-      'medidores',
-      'rallador',
-      'ralladores',
-      'espumadera',
-      'espumaderas',
-      'colador',
-      'coladores',
-      'tamiz',
-      'tamices',
-      'tamizador',
-      'molde',
-      'moldes',
-      'cortapasta',
-      'corta pasta',
-      'cortador',
-      'cortadores',
-      'bandeja',
-      'bandejas'
-    ],
-    phrases: [
-      'kit de utensilios',
-      'set de utensilios',
-      'utensilios profesionales'
-    ]
-  },
-  {
-    id: 'vajilla',
-    category: 'Vajilla',
-    keywords: [
-      'vajilla',
-      'plato',
-      'platos',
-      'copa',
-      'copas',
-      'vaso',
-      'vasos',
-      'taza',
-      'tazas',
-      'cuenco',
-      'cuencos',
-      'bowl',
-      'bowls',
-      'fuente',
-      'fuentes',
-      'bandeja',
-      'bandejas',
-      'presentación',
-      'presentacion',
-      'emplatado',
-      'servir',
-      'servicio',
-      'vajillas',
-      'plato de postre',
-      'plato llano',
-      'plato hondo',
-      'cubertería',
-      'cuberteria',
-      'cubierto',
-      'cubiertos',
-      'servilleta',
-      'servilletas',
-      'bandeja gastronorm',
-      'gastronorm'
-    ],
-    phrases: [
-      'platos de presentación',
-      'presentación de platos',
-      'servicio de mesa',
-      'vajilla profesional',
-      'menaje de mesa'
-    ],
-    priority: 1.05
-  },
-  {
-    id: 'reposteria',
-    category: 'Repostería',
-    keywords: [
-      'repostería',
-      'reposteria',
-      'pastelería',
-      'pasteleria',
-      'pastel',
-      'pasteles',
-      'tarta',
-      'tartas',
-      'cupcake',
-      'cupcakes',
-      'magdalena',
-      'magdalenas',
-      'mousse',
-      'ganache',
-      'merengue',
-      'fondant',
-      'glaseado',
-      'glasear',
-      'boquilla',
-      'boquillas',
-      'manga pastelera',
-      'mangas pasteleras',
-      'chocolate',
-      'decora',
-      'decoración de tartas',
-      'decoracion de tartas'
-    ],
-    phrases: [
-      'manga pastelera',
-      'decoración de pastelería',
-      'decoracion de pasteleria',
-      'repostería creativa'
-    ],
-    priority: 1.1
-  },
-  {
-    id: 'chocolate',
-    category: 'Chocolate',
-    keywords: [
-      'chocolate',
-      'chocolates',
-      'bombon',
-      'bombón',
-      'bombones',
-      'cacao',
-      'ganache',
-      'atemperar',
-      'templa',
-      'templar',
-      'atemp',
-      'temperar',
-      'molde de chocolate',
-      'molde chocolat',
-      'policarbonato',
-      'refinador',
-      'molino de cacao',
-      'molinos de cacao'
-    ],
-    phrases: [
-      'temperado de chocolate',
-      'atemperado de chocolate',
-      'trabajo con chocolate'
-    ],
-    priority: 1.08
-  },
-  {
-    id: 'textil',
-    category: 'Textil',
-    keywords: [
-      'textil',
-      'textiles',
-      'mantel',
-      'manteles',
-      'servilleta',
-      'servilletas',
-      'delantal',
-      'delantales',
-      'uniforme',
-      'uniformes',
-      'chaqueta',
-      'chaquetas',
-      'cofia',
-      'cofias',
-      'paño',
-      'panos',
-      'pañitos'
-    ],
-    phrases: [
-      'uniforme de cocina',
-      'ropa de cocina',
-      'indumentaria de chef'
-    ]
-  },
-  {
-    id: 'limpieza',
-    category: 'Limpieza',
-    keywords: [
-      'limpieza',
-      'limpiar',
-      'detergente',
-      'detergentes',
-      'desinfectante',
-      'desinfectantes',
-      'sanitizante',
-      'sanitizantes',
-      'higiene',
-      'desengrasante',
-      'desengrasantes',
-      'lavavajillas',
-      'lavaplatos',
-      'lejía',
-      'lejia',
-      'cloro',
-      'desinfeccion',
-      'desinfección'
-    ],
-    phrases: [
-      'productos de limpieza',
-      'limpieza profesional',
-      'desinfección de cocina',
-      'desinfeccion de cocina'
-    ]
-  },
-  {
-    id: 'almacenamiento',
-    category: 'Almacenamiento',
-    keywords: [
-      'almacenamiento',
-      'contenedor',
-      'contenedores',
-      'envase',
-      'envases',
-      'caja',
-      'cajas',
-      'bote',
-      'botes',
-      'tupper',
-      'tuppers',
-      'taper',
-      'tapadera',
-      'tapaderas',
-      'tapa',
-      'tapas',
-      'gastronorm',
-      'cubilote',
-      'cubilotes',
-      'bandeja gastronorm',
-      'bandejas gastronorm',
-      'recipiente',
-      'recipientes',
-      'vacío',
-      'vacio'
-    ],
-    phrases: [
-      'almacenamiento de alimentos',
-      'recipientes herméticos',
-      'recipientes hermeticos',
-      'conservación de alimentos',
-      'conservacion de alimentos'
-    ]
-  },
-  {
-    id: 'decoracion',
-    category: 'Decoración',
-    keywords: [
-      'decoracion',
-      'decoración',
-      'decorar',
-      'decorativo',
-      'decorativos',
-      'centro de mesa',
-      'centros de mesa',
-      'garnish',
-      'presentación',
-      'presentacion',
-      'emplatado',
-      'presentar',
-      'ornamento',
-      'ornamentos'
-    ],
-    phrases: [
-      'decoración de platos',
-      'decoracion de platos',
-      'presentación de mesa',
-      'presentacion de mesa'
-    ]
-  },
-  {
-    id: 'bebidas',
-    category: 'Bebidas',
-    keywords: [
-      'bebida',
-      'bebidas',
-      'coctel',
-      'cóctel',
-      'cocktail',
-      'refresco',
-      'refrescos',
-      'jugo',
-      'jugos',
-      'zumo',
-      'zumos',
-      'batido',
-      'batidos',
-      'smoothie',
-      'smoothies',
-      'infusion',
-      'infusión',
-      'infusiones',
-      'te',
-      'té',
-      'cafe',
-      'café',
-      'barra',
-      'barista'
-    ],
-    phrases: [
-      'bebidas calientes',
-      'bebidas frías',
-      'bebidas frias',
-      'linea de bebidas'
-    ]
-  },
-  {
-    id: 'desechables',
-    category: 'Desechables',
-    keywords: [
-      'desechable',
-      'desechables',
-      'descartable',
-      'descartables',
-      'un solo uso',
-      'take away',
-      'para llevar',
-      'plástico',
-      'plástico desechable',
-      'cartón desechable',
-      'envase desechable',
-      'vaso desechable',
-      'cubiertos desechables',
-      'biodegradable',
-      'compostable'
-    ],
-    phrases: [
-      'vajilla desechable',
-      'envases para llevar',
-      'packaging desechable'
-    ]
-  },
-  {
-    id: 'packaging',
-    category: 'Packaging y presentación',
-    keywords: [
-      'packaging',
-      'embalaje',
-      'empaque',
-      'empaques',
-      'envoltorio',
-      'envoltorios',
-      'caja',
-      'cajas',
-      'bolsa',
-      'bolsas',
-      'etiqueta',
-      'etiquetas',
-      'stickers',
-      'tarro',
-      'tarros',
-      'frasco',
-      'frascos',
-      'tapa',
-      'tapas'
-    ],
-    phrases: [
-      'packaging gastronómico',
-      'packaging gastronomico',
-      'presentación para llevar',
-      'presentacion para llevar'
-    ]
-  },
-  {
-    id: 'congelacion',
-    category: 'Congelación y frío',
-    keywords: [
-      'congelador',
-      'congeladores',
-      'congelar',
-      'congelación',
-      'congelacion',
-      'frigorifico',
-      'frigorífico',
-      'refrigerado',
-      'refrigeración',
-      'refrigeracion',
-      'abatidor',
-      'abatidores',
-      'camara frigorifica',
-      'cámara frigorífica'
-    ],
-    phrases: [
-      'equipos de frío',
-      'equipos de frio',
-      'cadena de frio',
-      'cadena de frío'
-    ],
-    priority: 1.1
-  },
-  {
-    id: 'panaderia',
-    category: 'Panadería',
-    keywords: [
-      'panaderia',
-      'panadería',
-      'pan',
-      'hogaza',
-      'baguette',
-      'brioche',
-      'masa madre',
-      'amasado',
-      'amasar',
-      'fermentar',
-      'fermentadora',
-      'fermentadoras'
-    ],
-    phrases: [
-      'productos de panadería',
-      'hornear pan',
-      'procesos de panadería'
-    ],
-    priority: 1.05
-  },
-  {
-    id: 'heladeria',
-    category: 'Heladería',
-    keywords: [
-      'heladeria',
-      'heladería',
-      'helado',
-      'helados',
-      'sorbete',
-      'sorbetes',
-      'gelato',
-      'pacojet',
-      'granizado',
-      'granizados'
-    ],
-    phrases: [
-      'maquina de helados',
-      'maquina heladera',
-      'equipos de heladería',
-      'equipos de heladeria'
-    ],
-    priority: 1.15
-  }
-];
-
-type CompiledCategoryPattern = CategoryPattern & {
-  normalizedKeywords: string[];
-  normalizedPhrases: string[];
-};
-
-const COMPILED_CATEGORY_PATTERNS: CompiledCategoryPattern[] = CATEGORY_PATTERNS.map(pattern => ({
-  ...pattern,
-  normalizedKeywords: expandCategoryKeywords(pattern.keywords),
-  normalizedPhrases: (pattern.phrases || [])
-    .map(phrase => normalizeText(phrase))
-    .filter(Boolean)
-}));
-
-function expandCategoryKeywords(words: string[]): string[] {
-  const expanded = new Set<string>();
-
-  const addVariant = (term: string) => {
-    if (!term) return;
-    expanded.add(term);
-    if (term.length > 3) {
-      if (!term.endsWith('s')) {
-        expanded.add(`${term}s`);
-      }
-      if (!term.endsWith('es')) {
-        expanded.add(`${term}es`);
-      }
-      if (term.endsWith('s')) {
-        expanded.add(term.replace(/s$/, ''));
-      }
-      if (term.endsWith('es')) {
-        expanded.add(term.replace(/es$/, ''));
-      }
-    }
-  };
-
-  words.forEach(word => {
-    if (!word) {
-      return;
-    }
-
-    const normalized = normalizeText(word);
-    if (!normalized) {
-      return;
-    }
-
-    addVariant(normalized);
-
-    if (normalized.includes(' ')) {
-      normalized.split(/\s+/).forEach(part => addVariant(part));
-    }
-  });
-
-  return Array.from(expanded).filter(Boolean);
-}
-
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
@@ -1010,6 +281,10 @@ export default async function handler(
               type: 'string',
               description: 'Nombre de la categoría (ej: "Cocina", "Herramientas", "Hogar").'
             },
+            subcategory: {
+              type: 'string',
+              description: 'Nombre de la subcategoría específica dentro de la categoría (opcional).'
+            },
             query: {
               type: 'string',
               description: 'Texto de búsqueda adicional para filtrar dentro de la categoría (opcional).'
@@ -1148,59 +423,16 @@ export default async function handler(
       }
     ];
 
-    // 5. Comprensión semántica previa (opcional con modelo ligero)
-    const enableSemanticUnderstanding = config?.enableSemanticUnderstanding !== false;
-    let semanticUnderstanding: SemanticUnderstanding | null = null;
-
-    if (enableSemanticUnderstanding) {
-      const semanticStart = Date.now();
-      try {
-        semanticUnderstanding = await analyzeMessageUnderstanding(openai, message, {
-          model: config?.semanticUnderstandingModel,
-          timeoutMs: config?.semanticUnderstandingTimeoutMs
-        });
-      } catch (semanticError) {
-        console.warn('[Chat API] Semantic understanding failed:', semanticError);
-      } finally {
-        recordStep('Comprensión semántica (OpenAI)', semanticStart);
-      }
-    }
-
-    // 6. Detectar intención del usuario combinando heurísticas + comprensión semántica
-    const heuristicIntent = detectUserIntent(message);
-    const semanticIntent = normalizeSemanticIntent(semanticUnderstanding?.intent);
-    const userIntent = mergeIntentSignals(
-      heuristicIntent,
-      semanticIntent,
-      semanticUnderstanding?.confidence
-    );
+    // 5. Detectar intención del usuario con heurística básica
+    const userIntent = detectUserIntent(message);
     const isComparisonQuery = userIntent.intent === 'compare';
     
-    // 7. Detectar categoría y término de búsqueda con señales semánticas adicionales
-    const semanticCategory = selectSemanticCategory(semanticUnderstanding);
-    const categoryDetection = detectCategoryInMessage(message);
-    const detectedCategory = semanticCategory || categoryDetection?.category || null;
-    const detectedSubcategory = categoryDetection?.subcategory;
-    const categoryMatchedKeywords = categoryDetection?.matchedKeywords || [];
-
-    const heuristicSearchTerm = extractSearchTermFromMessage(message);
-    const searchTermForQuery = selectSearchTermCandidate(
-      heuristicSearchTerm,
-      semanticUnderstanding?.search_terms || [],
-      categoryMatchedKeywords
-    );
-    const searchTermForInstructions =
-      searchTermForQuery || heuristicSearchTerm || categoryMatchedKeywords[0];
-
-    // 8. Detectar si el mensaje es sobre productos para forzar búsqueda
+    // 6. Detectar si el mensaje es sobre productos para forzar búsqueda
     // PERO solo si NO es una pregunta de comparación
-    const semanticProductFocus =
-      semanticUnderstanding?.product_focus === true &&
-      (semanticUnderstanding?.confidence ?? 0) >= 0.45;
     const isProductQuery =
-      (semanticProductFocus || detectProductQuery(message)) && !isComparisonQuery;
+      detectProductQuery(message) && !isComparisonQuery;
 
-    // 9. Preparar mensajes para OpenAI (con historial limitado)
+    // 7. Preparar mensajes para OpenAI (con historial limitado)
     // Añadir instrucción adicional al system prompt si es una pregunta sobre productos
     let enhancedSystemPrompt = systemPrompt;
     if (isComparisonQuery) {
@@ -1231,68 +463,15 @@ export default async function handler(
     let completion;
     let openaiCall1Start = 0;
     try {
-      // Si es una pregunta sobre productos, forzar búsqueda
       let toolChoice: any = 'auto';
-      if (isComparisonQuery) {
-        // Para comparaciones, NO forzar search_products, dejar que OpenAI elija compare_products
-        // O extraer nombres y llamar directamente
-        toolChoice = 'auto'; // Dejar que OpenAI elija compare_products automáticamente
-      } else if (isProductQuery) {
-        if (detectedCategory) {
-          // Si hay categoría detectada, forzar búsqueda en esa categoría con términos relevantes
-          const categoryQuery = searchTermForInstructions
-            ? buildCategorySearchQuery(searchTermForInstructions, detectedCategory)
-            : undefined;
-          const fallbackInstruction = detectedSubcategory || categoryMatchedKeywords[0];
-          const instructionQuery = categoryQuery || searchTermForInstructions || fallbackInstruction;
 
-          messages[messages.length - 1] = {
-            role: 'user',
-            content: `${message}\n\n[IMPORTANTE: El usuario pregunta sobre "${detectedCategory}". DEBES usar search_products_by_category con category="${detectedCategory}"${instructionQuery ? ` y query="${instructionQuery}"` : ''} para buscar productos relevantes dentro de esa categoría.]`
-          };
-
-          const categoryFunctionArgs: any = {
-            category: detectedCategory
-          };
-          if (categoryQuery) {
-            categoryFunctionArgs.query = categoryQuery;
-          } else if (searchTermForQuery) {
-            categoryFunctionArgs.query = searchTermForQuery;
-          } else if (detectedSubcategory) {
-            categoryFunctionArgs.query = detectedSubcategory;
-          } else if (categoryMatchedKeywords.length > 0) {
-            categoryFunctionArgs.query = categoryMatchedKeywords[0];
-          }
-
-          toolChoice = {
-            type: 'function' as const,
-            function: {
-              name: 'search_products_by_category',
-              arguments: JSON.stringify(categoryFunctionArgs)
-            }
-          };
-        } else {
-          // Extraer término de búsqueda del mensaje para añadirlo como contexto
-          // Añadir el término de búsqueda al mensaje del usuario para que OpenAI lo use
-          if (
-            searchTermForInstructions &&
-            searchTermForInstructions !== message.trim()
-          ) {
-            messages[messages.length - 1] = {
-              role: 'user',
-              content: `${message}\n\n[IMPORTANTE: Busca productos relacionados con "${searchTermForInstructions}" usando la función search_products]`
-            };
-          }
-          // Forzar el uso de search_products
-          toolChoice = { 
-            type: 'function' as const, 
-            function: { 
-              name: 'search_products'
-            } 
-          };
-        }
+      if (isProductQuery && heuristicSearchTerm && heuristicSearchTerm !== message.trim()) {
+        messages[messages.length - 1] = {
+          role: 'user',
+          content: `${message}\n\n[Nota: Si necesitas datos reales de productos, puedes usar la función search_products con "${heuristicSearchTerm}"]`
+        };
       }
-      
+
       openaiCall1Start = Date.now();
       console.time('openai_call_1');
       completion = await Promise.race([
@@ -1431,374 +610,10 @@ export default async function handler(
       // Si no hay resultados, intentar generar alternativas automáticas
       if (
         functionName === 'search_products' &&
-        (!functionResult.products || functionResult.products.length === 0) &&
-        functionArgs && typeof functionArgs.query === 'string' && functionArgs.query.trim().length > 0 &&
-        functionArgs.query.trim().length >= 6
+        (!functionResult.products || functionResult.products.length === 0)
       ) {
-        try {
-          const originalQuery = functionArgs.query.trim();
-          const clarifyResult = await clarifySearchIntent(supabase, { original_query: originalQuery });
-
-          const suggestionQueries = (clarifyResult?.suggestions || [])
-            .map((q: string) => q.trim())
-            .filter((q: string) => q.length > 0 && q.toLowerCase() !== originalQuery.toLowerCase());
-
-          const alternativeProducts: any[] = [];
-          const seenProductIds = new Set<string>();
-
-          for (const suggestion of suggestionQueries) {
-            const altResult = await searchProducts(supabase, { query: suggestion, limit: 3 });
-            if (altResult?.products && altResult.products.length > 0) {
-              altResult.products.forEach((product: any) => {
-                const key = String(product.id || product.sku || product.name);
-                if (!seenProductIds.has(key) && alternativeProducts.length < 5) {
-                  seenProductIds.add(key);
-                  alternativeProducts.push(product);
-                }
-              });
-            }
-
-            if (alternativeProducts.length >= 5) {
-              break;
-            }
-          }
-
-          if (suggestionQueries.length > 0) {
-            functionResult.search_suggestions = suggestionQueries;
-          }
-          if (alternativeProducts.length > 0) {
-            functionResult.alternative_products = alternativeProducts;
-          }
-        } catch (alternativeSearchError) {
-          console.error('Alternative search attempt failed:', alternativeSearchError);
-        }
+        console.log('No products found for query', functionArgs?.query);
       }
-
-      const searchTermForResult = selectSearchTermCandidate(
-        (functionArgs && typeof functionArgs.query === 'string') ? functionArgs.query : undefined,
-        semanticUnderstanding?.search_terms || [],
-        [searchTermForQuery, heuristicSearchTerm, ...(categoryMatchedKeywords || [])]
-      );
-
-      if (shouldUseQuickResponse(functionName, functionResult, userIntent)) {
-        const product = functionResult.products[0];
-        const quickMessage = buildQuickResponse(
-          product,
-          searchTermForResult,
-          userIntent
-        );
-
-        totalTokens = firstCallTokens || 0;
-
-        const responseTime = Date.now() - startTime;
-        const saveAnalyticsStart = Date.now();
-        const conversationId = await saveConversationToAnalytics(
-          supabase,
-          sessionId || 'default',
-          message,
-          quickMessage,
-          functionName,
-          functionResult.products,
-          functionArgs?.category || functionArgs?.subcategory,
-          model,
-          responseTime,
-          totalTokens
-        );
-        recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
-
-        const finalTimings = buildTimings();
-        const assistantMessage = {
-          role: 'assistant',
-          content: quickMessage,
-          function_calls: [toolCall],
-          products: functionResult.products,
-          sources: ['products_db'],
-          quick_response: true,
-          response_timings: finalTimings
-        };
-
-        res.status(200).json({
-          success: true,
-          message: quickMessage,
-          function_called: functionName,
-          function_result: functionResult,
-          conversation_id: conversationId,
-          conversation_history: [
-            ...conversationHistory,
-            { role: 'user', content: message },
-            assistantMessage
-          ],
-          timings: finalTimings
-        });
-        return;
-      }
-
-      if (shouldUseStructuredResponse(functionName, functionResult, userIntent)) {
-        const structuredMessage = buildStructuredResponse(
-          functionResult.products,
-          searchTermForResult,
-          userIntent,
-          functionArgs?.category || functionArgs?.subcategory || detectedCategory,
-          functionResult.total
-        );
-
-        totalTokens = firstCallTokens || 0;
-
-        const responseTime = Date.now() - startTime;
-        const saveAnalyticsStart = Date.now();
-        const conversationId = await saveConversationToAnalytics(
-          supabase,
-          sessionId || 'default',
-          message,
-          structuredMessage,
-          functionName,
-          functionResult.products,
-          functionArgs?.category || functionArgs?.subcategory,
-          model,
-          responseTime,
-          totalTokens
-        );
-        recordStep('Guardar analytics (Supabase)', saveAnalyticsStart);
-
-        const finalTimings = buildTimings();
-        const assistantMessage = {
-          role: 'assistant',
-          content: structuredMessage,
-          function_calls: [toolCall],
-          products: functionResult.products,
-          sources: ['products_db'],
-          structured_response: true,
-          response_timings: finalTimings
-        };
-
-        res.status(200).json({
-          success: true,
-          message: structuredMessage,
-          function_called: functionName,
-          function_result: functionResult,
-          conversation_id: conversationId,
-          conversation_history: [
-            ...conversationHistory,
-            { role: 'user', content: message },
-            assistantMessage
-          ],
-          timings: finalTimings
-        });
-        return;
-      }
-
-      // Pasar userIntent a searchProducts si es search_products
-      if (functionName === 'search_products' && functionArgs) {
-        functionArgs.userIntent = userIntent;
-      }
-
-      // Preparar contexto enriquecido con instrucciones de validación
-      let enrichedContext = '';
-      
-      // Si es una comparación, usar instrucciones específicas para comparación
-      if (functionName === 'compare_products') {
-        enrichedContext += '\n\n📊 INSTRUCCIONES PARA COMPARAR:\n';
-        enrichedContext += '• Explica las diferencias clave entre los productos (precio, uso, características técnicas).\n';
-        enrichedContext += '• Ofrece un resumen inicial y después una comparación punto por punto.\n';
-        enrichedContext += '• Cierra con una recomendación clara de cuándo elegir cada opción.\n';
-        enrichedContext += '• Evita repetir especificaciones sin contexto; interpreta qué implican para el usuario.\n\n';
-      } else {
-        enrichedContext += '\n\n📋 INSTRUCCIONES PRINCIPALES:\n';
-        enrichedContext += '• Usa la estructura fija: Nombre en negrita, Precio, Categoría (si aplica), Descripción corta (1 frase), Enlace.\n';
-        enrichedContext += '• Ordena la respuesta en bloques: 🏆 RECOMENDADO (1 producto), 🔁 ALTERNATIVAS (siguientes 2), 💡 PUEDE INTERESARTE (resto).\n';
-        enrichedContext += '• Presenta siempre el precio si existe y abre con "He encontrado X productos relacionados con [término]"\n';
-        enrichedContext += '• Si el producto no coincide exactamente, sugiere alternativas dentro de la misma categoría.\n\n';
-        
-        // Añadir instrucciones según la intención detectada
-        if (userIntent.intent === 'buy') {
-          enrichedContext += '• Intención de compra: destaca el precio y anima a usar el enlace para completar la adquisición.\n';
-        } else if (userIntent.intent === 'info') {
-          enrichedContext += '• Intención informativa: incluye características técnicas y aclara para qué sirve cada producto.\n';
-        }
-      }
-      
-      // Añadir instrucciones específicas según el caso
-      if (functionName === 'compare_products') {
-        // Instrucciones específicas para comparación
-        if (functionResult.products && functionResult.products.length >= 2) {
-          enrichedContext += `\n✅ Has encontrado ${functionResult.products.length} productos para comparar.\n`;
-          enrichedContext += 'IMPORTANTE: DEBES crear una comparación detallada explicando las diferencias entre estos productos.\n';
-          enrichedContext += 'NO solo listes los productos. Explica QUÉ los hace diferentes.\n';
-          enrichedContext += `Productos a comparar: ${functionResult.products.map((p: any) => p.name).join(', ')}\n`;
-        } else if (functionResult.products && functionResult.products.length === 1) {
-          enrichedContext += '\n⚠️ Solo se encontró un producto. Explica sus características y menciona que no se pudo encontrar el otro producto para comparar.\n';
-        } else {
-          enrichedContext += '\n⚠️ No se encontraron productos para comparar. Informa al usuario amablemente.\n';
-        }
-      } else if (functionResult.products && functionResult.products.length > 1) {
-        enrichedContext += '\n⚠️ IMPORTANTE: Has encontrado múltiples productos (ya ordenados por relevancia). Presenta los más relevantes primero.\n';
-      } else if (functionResult.products && functionResult.products.length === 1) {
-        const product = functionResult.products[0];
-        enrichedContext += '\n✅ Has encontrado un producto específico. Preséntalo con todos sus detalles.\n';
-        // Verificar si el nombre coincide exactamente con la búsqueda
-        if (functionArgs.query && typeof functionArgs.query === 'string') {
-          const searchTerm = functionArgs.query.toLowerCase().trim();
-          const productName = product.name.toLowerCase();
-          if (!productName.includes(searchTerm) && !searchTerm.includes(productName.split(' ')[0])) {
-            enrichedContext += '⚠️ Nota: El producto encontrado puede no coincidir exactamente con la búsqueda. Asegúrate de mencionar el nombre completo.\n';
-          }
-        }
-        
-        // Buscar contenido web adicional para el producto encontrado (solo si no hay múltiples productos)
-        // Esto se hace después de la primera respuesta para no bloquear
-        // Por ahora, el contenido web se busca directamente en la función search_web_content
-      } else if (functionResult.products && functionResult.products.length === 0) {
-        // Detectar si hay una categoría detectada o consultada
-        const categoryConsulted = functionArgs.category || detectedCategory;
-        
-        const noResultIntro = categoryConsulted
-          ? `No hay coincidencias exactas en la categoría "${categoryConsulted}".`
-          : 'No hay productos que coincidan exactamente con la búsqueda.';
-
-        enrichedContext += `\n⚠️ ${noResultIntro} Construye una respuesta breve con estos pasos:\n`;
-        enrichedContext += '• Muestra empatía y ofrece ayuda inmediata.\n';
-        if (categoryConsulted) {
-          enrichedContext += `• Pregunta qué tipo de ${categoryConsulted.toLowerCase()} necesita (material, tamaño, uso).\n`;
-        }
-        enrichedContext += '• Usa las sugerencias generadas para proponer términos o categorías nuevas.\n';
-        enrichedContext += '• Invita al usuario a detallar mejor la necesidad para que puedas refinar la búsqueda.\n';
-
-        if (functionResult.search_suggestions && functionResult.search_suggestions.length > 0) {
-          enrichedContext += '\n🔄 SUGERENCIAS AUTOMÁTICAS:\n';
-          functionResult.search_suggestions.slice(0, 5).forEach((suggestion: string, idx: number) => {
-            enrichedContext += `   ${idx + 1}. ${suggestion}\n`;
-          });
-          enrichedContext += 'Incluye estas opciones como propuestas concretas.\n';
-        }
-
-        if (functionResult.alternative_products && functionResult.alternative_products.length > 0) {
-          enrichedContext += '\n🧾 PRODUCTOS ALTERNATIVOS DISPONIBLES:\n';
-          functionResult.alternative_products.slice(0, 3).forEach((product: any, idx: number) => {
-            const priceInfo = product.price ? ` - ${product.price}` : '';
-            const categoryInfo = product.category ? ` (${product.category})` : '';
-            enrichedContext += `   ${idx + 1}. ${product.name}${priceInfo}${categoryInfo}\n`;
-          });
-          enrichedContext += 'Preséntalos como opciones sugeridas si encajan con la necesidad.\n';
-        }
-        
-        // Generar sugerencias automáticas mejoradas
-        if (functionArgs.query && typeof functionArgs.query === 'string') {
-          const suggestions = await generateSearchSuggestions(supabase, functionArgs.query);
-          if (suggestions.length > 0) {
-            enrichedContext += '\n💡 SUGERENCIAS DE BÚSQUEDA ALTERNATIVAS:\n';
-            suggestions.slice(0, 5).forEach((suggestion, idx) => {
-              enrichedContext += `   ${idx + 1}. "${suggestion}"\n`;
-            });
-            enrichedContext += '\nPuedes sugerir al usuario que pruebe con estos términos de forma amigable.\n';
-          }
-          
-          // Buscar productos similares por categorías relacionadas (OPTIMIZADO - más rápido)
-          enrichedContext += '\n🔍 BÚSQUEDA AUTOMÁTICA DE PRODUCTOS SIMILARES:\n';
-          enrichedContext += 'Intenta buscar productos en categorías relacionadas o con términos similares.\n';
-          
-          // Buscar categorías relacionadas de forma más eficiente (con timeout para no bloquear)
-          // Hacer esto en paralelo con otras operaciones si es posible, o con timeout corto
-          try {
-            // Usar Promise.race para limitar el tiempo de búsqueda a máximo 2 segundos
-            const categoriesQuery = supabase
-              .from('products')
-              .select('category')
-              .not('category', 'is', null)
-              .limit(10); // Reducir límite para ser más rápido
-            
-            const categoriesResult: { data?: any[] | null } | null = await Promise.race([
-              categoriesQuery,
-              new Promise<{ data: null }>((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 2000)
-              )
-            ]).catch(() => ({ data: null }));
-            
-            if (categoriesResult && categoriesResult.data && Array.isArray(categoriesResult.data) && categoriesResult.data.length > 0) {
-              const uniqueCategories = [...new Set(categoriesResult.data.map((c: any) => c.category))];
-              const normalizedQuery = normalizeText(functionArgs.query);
-              
-              // Buscar categorías que contengan palabras de la búsqueda (más rápido)
-              const queryWords = normalizedQuery.split(' ').filter(w => w.length > 3);
-              const relatedCategories = uniqueCategories.filter((cat: string) => {
-                const normalizedCat = normalizeText(cat);
-                return queryWords.some(word => normalizedCat.includes(word));
-              });
-              
-              if (relatedCategories.length > 0) {
-                enrichedContext += `\nCategorías relacionadas encontradas: ${relatedCategories.slice(0, 3).join(', ')}\n`;
-                enrichedContext += 'Puedes sugerir al usuario que busque en estas categorías.\n';
-              }
-            }
-          } catch (error) {
-            // Silenciar errores de timeout - no es crítico
-            // No bloquear la respuesta si esto falla
-          }
-        }
-        
-        // Instrucción para generar respuesta con OpenAI cuando no hay resultados
-        enrichedContext += '\n\n⚠️ IMPORTANTE: Como no hay resultados, genera una respuesta empática y útil usando OpenAI.\n';
-        enrichedContext += 'No uses respuestas genéricas. Sé específico y ofrece alternativas concretas.\n';
-      }
-      
-      // Formatear productos para mejor presentación (OPTIMIZADO - menos productos)
-      if (functionResult.products && functionResult.products.length > 0) {
-        enrichedContext += '\n\n📦 PRODUCTOS ENCONTRADOS (formateados para mejor presentación):\n';
-        enrichedContext += formatProductsForPrompt(functionResult.products, 3); // Reducido de 5 a 3 para mayor velocidad
-        enrichedContext += '\n\nUsa esta información formateada para crear una respuesta clara y estructurada.\n';
-      }
-      
-      // Scraping desactivado temporalmente - comentado para evitar FUNCTION_INVOCATION_FAILED
-      // TODO: Reactivar cuando se implemente scraping asíncrono o con mejor manejo de errores
-      /*
-      if (functionResult.products && functionResult.products.length > 0) {
-        const productsWithWebData = functionResult.products.filter((p: any) => p.webData);
-        if (productsWithWebData.length > 0) {
-          enrichedContext += '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
-          productsWithWebData.forEach((product: any, idx: number) => {
-            enrichedContext += `\nProducto ${idx + 1}: ${product.name}\n`;
-            if (product.webData?.description) {
-              enrichedContext += `- Descripción completa: ${product.webData.description}\n`;
-            }
-            if (product.webData?.features && product.webData.features.length > 0) {
-              enrichedContext += `- Características: ${product.webData.features.join(', ')}\n`;
-            }
-            if (product.webData?.specifications) {
-              const specs = Object.entries(product.webData.specifications)
-                .slice(0, 5)
-                .map(([key, value]) => `${key}: ${value}`)
-                .join(', ');
-              if (specs) {
-                enrichedContext += `- Especificaciones: ${specs}\n`;
-              }
-            }
-            if (product.webData?.availableColors && product.webData.availableColors.length > 0) {
-              enrichedContext += `- Colores disponibles: ${product.webData.availableColors.join(', ')}\n`;
-            }
-          });
-        }
-      } else if (functionResult.product && functionResult.product.webData) {
-        const product = functionResult.product;
-        enrichedContext += '\n\nINFORMACIÓN ADICIONAL OBTENIDA DE LA WEB:\n';
-        if (product.webData.description) {
-          enrichedContext += `- Descripción completa: ${product.webData.description}\n`;
-        }
-        if (product.webData.features && product.webData.features.length > 0) {
-          enrichedContext += `- Características: ${product.webData.features.join(', ')}\n`;
-        }
-        if (product.webData.specifications) {
-          const specs = Object.entries(product.webData.specifications)
-            .slice(0, 5)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join(', ');
-          if (specs) {
-            enrichedContext += `- Especificaciones: ${specs}\n`;
-          }
-        }
-        if (product.webData.availableColors && product.webData.availableColors.length > 0) {
-          enrichedContext += `- Colores disponibles: ${product.webData.availableColors.join(', ')}\n`;
-        }
-      }
-      */
 
       // 9. Enviar resultados de vuelta a OpenAI con contexto enriquecido
       // Limitar el tamaño del contexto enriquecido para mayor velocidad (OPTIMIZADO)
@@ -2425,7 +1240,6 @@ function extractSearchTermFromMessage(message: string): string {
 
 // Función para detectar categorías comunes en el mensaje
 const MAX_CONTEXT_CHAR_LENGTH = 1500;
-const QUICK_RESPONSE_SCORE_THRESHOLD = 220;
 
 function buildNgrams(tokens: string[], size: number): Set<string> {
   const result = new Set<string>();
@@ -2566,7 +1380,7 @@ async function analyzeMessageUnderstanding(
 ): Promise<SemanticUnderstanding | null> {
   const model = options.model || SEMANTIC_UNDERSTANDING_DEFAULT_MODEL;
   if (!model) {
-  return null;
+    return null;
   }
 
   const timeoutMs = options.timeoutMs ?? 5000;
@@ -2742,31 +1556,6 @@ function mergeIntentSignals(
   }
 
   return { ...heuristicIntent, source: heuristicIntent.source ? heuristicIntent.source : 'heuristic', confidence };
-}
-
-function selectSemanticCategory(semanticUnderstanding: SemanticUnderstanding | null): string | null {
-  if (!semanticUnderstanding || !semanticUnderstanding.categories || semanticUnderstanding.categories.length === 0) {
-    return null;
-  }
-
-  const category = semanticUnderstanding.categories.find(cat => typeof cat === 'string' && cat.trim().length > 0);
-  if (!category) {
-    return null;
-  }
-
-  return formatCategoryName(category);
-}
-
-function formatCategoryName(category: string): string {
-  const trimmed = category.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-
-  return trimmed
-    .split(/\s+/)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
 }
 
 function selectSearchTermCandidate(
@@ -2948,150 +1737,6 @@ function promptReducer(text: string): string {
   return filteredLines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
-function buildQuickResponse(product: any, searchTerm: string | undefined, userIntent?: { intent: string }): string {
-  const description = (product.description || '').replace(/\s+/g, ' ').trim();
-  const descriptionPreview = description.length > 160 ? `${description.substring(0, 160)}...` : (description || 'Sin descripción disponible');
-
-  const lines: string[] = [];
-  if (searchTerm && searchTerm.trim().length > 0) {
-    lines.push(`He encontrado un resultado muy relevante para "${searchTerm.trim()}"`);
-  } else {
-    lines.push('He encontrado un producto muy relevante para tu búsqueda');
-  }
-  lines.push('');
-  lines.push(`🏆 **${product.name}**`);
-  lines.push(`💰 Precio: ${product.price || 'No disponible'}`);
-  if (product.category) {
-    lines.push(`📦 Categoría: ${product.category}`);
-  }
-  lines.push(`📝 ${descriptionPreview}`);
-  if (product.product_url) {
-    lines.push(`🔗 [Ver producto](${product.product_url})`);
-  }
-
-  if (userIntent?.intent === 'buy') {
-    lines.push('');
-    lines.push('🛒 Consejo: Haz clic en el enlace para ver detalles o solicitar asistencia con la compra.');
-  }
-
-  lines.push('');
-  lines.push('¿Quieres que te cuente más detalles o te muestre alternativas?');
-
-  return lines.join('\n');
-}
-
-function shouldUseQuickResponse(functionName: string, functionResult: any, userIntent: { intent: string }): boolean {
-  if (functionName !== 'search_products') {
-    return false;
-  }
-
-  if (!functionResult || !Array.isArray(functionResult.products) || functionResult.products.length !== 1) {
-    return false;
-  }
-
-  if (userIntent.intent === 'compare') {
-    return false;
-  }
-
-  const product = functionResult.products[0];
-  const score = product?.relevanceScore ?? product?.relevance_score ?? 0;
-  return score >= QUICK_RESPONSE_SCORE_THRESHOLD;
-}
-
-function shouldUseStructuredResponse(functionName: string, functionResult: any, userIntent: { intent: string }): boolean {
-  if (functionName !== 'search_products' && functionName !== 'search_products_by_category') {
-    return false;
-  }
-
-  if (!functionResult || !Array.isArray(functionResult.products) || functionResult.products.length === 0) {
-    return false;
-  }
-
-  if (functionResult.products.length > 5) {
-    return false;
-  }
-
-  if (userIntent.intent === 'compare') {
-    return false;
-  }
-
-  return true;
-}
-
-function buildStructuredResponse(
-  products: any[],
-  searchTerm: string | undefined,
-  userIntent: { intent: string },
-  category?: string,
-  total?: number
-): string {
-  const lines: string[] = [];
-  const normalizedCategory = category ? category.toLowerCase() : undefined;
-  const totalCount = typeof total === 'number' && total > 0 ? total : products.length;
-
-  if (searchTerm && searchTerm.trim().length > 0) {
-    if (normalizedCategory) {
-      lines.push(`He encontrado ${totalCount} producto(s) para "${searchTerm.trim()}" en ${category}.`);
-    } else {
-      lines.push(`He encontrado ${totalCount} producto(s) para "${searchTerm.trim()}".`);
-    }
-  } else if (normalizedCategory) {
-    lines.push(`He encontrado ${totalCount} producto(s) destacados en ${category}.`);
-  } else {
-    lines.push(`He encontrado ${totalCount} producto(s) relevantes para tu búsqueda.`);
-  }
-
-  lines.push('');
-
-  const highlight = products[0];
-  const rest = products.slice(1);
-
-  const renderProduct = (product: any, index: number, label?: string) => {
-    const description = (product.description || '').replace(/\s+/g, ' ').trim();
-    const descriptionPreview = description.length > 140 ? `${description.substring(0, 140)}...` : (description || 'Sin descripción disponible');
-    const priceLine = `💰 Precio: ${product.price || 'No disponible'}`;
-    const categoryLine = product.category ? `📦 Categoría: ${product.category}` : undefined;
-    const lines: string[] = [];
-
-    lines.push(`${index}. **${product.name}**${label ? ` — ${label}` : ''}`);
-    lines.push(priceLine);
-    if (categoryLine) {
-      lines.push(categoryLine);
-    }
-    lines.push(`📝 ${descriptionPreview}`);
-    if (product.product_url) {
-      lines.push(`🔗 [Ver producto](${product.product_url})`);
-    }
-    return lines.join('\n');
-  };
-
-  lines.push(renderProduct(highlight, 1, 'TOP')); // principal
-
-  if (rest.length > 0) {
-    lines.push('');
-    lines.push('Otras opciones que podrían interesarte:');
-    rest.forEach((product, idx) => {
-      lines.push('');
-      lines.push(renderProduct(product, idx + 2));
-    });
-  }
-
-  if (totalCount > products.length) {
-    lines.push('');
-    lines.push(`Hay ${totalCount - products.length} producto(s) adicionales disponibles en la base de datos.`);
-  }
-
-  if (userIntent.intent === 'buy') {
-    lines.push('');
-    lines.push('🛒 Si alguno encaja con lo que necesitas, dime y te paso más detalles o te ayudo con el proceso de compra.');
-  } else {
-    lines.push('');
-    lines.push('¿Quieres más detalles, comparar alternativas o ver otros tipos de productos?');
-  }
-
-  return lines.join('\n');
-}
-
 // Función para detectar intención del usuario
 function detectUserIntent(message: string): IntentResult {
   const lowerMessage = message.toLowerCase();
@@ -3133,60 +1778,56 @@ function detectUserIntent(message: string): IntentResult {
 
 // Función para generar sugerencias de búsqueda cuando no hay resultados
 async function generateSearchSuggestions(supabase: any, originalQuery: string): Promise<string[]> {
-  try {
-    const suggestions: string[] = [];
-    const words = originalQuery.split(/\s+/).filter(w => w.length > 2);
-    
-    // Generar variaciones de palabras
-    words.forEach(word => {
-      const variations = generateWordVariations(word);
-      variations.forEach(variation => {
-        if (variation !== word && variation.length > 2) {
-          const newQuery = originalQuery.replace(word, variation);
-          if (newQuery !== originalQuery && !suggestions.includes(newQuery)) {
-            suggestions.push(newQuery);
-          }
-        }
-      });
-    });
-    
-    // Buscar categorías similares
-    const { data: categories } = await supabase
-      .from('products')
-      .select('category')
-      .not('category', 'is', null)
-      .limit(50);
-    
-    if (categories && categories.length > 0) {
-      const uniqueCategories = [...new Set(categories.map((c: any) => c.category))];
-      const normalizedQuery = normalizeText(originalQuery);
-      
-      // Buscar categorías que contengan palabras de la búsqueda
-      uniqueCategories.forEach((cat: string) => {
-        const normalizedCat = normalizeText(cat);
-        if (normalizedCat.includes(normalizedQuery) || normalizedQuery.includes(normalizedCat.split(' ')[0])) {
-          if (!suggestions.includes(cat)) {
-            suggestions.push(cat);
-          }
-        }
-      });
-    }
-    
-    // Si no hay suficientes sugerencias, crear búsquedas más amplias
-    if (suggestions.length < 3 && words.length > 1) {
-      words.forEach((_, index) => {
-        const shorterQuery = words.filter((_, i) => i !== index).join(' ');
-        if (shorterQuery.length > 0 && !suggestions.includes(shorterQuery)) {
-          suggestions.push(shorterQuery);
-        }
-      });
-    }
-    
-    return suggestions.slice(0, 5);
-  } catch (error) {
-    console.error('Error generating search suggestions:', error);
+  const trimmedQuery = (originalQuery || '').trim();
+  if (!trimmedQuery || trimmedQuery.length < 3) {
     return [];
   }
+
+  const normalizedQuery = normalizeText(trimmedQuery);
+  const words = normalizedQuery.split(/\s+/).filter(Boolean);
+
+  const variations = new Set<string>();
+  words.forEach(word => {
+    variations.add(word);
+    if (word.length > 4) {
+      variations.add(word.slice(0, -1));
+      variations.add(word.slice(0, -2));
+    }
+  });
+
+  const tokens = Array.from(variations);
+  const suggestions: string[] = [];
+
+  if (tokens.length > 1) {
+    for (let i = 0; i < tokens.length; i++) {
+      const partial = tokens.filter((_, idx) => idx !== i).join(' ');
+      if (partial.length >= 3) {
+        suggestions.push(partial);
+      }
+    }
+  }
+
+  const singleTerms = tokens.filter(t => t.length >= 3 && !suggestions.includes(t));
+  suggestions.push(...singleTerms);
+
+  const limitedSuggestions = suggestions.slice(0, 5);
+
+  const relatedCategories = await supabase
+    .from('products')
+    .select('category')
+    .ilike('category', `%${trimmedQuery}%`)
+    .limit(5);
+
+  if (relatedCategories?.data) {
+    relatedCategories.data.forEach((row: any) => {
+      const category = row.category?.trim();
+      if (category && !limitedSuggestions.includes(category)) {
+        limitedSuggestions.push(category);
+      }
+    });
+  }
+
+  return limitedSuggestions.slice(0, 5);
 }
 
 // Tabla de sinónimos técnicos y equivalencias
@@ -4007,6 +2648,10 @@ async function searchProductsByCategory(supabase: any, params: any) {
   if (params.query) {
     const safeQuery = escapeSupabaseFilterValue(params.query);
     query = query.or(`name.ilike.%${safeQuery}%,description.ilike.%${safeQuery}%`);
+  }
+  
+  if (params.subcategory) {
+    query = query.ilike('subcategory', `%${params.subcategory}%`);
   }
   
   const limit = params.limit || 15;

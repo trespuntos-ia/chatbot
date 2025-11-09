@@ -104,7 +104,7 @@ export default async function handler(
 
     // POST: Crear un nuevo prompt
     if (req.method === 'POST') {
-      const { name, prompt, description, variables, is_active } = req.body;
+      const { name, prompt, description, variables, is_active, structured_fields } = req.body;
 
       if (!name || !prompt) {
         res.status(400).json({
@@ -129,7 +129,8 @@ export default async function handler(
           name,
           prompt,
           description: description || null,
-          is_active: is_active || false
+          is_active: is_active || false,
+          structured_fields: structured_fields || null
         })
         .select()
         .single();
@@ -172,7 +173,7 @@ export default async function handler(
 
     // PUT: Actualizar un prompt
     if (req.method === 'PUT') {
-      const { id, name, prompt, description, variables, is_active } = req.body;
+      const { id, name, prompt, description, variables, is_active, structured_fields } = req.body;
 
       if (!id) {
         res.status(400).json({
@@ -196,6 +197,7 @@ export default async function handler(
       if (prompt !== undefined) updateData.prompt = prompt;
       if (description !== undefined) updateData.description = description;
       if (is_active !== undefined) updateData.is_active = is_active;
+      if (structured_fields !== undefined) updateData.structured_fields = structured_fields;
 
       const { data: updatedPrompt, error: promptError } = await supabase
         .from('system_prompts')

@@ -41,6 +41,18 @@ export interface PromptVariable {
   updated_at?: string;
 }
 
+export interface PromptStructuredFields {
+  component: string;
+  purpose: string;
+  role: string;
+  objective: string;
+  context: string;
+  audience: string;
+  task: string;
+  restrictions: string;
+  tone: string;
+}
+
 export interface SystemPrompt {
   id: string;
   name: string;
@@ -52,6 +64,7 @@ export interface SystemPrompt {
   created_at?: string;
   updated_at?: string;
   variables?: PromptVariable[];
+  structured_fields?: PromptStructuredFields | null;
 }
 
 // Tipos para Chat (Fase 2)

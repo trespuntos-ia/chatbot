@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   getPrompts,
   createPrompt,
@@ -6,25 +6,124 @@ import {
   deletePrompt,
   activatePrompt,
   processPrompt,
-  extractVariablesFromPrompt
+  extractVariablesFromPrompt,
+  generateSystemPrompt
 } from '../services/promptService';
 import {
   getAllSuggestedQueries,
   updateSuggestedQueries,
   type SuggestedQuery
 } from '../services/suggestedQueriesService';
-import type { SystemPrompt, PromptVariable } from '../types';
+import type {
+  SystemPrompt,
+  PromptVariable,
+  PromptStructuredFields
+} from '../types';
+
+const createEmptyStructuredFields = (): PromptStructuredFields => ({
+  component: '',
+  purpose: '',
+  role: '',
+  objective: '',
+  context: '',
+  audience: '',
+  task: '',
+  restrictions: '',
+  tone: ''
+});
 
 export function PromptConfig() {
   const [prompts, setPrompts] = useState<SystemPrompt[]>([]);
   const [selectedPrompt, setSelectedPrompt] = useState<SystemPrompt | null>(null);
   const [promptName, setPromptName] = useState('');
   const [promptText, setPromptText] = useState('');
-  const [promptDescription, setPromptDescription] = useState('');
+  const [structuredFields, setStructuredFields] = useState<PromptStructuredFields>(() => createEmptyStructuredFields());
   const [variables, setVariables] = useState<PromptVariable[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const structuredFieldConfig = useMemo(
+    () => ([
+      {
+        key: 'component' as const,
+        label: 'Componente que debe generar la IA',
+        placeholder: 'Ej: Manual de uso del Dashboard de Analytics',
+        multiline: false
+      },
+      {
+        key: 'purpose' as const,
+        label: 'Descripción y propósito',
+        placeholder: 'Explica qué se busca conseguir con este prompt y por qué es importante',
+        multiline: true
+      },
+      {
+        key: 'role' as const,
+        label: 'Rol',
+        placeholder: 'Ej: Actúa como un profesional del growth marketing especializado en ecommerce',
+        multiline: false
+      },
+      {
+        key: 'objective' as const,
+        label: 'Objetivo',
+        placeholder: 'Define el objetivo central de la interacción que debe guiar al modelo',
+        multiline: true
+      },
+      {
+        key: 'context' as const,
+        label: 'Contexto',
+        placeholder: 'Describe el escenario, negocio o condiciones de partida',
+        multiline: true
+      },
+      {
+        key: 'audience' as const,
+        label: 'Audiencia',
+        placeholder: '¿Para quién es la respuesta o a quién se dirige la marca?',
+        multiline: true
+      },
+      {
+        key: 'task' as const,
+        label: 'Tarea',
+        placeholder: 'Detalla las acciones específicas y el formato de salida esperado',
+        multiline: true
+      },
+      {
+        key: 'restrictions' as const,
+        label: 'Restricciones',
+        placeholder: 'Incluye límites obligatorios: extensión, temas prohibidos, etc.',
+        multiline: true
+      },
+      {
+        key: 'tone' as const,
+        label: 'Tono',
+        placeholder: 'Define el estilo de la respuesta: profesional, cercano, técnico, etc.',
+        multiline: false
+      }
+    ]),
+    []
+  );
+
+  const structuredFieldLabels = useMemo(
+    () => ({
+      component: 'Componente que debe generar la IA',
+      purpose: 'Descripción y propósito',
+      role: 'Rol',
+      objective: 'Objetivo',
+      context: 'Contexto',
+      audience: 'Audiencia',
+      task: 'Tarea',
+      restrictions: 'Restricciones',
+      tone: 'Tono'
+    }),
+    []
+  );
+
+  const handleStructuredFieldChange = (field: keyof PromptStructuredFields, value: string) => {
+    setStructuredFields((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
   
   // Estado para sugerencias
   const [suggestedQueries, setSuggestedQueries] = useState<SuggestedQuery[]>([]);
@@ -43,7 +142,14 @@ export function PromptConfig() {
     if (selectedPrompt) {
       setPromptName(selectedPrompt.name);
       setPromptText(selectedPrompt.prompt);
-      setPromptDescription(selectedPrompt.description || '');
+      const baseFields = createEmptyStructuredFields();
+      const promptFields = selectedPrompt.structured_fields || null;
+      const mergedFields: PromptStructuredFields = {
+        ...baseFields,
+        ...(promptFields ?? {}),
+        purpose: promptFields?.purpose ?? selectedPrompt.description ?? ''
+      };
+      setStructuredFields(mergedFields);
       
       // Extraer variables del prompt y cargar las existentes
       const extractedVars = extractVariablesFromPrompt(selectedPrompt.prompt);
@@ -64,7 +170,7 @@ export function PromptConfig() {
       // Reset al crear nuevo
       setPromptName('');
       setPromptText('');
-      setPromptDescription('');
+      setStructuredFields(createEmptyStructuredFields());
       setVariables([]);
     }
   }, [selectedPrompt]);
@@ -88,6 +194,18 @@ export function PromptConfig() {
       return;
     }
 
+    const missingFields = (Object.keys(structuredFieldLabels) as Array<keyof PromptStructuredFields>)
+      .filter((field) => !structuredFields[field]?.trim());
+
+    if (missingFields.length > 0) {
+      setError(
+        `Completa todos los campos obligatorios: ${missingFields
+          .map((field) => structuredFieldLabels[field])
+          .join(', ')}`
+      );
+      return;
+    }
+
     try {
       setIsLoading(true);
       setError('');
@@ -98,8 +216,9 @@ export function PromptConfig() {
         await updatePrompt(selectedPrompt.id, {
           name: promptName,
           prompt: promptText,
-          description: promptDescription || undefined,
-          variables: variables.filter(v => v.variable_value.trim() !== '')
+          description: structuredFields.purpose || undefined,
+          variables: variables.filter(v => v.variable_value.trim() !== ''),
+          structured_fields: structuredFields
         });
         setSuccess('Prompt actualizado correctamente');
       } else {
@@ -107,9 +226,10 @@ export function PromptConfig() {
         await createPrompt(
           promptName,
           promptText,
-          promptDescription || undefined,
+          structuredFields.purpose || undefined,
           variables.filter(v => v.variable_value.trim() !== ''),
-          false
+          false,
+          structuredFields
         );
         setSuccess('Prompt creado correctamente');
         setSelectedPrompt(null);
@@ -169,7 +289,7 @@ export function PromptConfig() {
     setSelectedPrompt(null);
     setPromptName('');
     setPromptText('');
-    setPromptDescription('');
+    setStructuredFields(createEmptyStructuredFields());
     setVariables([]);
     setError('');
     setSuccess('');
@@ -198,6 +318,34 @@ export function PromptConfig() {
     const newVars = [...variables];
     newVars[index] = { ...newVars[index], ...updates };
     setVariables(newVars);
+  };
+
+  const handleGeneratePrompt = async () => {
+    const missingFields = (Object.keys(structuredFieldLabels) as Array<keyof PromptStructuredFields>)
+      .filter((field) => !structuredFields[field]?.trim());
+
+    if (missingFields.length > 0) {
+      setError(
+        `Para generar el prompt completa: ${missingFields
+          .map((field) => structuredFieldLabels[field])
+          .join(', ')}`
+      );
+      return;
+    }
+
+    try {
+      setIsGeneratingPrompt(true);
+      setError('');
+      setSuccess('');
+
+      const generatedPrompt = await generateSystemPrompt(structuredFields);
+      handlePromptTextChange(generatedPrompt);
+      setSuccess('Prompt generado con IA correctamente');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo generar el prompt con IA');
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
   };
 
   // Generar preview del prompt procesado
@@ -422,28 +570,54 @@ export function PromptConfig() {
               />
             </div>
 
-            {/* Descripción */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Descripción (opcional)
-              </label>
-              <input
-                type="text"
-                value={promptDescription}
-                onChange={(e) => setPromptDescription(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="Descripción del prompt"
-              />
+            {/* Campos estructurados */}
+            <div className="grid grid-cols-1 gap-4">
+              {structuredFieldConfig.map((field) => (
+                <div key={field.key}>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {field.label}
+                  </label>
+                  {field.multiline ? (
+                    <textarea
+                      value={structuredFields[field.key]}
+                      onChange={(e) => handleStructuredFieldChange(field.key, e.target.value)}
+                      rows={field.key === 'task' ? 4 : 3}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder={field.placeholder}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={structuredFields[field.key]}
+                      onChange={(e) => handleStructuredFieldChange(field.key, e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder={field.placeholder}
+                    />
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Texto del Prompt */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Prompt del Sistema
-                <span className="text-xs text-slate-500 ml-2">
-                  Usa {'{{variable_name}}'} para variables dinámicas
-                </span>
-              </label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 mb-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Prompt del Sistema
+                  </label>
+                  <p className="text-xs text-slate-500">
+                    Usa {'{{variable_name}}'} para variables dinámicas
+                  </p>
+                </div>
+                <button
+                  onClick={handleGeneratePrompt}
+                  type="button"
+                  disabled={isGeneratingPrompt}
+                  className="inline-flex items-center justify-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isGeneratingPrompt ? 'Generando...' : 'Generar prompt con IA'}
+                </button>
+              </div>
               <textarea
                 value={promptText}
                 onChange={(e) => handlePromptTextChange(e.target.value)}

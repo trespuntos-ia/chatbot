@@ -114,6 +114,7 @@ Extrae los nombres de los productos del mensaje y úsalos en product_names.`;
 - **Cómo funciona:** El mensaje se normaliza (acentos fuera, minúsculas), se generan *ngrams* y se evalúa cada patrón. Coincidencias en frases aportan más puntos; también se consideran variantes (`ahumar`, `ahumador`, `smoking`) y sinónimos de subcategorías.
 - **Confianza:** Solo se devuelve una categoría cuando la puntuación supera un umbral; además almacenamos `matchedKeywords` para reusar el lenguaje del usuario al construir la query.
 - **Integración:** El resultado se fusiona con la categoría sugerida por la comprensión semántica ligera. Si ambos coinciden, se prioriza; si difieren, se usa la opción con mayor confianza (`mergeIntentSignals`, `selectSearchTermCandidate`).
+- **Subcategorías:** Cuando se detecta una subcategoría (ej. "Ahumadores gastronómicos"), el backend envía ese valor explícitamente a `search_products_by_category` (nuevo parámetro `subcategory`) para filtrar por `subcategory` además del término libre.
 - **Referencia:** Lógica en `api/chat.ts` (≈ líneas 1180-1270 para el uso y 2430-2548 para el detector).
 
 ---
