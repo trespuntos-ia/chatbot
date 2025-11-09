@@ -88,6 +88,31 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
     }
   };
 
+  // Permitir que otros componentes (como el hero del widget) pre rellenen el input
+  useEffect(() => {
+    const handlePrefill = (event: Event) => {
+      const customEvent = event as CustomEvent<string>;
+      const value = typeof customEvent.detail === 'string' ? customEvent.detail : '';
+      setInputMessage(value);
+
+      requestAnimationFrame(() => {
+        const inputElement = inputRef.current;
+        if (inputElement) {
+          inputElement.focus();
+          const length = value.length;
+          if ('setSelectionRange' in inputElement) {
+            (inputElement as HTMLInputElement | HTMLTextAreaElement).setSelectionRange(length, length);
+          }
+        }
+      });
+    };
+
+    window.addEventListener('prefill-chat-input', handlePrefill as EventListener);
+    return () => {
+      window.removeEventListener('prefill-chat-input', handlePrefill as EventListener);
+    };
+  }, []);
+
   // Generar o recuperar session_id desde localStorage
   useEffect(() => {
     let storedSessionId = localStorage.getItem('chat_session_id');
@@ -550,6 +575,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
         <div className="border-t border-gray-700/50 pt-6 px-6 pb-6">
           <div className="relative">
           <textarea
+              id="chat-input"
               ref={inputRef as React.RefObject<HTMLTextAreaElement>}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
@@ -642,6 +668,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
         <div className="border-t border-gray-700/50 pt-3 px-6 pb-4">
           <div className="flex items-center gap-3">
             <input
+              id="chat-input"
               ref={inputRef as React.RefObject<HTMLInputElement>}
               type="text"
               value={inputMessage}
