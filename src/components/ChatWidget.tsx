@@ -14,11 +14,18 @@ interface ChatWidgetProps {
 export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(true); // Abierto por defecto
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
   const [heroInput, setHeroInput] = useState('');
   const [headerSuggestions, setHeaderSuggestions] = useState<string[]>([]);
   const [currentSuggestionIndex, setCurrentSuggestionIndex] = useState(0);
   const { clearMessages } = useChat();
+
+  const openChatWindow = (fullscreen: boolean = false) => {
+    setIsOpen(true);
+    setIsExpanded(true);
+    setIsFullscreen(fullscreen);
+  };
 
   const fallbackSuggestions = useMemo(
     () => [
@@ -90,16 +97,38 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     }
   };
 
-  const handleHeroSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const dispatchHeroMessage = () => {
     const trimmed = heroInput.trim();
 
-    if (trimmed.length > 0) {
-      window.dispatchEvent(new CustomEvent('prefill-chat-input', { detail: trimmed }));
-      setHeroInput('');
+    if (trimmed.length === 0) {
+      return false;
     }
 
-    setTimeout(() => focusChatInput(), 25);
+    window.dispatchEvent(new CustomEvent('prefill-chat-input', { detail: trimmed }));
+    setHeroInput('');
+    return true;
+  };
+
+  const handleHeroSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const hasMessage = dispatchHeroMessage();
+
+    if (hasMessage) {
+      if (!isExpanded) {
+        openChatWindow(false);
+      }
+      setTimeout(() => focusChatInput(), 25);
+    }
+  };
+
+  const handleCompactHeroSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const hasMessage = dispatchHeroMessage();
+
+    if (hasMessage) {
+      openChatWindow(false);
+      setTimeout(() => focusChatInput(), 120);
+    }
   };
 
   // Función para limpiar el chat
@@ -107,22 +136,26 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
       clearMessages();
       setIsExpanded(false);
+      setIsFullscreen(false);
       setHasAutoExpanded(false); // Resetear para permitir auto-expansión en la próxima conversación
     }
   };
 
   // Función para manejar el cambio manual de expansión
   const handleToggleExpand = () => {
-    const newExpandedState = !isExpanded;
-    setIsExpanded(newExpandedState);
-    // Si el usuario contrae manualmente, marcar que ya no queremos auto-expansión
-    // Si expande manualmente, también marcar para evitar conflictos
+    if (!isExpanded) {
+      openChatWindow(false);
+      setHasAutoExpanded(true);
+      return;
+    }
+    const newFullscreenState = !isFullscreen;
+    setIsFullscreen(newFullscreenState);
     setHasAutoExpanded(true);
   };
 
   return (
     <>
-      {isOpen && isExpanded && (
+      {isOpen && isExpanded && isFullscreen && (
         <div className="fixed inset-0 z-40 pointer-events-none">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_55%)]" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_right,_rgba(37,99,235,0.18),_transparent_60%)]" />
@@ -137,7 +170,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
           animate={{ scale: 1, rotate: 0 }}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          onClick={() => setIsOpen(true)}
+          onClick={() => openChatWindow(false)}
           className="fixed bottom-6 right-6 group z-50"
           aria-label="Asistente"
         >
@@ -227,61 +260,256 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
         </motion.button>
       )}
 
-      {/* Modal flotante - esquina superior derecha */}
-      <div 
+      {/* Modal flotante - esquina inferior derecha */}
+      <div
         className={`fixed z-50 transition-all duration-300 ${
-          isOpen 
-            ? (isExpanded 
-                ? 'top-0 right-0 md:top-0 md:right-0 w-full md:w-full h-full md:h-full opacity-100 pointer-events-auto overflow-hidden' 
-                : 'top-6 right-6 w-full md:w-[400px] h-[650px] opacity-100 pointer-events-auto')
-            : 'opacity-0 pointer-events-none invisible'
+          isOpen
+            ? isFullscreen
+              ? 'inset-0 h-full w-full overflow-hidden opacity-100 pointer-events-auto'
+              : isExpanded
+                ? 'bottom-6 right-6 h-[600px] w-full max-w-[520px] opacity-100 pointer-events-auto'
+                : 'bottom-6 right-6 w-full max-w-[380px] opacity-100 pointer-events-auto'
+            : 'invisible pointer-events-none opacity-0'
         }`}
       >
-        {/* Contenedor principal con esquinas redondeadas y sombra */}
-        <div className={`flex flex-col h-full overflow-hidden border border-gray-700/50 shadow-[0_30px_120px_-40px_rgba(8,12,24,0.85)] transition-all duration-300 ${
-          isExpanded ? 'md:rounded-none rounded-none' : 'rounded-2xl'
-        } ${isExpanded ? 'bg-[linear-gradient(160deg,_rgba(9,13,23,0.95)_0%,_rgba(7,12,25,0.92)_60%,_rgba(3,7,18,0.96)_100%)]' : 'bg-[#202020]'}`}>
-          {/* Header con hero interactivo */}
-          <div className="px-6 py-6 border-b border-gray-700/50 bg-gradient-to-br from-[#18181b] via-[#15161b] to-[#11121a]">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <h2 className="text-2xl font-semibold text-white tracking-tight">ChefCopilot</h2>
-                  <motion.span
-                    className="px-3 py-1 rounded-full bg-cyan-500/15 text-cyan-200 text-xs font-semibold uppercase tracking-[0.12em] border border-cyan-500/40 shadow-sm"
-                    animate={{ opacity: [0.8, 1, 0.8] }}
-                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                  >
-                    Asistente activo
-                  </motion.span>
+        {isOpen &&
+          (isExpanded ? (
+            <div
+              className={`flex h-full flex-col overflow-hidden border border-gray-700/50 shadow-[0_30px_120px_-40px_rgba(8,12,24,0.85)] transition-all duration-300 ${
+                isFullscreen
+                  ? 'rounded-none bg-[linear-gradient(160deg,_rgba(9,13,23,0.95)_0%,_rgba(7,12,25,0.92)_60%,_rgba(3,7,18,0.96)_100%)]'
+                  : 'rounded-[32px] bg-[linear-gradient(155deg,_rgba(12,17,31,0.95)_0%,_rgba(9,14,28,0.92)_45%,_rgba(6,11,22,0.95)_100%)]'
+              }`}
+            >
+              <div className="border-b border-gray-700/50 bg-gradient-to-br from-[#18181b] via-[#15161b] to-[#11121a] px-6 py-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="text-2xl font-semibold text-white tracking-tight">ChefCopilot</h2>
+                      <motion.span
+                        className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-200 shadow-sm"
+                        animate={{ opacity: [0.8, 1, 0.8] }}
+                        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                      >
+                        Asistente activo
+                      </motion.span>
+                    </div>
+                    <p className="max-w-sm text-sm text-white/70">
+                      Tu asesor experto en cocina profesional
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleToggleExpand}
+                      className="rounded-lg p-2 text-white/60 transition hover:bg-[#26262c] hover:text-white"
+                      aria-label={isFullscreen ? 'Contraer' : 'Expandir'}
+                    >
+                      {isFullscreen ? (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25"
+                          />
+                        </svg>
+                      ) : (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleClearChat();
+                      }}
+                      className="rounded-lg p-2 text-white/60 transition hover:bg-[#26262c] hover:text-white"
+                      aria-label="Limpiar conversación"
+                      title="Limpiar conversación"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsOpen(false);
+                        setIsExpanded(false);
+                        setIsFullscreen(false);
+                      }}
+                      className="rounded-lg p-2 text-white/60 transition hover:bg-[#26262c] hover:text-white"
+                      aria-label="Cerrar"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <p className="text-sm text-white/70 max-w-sm">
-                  Tu asesor experto en cocina profesional
-                </p>
+
+                <form onSubmit={handleHeroSubmit} className="mt-6">
+                  <div className="relative flex items-center gap-3 rounded-3xl border border-white/8 bg-[#111216]/95 px-4 py-3 shadow-inner transition focus-within:border-cyan-500/60 focus-within:shadow-cyan-500/10">
+                    <input
+                      type="text"
+                      value={heroInput}
+                      onChange={(event) => setHeroInput(event.target.value)}
+                      placeholder="Pregunta cualquier cosa..."
+                      className="flex-1 bg-transparent text-sm text-white placeholder-white/40 focus:outline-none"
+                      aria-label="Pregunta al asistente"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+                        title="Micrófono (próximamente)"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        type="submit"
+                        className="rounded-full bg-cyan-500 p-2 text-black shadow-md transition hover:bg-cyan-400"
+                        aria-label="Enviar pregunta"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 19l9 2-9-18-9 18 9-2zm0-9v6"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+
+                <div className="mt-4 flex min-h-[1.5rem] items-center gap-2 text-sm text-white/70">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4 flex-shrink-0 text-white/60"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
+                  </svg>
+                  <div className="relative h-5 overflow-hidden">
+                    <AnimatePresence mode="wait">
+                      <motion.span
+                        key={currentSuggestion}
+                        initial={{ y: 12, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: -12, opacity: 0 }}
+                        transition={{ duration: 0.45, ease: 'easeInOut' }}
+                        className="block text-white/80"
+                      >
+                        {currentSuggestion}
+                      </motion.span>
+                    </AnimatePresence>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleToggleExpand}
-                  className="p-2 hover:bg-[#26262c] rounded-lg transition text-white/60 hover:text-white"
-                  aria-label={isExpanded ? 'Contraer' : 'Expandir'}
-                >
-                  {isExpanded ? (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
+              <div className="flex-1 overflow-hidden">
+                <Chat
+                  config={config}
+                  isExpanded={isExpanded}
+                  onFirstMessage={() => {
+                    if (!hasAutoExpanded) {
+                      setHasAutoExpanded(true);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex w-full flex-col gap-4 overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(155deg,_rgba(20,22,32,0.95)_0%,_rgba(12,14,24,0.98)_60%,_rgba(9,11,20,0.98)_100%)] p-5 text-white/80 shadow-[0_24px_96px_-36px_rgba(11,14,30,0.85)] backdrop-blur-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
+                    <motion.span
+                      className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-200 shadow-sm"
+                      animate={{ opacity: [0.75, 1, 0.75] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25"
-                      />
-                    </svg>
-                  ) : (
+                      Asistente activo
+                    </motion.span>
+                  </div>
+                  <p className="text-sm text-white/60">
+                    Tu asesor experto en cocina profesional
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => openChatWindow(false)}
+                    className="rounded-lg p-2 text-white/60 transition hover:bg-white/10 hover:text-white"
+                    aria-label="Expandir chat"
+                  >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       className="h-5 w-5"
@@ -296,93 +524,15 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                         d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
                       />
                     </svg>
-                  )}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleClearChat();
-                  }}
-                  className="p-2 hover:bg-[#26262c] rounded-lg transition text-white/60 hover:text-white"
-                  aria-label="Limpiar conversación"
-                  title="Limpiar conversación"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => {
-                    setIsOpen(false);
-                    setIsExpanded(false);
-                  }}
-                  className="p-2 hover:bg-[#26262c] rounded-lg transition text-white/60 hover:text-white"
-                  aria-label="Cerrar"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <form onSubmit={handleHeroSubmit} className="mt-6">
-              <div className="relative flex items-center gap-3 bg-[#111216]/95 border border-white/8 rounded-3xl px-4 py-3 shadow-inner focus-within:border-cyan-500/60 focus-within:shadow-cyan-500/10 transition">
-                <input
-                  type="text"
-                  value={heroInput}
-                  onChange={(event) => setHeroInput(event.target.value)}
-                  placeholder="Pregunta cualquier cosa..."
-                  className="flex-1 bg-transparent text-sm text-white placeholder-white/40 focus:outline-none"
-                  aria-label="Pregunta al asistente"
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-full transition"
-                    title="Micrófono (próximamente)"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                      />
-                    </svg>
                   </button>
                   <button
-                    type="submit"
-                    className="p-2 rounded-full bg-cyan-500 text-black hover:bg-cyan-400 transition shadow-md"
-                    aria-label="Enviar pregunta"
+                    onClick={() => {
+                      setIsOpen(false);
+                      setIsExpanded(false);
+                      setIsFullscreen(false);
+                    }}
+                    className="rounded-lg p-2 text-white/60 transition hover:bg-white/10 hover:text-white"
+                    aria-label="Cerrar chat"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -395,60 +545,100 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M12 19l9 2-9-18-9 18 9-2zm0-9v6"
+                        d="M6 18L18 6M6 6l12 12"
                       />
                     </svg>
                   </button>
                 </div>
               </div>
-            </form>
 
-            <div className="mt-4 flex items-center gap-2 text-sm text-white/70 min-h-[1.5rem]">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 text-white/60 flex-shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <div className="relative h-5 overflow-hidden">
-                <AnimatePresence mode="wait">
-                  <motion.span
-                    key={currentSuggestion}
-                    initial={{ y: 12, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: -12, opacity: 0 }}
-                    transition={{ duration: 0.45, ease: 'easeInOut' }}
-                    className="block text-white/80"
-                  >
-                    {currentSuggestion}
-                  </motion.span>
-                </AnimatePresence>
+              <form onSubmit={handleCompactHeroSubmit}>
+                <div className="flex items-center gap-3 rounded-2xl border border-white/12 bg-white/5 px-4 py-3 shadow-inner transition focus-within:border-cyan-400/60 focus-within:bg-white/10">
+                  <input
+                    type="text"
+                    value={heroInput}
+                    onChange={(event) => setHeroInput(event.target.value)}
+                    placeholder="Pregunta cualquier cosa..."
+                    className="flex-1 bg-transparent text-sm text-white placeholder-white/50 focus:outline-none"
+                    aria-label="Pregunta al asistente"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+                      title="Micrófono (próximamente)"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      type="submit"
+                      className="rounded-full bg-cyan-500 p-2 text-black shadow-md transition hover:bg-cyan-400"
+                      aria-label="Enviar pregunta"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 19l9 2-9-18-9 18 9-2zm0-9v6"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              <div className="flex items-center gap-2 text-sm text-white/70">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4 flex-shrink-0 text-white/55"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                <div className="relative h-5 overflow-hidden">
+                  <AnimatePresence mode="wait">
+                    <motion.span
+                      key={currentSuggestion}
+                      initial={{ y: 12, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      exit={{ y: -12, opacity: 0 }}
+                      transition={{ duration: 0.45, ease: 'easeInOut' }}
+                      className="block text-white/80"
+                    >
+                      {currentSuggestion}
+                    </motion.span>
+                  </AnimatePresence>
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Contenido del chat */}
-          <div className="flex-1 overflow-hidden">
-            <Chat 
-              config={config}
-              isExpanded={isExpanded}
-              onFirstMessage={() => {
-                if (!isExpanded && !hasAutoExpanded) {
-                  setIsExpanded(true);
-                  setHasAutoExpanded(true);
-                }
-              }}
-            />
-          </div>
-        </div>
+          ))}
       </div>
     </>
   );

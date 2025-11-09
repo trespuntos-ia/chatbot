@@ -70,20 +70,6 @@ function App() {
         <>
           <Dashboard />
           <ChatWidget />
-          <button
-            onClick={() => switchView('landing')}
-            className="fixed top-5 right-5 z-50 rounded-full border border-slate-200 bg-white/90 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-white"
-            type="button"
-          >
-            Ver landing del chat
-          </button>
-          <button
-            onClick={() => switchView('admin')}
-            className="fixed top-5 right-5 mt-12 z-50 rounded-full border border-indigo-200 bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
-            type="button"
-          >
-            Ir al panel /admin
-          </button>
         </>
       ) : view === 'landing' ? (
         <div className="relative min-h-screen overflow-hidden bg-transparent text-white">
