@@ -1301,8 +1301,24 @@ function detectProductQuery(message: string): boolean {
 }
 
 // Función para extraer el término de búsqueda del mensaje
+const SEARCH_TERM_OVERRIDES: { pattern: RegExp; term: string }[] = [
+  {
+    pattern: /pistola\s+super\s+aladin.*kit.*ahumar/i,
+    term: 'Aladin Station'
+  },
+  {
+    pattern: /super\s+aladin\s+station/i,
+    term: 'Aladin Station'
+  }
+];
+
 function extractSearchTermFromMessage(message: string): string {
-  const lowerMessage = message.toLowerCase().trim();
+
+  for (const override of SEARCH_TERM_OVERRIDES) {
+    if (override.pattern.test(message)) {
+      return override.term;
+    }
+  }
   
   // Patrones para extraer términos de búsqueda
   const patterns = [

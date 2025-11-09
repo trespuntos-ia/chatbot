@@ -62,6 +62,7 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const hasSentFirstMessage = useRef(false);
+  const handleSendMessageRef = useRef<() => void>(() => {});
 
   // Determinar si estamos en estado inicial (sin mensajes)
   const isInitialState = messages.length === 0;
@@ -272,6 +273,23 @@ export function Chat({ config, isExpanded = false, onFirstMessage }: ChatProps) 
       setLoadingStage('');
     }
   };
+
+  useEffect(() => {
+    handleSendMessageRef.current = () => {
+      void handleSendMessage();
+    };
+  });
+
+  useEffect(() => {
+    const handleExternalSubmit = () => {
+      handleSendMessageRef.current();
+    };
+
+    window.addEventListener('submit-chat-input', handleExternalSubmit);
+    return () => {
+      window.removeEventListener('submit-chat-input', handleExternalSubmit);
+    };
+  }, []);
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

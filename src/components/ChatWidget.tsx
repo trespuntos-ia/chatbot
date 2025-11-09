@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 import { Chat } from './Chat';
@@ -20,6 +20,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
   const [headerSuggestions, setHeaderSuggestions] = useState<string[]>([]);
   const [currentSuggestionIndex, setCurrentSuggestionIndex] = useState(0);
   const { clearMessages } = useChat();
+  const heroInputRef = useRef<HTMLInputElement | null>(null);
 
   const openChatWindow = (fullscreen: boolean = false) => {
     setIsOpen(true);
@@ -109,6 +110,32 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     return true;
   };
 
+  const handleSuggestionClick = (text: string) => {
+    setHeroInput(text);
+    if (!isExpanded) {
+      openChatWindow(false);
+    }
+    requestAnimationFrame(() => {
+      const input = heroInputRef.current;
+      if (input) {
+        const length = text.length;
+        input.focus();
+        input.setSelectionRange(length, length);
+      }
+    });
+  };
+
+  const submitPrefilledMessage = () => {
+    window.dispatchEvent(new Event('submit-chat-input'));
+  };
+
+  const scheduleSubmitWithFocus = (delay: number) => {
+    window.setTimeout(() => {
+      submitPrefilledMessage();
+      window.setTimeout(() => focusChatInput(), 75);
+    }, delay);
+  };
+
   const handleHeroSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const hasMessage = dispatchHeroMessage();
@@ -116,8 +143,10 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
     if (hasMessage) {
       if (!isExpanded) {
         openChatWindow(false);
+        scheduleSubmitWithFocus(220);
+      } else {
+        scheduleSubmitWithFocus(60);
       }
-      setTimeout(() => focusChatInput(), 25);
     }
   };
 
@@ -127,7 +156,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
     if (hasMessage) {
       openChatWindow(false);
-      setTimeout(() => focusChatInput(), 120);
+      scheduleSubmitWithFocus(220);
     }
   };
 
@@ -267,7 +296,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
             ? isFullscreen
               ? 'inset-0 h-full w-full overflow-hidden opacity-100 pointer-events-auto'
               : isExpanded
-                ? 'bottom-6 right-6 h-[600px] w-full max-w-[520px] opacity-100 pointer-events-auto'
+                ? 'bottom-6 right-6 h-[840px] w-full max-w-[728px] opacity-100 pointer-events-auto'
                 : 'bottom-6 right-6 w-full max-w-[380px] opacity-100 pointer-events-auto'
             : 'invisible pointer-events-none opacity-0'
         }`}
@@ -275,24 +304,15 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
         {isOpen &&
           (isExpanded ? (
             <div
-              className={`flex h-full flex-col overflow-hidden border border-gray-700/50 shadow-[0_30px_120px_-40px_rgba(8,12,24,0.85)] transition-all duration-300 ${
-                isFullscreen
-                  ? 'rounded-none bg-[linear-gradient(160deg,_rgba(9,13,23,0.95)_0%,_rgba(7,12,25,0.92)_60%,_rgba(3,7,18,0.96)_100%)]'
-                  : 'rounded-[32px] bg-[linear-gradient(155deg,_rgba(12,17,31,0.95)_0%,_rgba(9,14,28,0.92)_45%,_rgba(6,11,22,0.95)_100%)]'
+              className={`flex h-full flex-col overflow-hidden border border-[#303030] shadow-[0_30px_120px_-40px_rgba(8,12,24,0.85)] transition-all duration-300 ${
+                isFullscreen ? 'rounded-none bg-[#1a1a1a]' : 'rounded-[32px] bg-[#202020]'
               }`}
             >
-              <div className="border-b border-gray-700/50 bg-gradient-to-br from-[#18181b] via-[#15161b] to-[#11121a] px-6 py-6">
+              <div className="border-b border-[#2a2a2a] bg-[#202020] px-6 py-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="text-2xl font-semibold text-white tracking-tight">ChefCopilot</h2>
-                      <motion.span
-                        className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-200 shadow-sm"
-                        animate={{ opacity: [0.8, 1, 0.8] }}
-                        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                      >
-                        Asistente activo
-                      </motion.span>
                     </div>
                     <p className="max-w-sm text-sm text-white/70">
                       Tu asesor experto en cocina profesional
@@ -388,7 +408,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                 </div>
 
                 <form onSubmit={handleHeroSubmit} className="mt-6">
-                  <div className="relative flex items-center gap-3 rounded-3xl border border-white/8 bg-[#111216]/95 px-4 py-3 shadow-inner transition focus-within:border-cyan-500/60 focus-within:shadow-cyan-500/10">
+                  <div className="relative flex items-center gap-3 rounded-3xl border border-[#3a3a3a] bg-[#2A2A2A] px-4 py-3 shadow-inner transition focus-within:border-cyan-500/60 focus-within:shadow-cyan-500/10">
                     <input
                       type="text"
                       value={heroInput}
@@ -396,6 +416,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                       placeholder="Pregunta cualquier cosa..."
                       className="flex-1 bg-transparent text-sm text-white placeholder-white/40 focus:outline-none"
                       aria-label="Pregunta al asistente"
+                      ref={heroInputRef}
                     />
                     <div className="flex items-center gap-2">
                       <button
@@ -459,16 +480,18 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                   </svg>
                   <div className="relative h-5 overflow-hidden">
                     <AnimatePresence mode="wait">
-                      <motion.span
+                      <motion.button
                         key={currentSuggestion}
                         initial={{ y: 12, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         exit={{ y: -12, opacity: 0 }}
                         transition={{ duration: 0.45, ease: 'easeInOut' }}
-                        className="block text-white/80"
+                        type="button"
+                        onClick={() => handleSuggestionClick(currentSuggestion)}
+                        className="rounded-full px-3 py-1 text-left text-white/80 ring-offset-[#202020] transition hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/60"
                       >
                         {currentSuggestion}
-                      </motion.span>
+                      </motion.button>
                     </AnimatePresence>
                   </div>
                 </div>
@@ -487,18 +510,11 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
               </div>
             </div>
           ) : (
-            <div className="flex w-full flex-col gap-4 overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(155deg,_rgba(20,22,32,0.95)_0%,_rgba(12,14,24,0.98)_60%,_rgba(9,11,20,0.98)_100%)] p-5 text-white/80 shadow-[0_24px_96px_-36px_rgba(11,14,30,0.85)] backdrop-blur-xl">
+            <div className="flex w-full flex-col gap-4 overflow-hidden rounded-[28px] border border-[#303030] bg-[#202020] p-5 text-white/80 shadow-[0_24px_96px_-36px_rgba(11,14,30,0.85)]">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-semibold text-white">ChefCopilot</h2>
-                    <motion.span
-                      className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-200 shadow-sm"
-                      animate={{ opacity: [0.75, 1, 0.75] }}
-                      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                    >
-                      Asistente activo
-                    </motion.span>
                   </div>
                   <p className="text-sm text-white/60">
                     Tu asesor experto en cocina profesional
@@ -553,7 +569,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
               </div>
 
               <form onSubmit={handleCompactHeroSubmit}>
-                <div className="flex items-center gap-3 rounded-2xl border border-white/12 bg-white/5 px-4 py-3 shadow-inner transition focus-within:border-cyan-400/60 focus-within:bg-white/10">
+                <div className="flex items-center gap-3 rounded-2xl border border-[#3a3a3a] bg-[#2A2A2A] px-4 py-3 shadow-inner transition focus-within:border-cyan-400/60">
                   <input
                     type="text"
                     value={heroInput}
@@ -561,6 +577,7 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                     placeholder="Pregunta cualquier cosa..."
                     className="flex-1 bg-transparent text-sm text-white placeholder-white/50 focus:outline-none"
                     aria-label="Pregunta al asistente"
+                    ref={heroInputRef}
                   />
                   <div className="flex items-center gap-2">
                     <button
@@ -624,16 +641,18 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
                 </svg>
                 <div className="relative h-5 overflow-hidden">
                   <AnimatePresence mode="wait">
-                    <motion.span
+                    <motion.button
                       key={currentSuggestion}
                       initial={{ y: 12, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
                       exit={{ y: -12, opacity: 0 }}
                       transition={{ duration: 0.45, ease: 'easeInOut' }}
-                      className="block text-white/80"
+                      type="button"
+                      onClick={() => handleSuggestionClick(currentSuggestion)}
+                      className="rounded-full px-3 py-1 text-left text-white/80 ring-offset-[#202020] transition hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/60"
                     >
                       {currentSuggestion}
-                    </motion.span>
+                    </motion.button>
                   </AnimatePresence>
                 </div>
               </div>
