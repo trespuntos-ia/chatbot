@@ -122,6 +122,13 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
 
   return (
     <>
+      {isOpen && isExpanded && (
+        <div className="fixed inset-0 z-40 pointer-events-none">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_55%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_right,_rgba(37,99,235,0.18),_transparent_60%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(140deg,_rgba(5,10,19,0.96)_0%,_rgba(11,18,34,0.94)_45%,_rgba(4,9,20,0.98)_100%)]" />
+        </div>
+      )}
       {/* Botón animado "Abrir Asistente" - aparece cuando el modal está cerrado */}
       {!isOpen && (
         <motion.button
@@ -230,9 +237,9 @@ export function ChatWidget({ config = DEFAULT_CHAT_CONFIG }: ChatWidgetProps) {
         }`}
       >
         {/* Contenedor principal con esquinas redondeadas y sombra */}
-        <div className={`bg-[#202020] shadow-2xl flex flex-col h-full overflow-hidden border border-gray-700/50 ${
+        <div className={`flex flex-col h-full overflow-hidden border border-gray-700/50 shadow-[0_30px_120px_-40px_rgba(8,12,24,0.85)] ${
           isExpanded ? 'md:rounded-2xl' : 'rounded-2xl'
-        }`}>
+        } ${isExpanded ? 'bg-[linear-gradient(160deg,_rgba(9,13,23,0.95)_0%,_rgba(7,12,25,0.92)_60%,_rgba(3,7,18,0.96)_100%)]' : 'bg-[#202020]'}`}>
           {/* Header con hero interactivo */}
           <div className="px-6 py-6 border-b border-gray-700/50 bg-gradient-to-br from-[#18181b] via-[#15161b] to-[#11121a]">
             <div className="flex items-start justify-between gap-4">
