@@ -5,6 +5,60 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>prestashop-products-app</title>
+    <script>
+      // Silenciar errores de Shadow DOM de extensiones del navegador (como poetry.js)
+      // Este código debe ejecutarse ANTES de cualquier otro script
+      (function() {
+        // Guardar el console.error original
+        const originalConsoleError = console.error;
+        
+        // Sobrescribir console.error para filtrar errores de Shadow DOM
+        console.error = function(...args) {
+          const errorMessage = args.join(' ');
+          if (
+            errorMessage.includes('attachShadow') ||
+            errorMessage.includes('Shadow root cannot be created') ||
+            errorMessage.includes('poetry.js')
+          ) {
+            // Silenciar este error específico
+            return;
+          }
+          // Llamar al console.error original para otros errores
+          originalConsoleError.apply(console, args);
+        };
+        
+        // Manejador de errores global
+        window.addEventListener('error', function(event) {
+          const errorMessage = event.message || '';
+          const errorSource = event.filename || '';
+          
+          if (
+            errorMessage.includes('attachShadow') ||
+            errorMessage.includes('Shadow root cannot be created') ||
+            errorSource.includes('poetry.js') ||
+            errorSource.includes('extension://')
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            return false;
+          }
+        }, true);
+        
+        // Manejador de promesas rechazadas
+        window.addEventListener('unhandledrejection', function(event) {
+          const reason = event.reason;
+          const errorMessage = reason?.message || String(reason) || '';
+          
+          if (
+            errorMessage.includes('attachShadow') ||
+            errorMessage.includes('Shadow root cannot be created')
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
