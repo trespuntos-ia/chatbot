@@ -68,9 +68,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       allProducts = data || [];
     } else if (!force) {
       // Límite por defecto si no es force
-      // CONFIGURABLE: Aumentar si la conexión es estable (50 → 100, 150, etc.)
-      // Con chunking optimizado (~5-10 chunks/producto), 100 productos = ~500-1000 chunks ≈ 1-2 min
-      const DEFAULT_LIMIT = 100; // Aumentado de 50 a 100 para indexar más productos
+      // OPTIMIZADO PARA MÁXIMA COBERTURA: Aumentado para indexar más productos y generar más chunks
+      // Con chunking optimizado (~5-10 chunks/producto), 150 productos = ~750-1500 chunks ≈ 2-3 min
+      // Vercel timeout es 5 minutos, así que tenemos margen de seguridad
+      const DEFAULT_LIMIT = 150; // Aumentado para máxima cobertura del catálogo
       console.log(`[index-products-rag] Fetching ${DEFAULT_LIMIT} products (default limit)...`);
       const { data, error } = await supabase
         .from('products')
@@ -81,10 +82,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       allProducts = data || [];
     } else {
       // force=true: obtener productos NO indexados usando consulta SQL eficiente
-      // CONFIGURABLE: Aumentar si la conexión es estable (50 → 100, 150, etc.)
-      // Con chunking optimizado (~5-10 chunks/producto), 100 productos = ~500-1000 chunks ≈ 1-2 min
-      // Vercel timeout es 5 minutos, así que tenemos margen de seguridad
-      const MAX_PRODUCTS_PER_CALL = 100; // Aumentado de 50 a 100 para indexar más productos por llamada
+      // OPTIMIZADO PARA MÁXIMA COBERTURA: Aumentado para indexar más productos y generar más chunks
+      // Con chunking optimizado (~5-10 chunks/producto), 150 productos = ~750-1500 chunks ≈ 2-3 min
+      // Vercel timeout es 5 minutos, así que tenemos margen de seguridad (2 minutos de buffer)
+      const MAX_PRODUCTS_PER_CALL = 150; // Aumentado para máxima cobertura del catálogo
       console.log(`[index-products-rag] Fetching unindexed products (max ${MAX_PRODUCTS_PER_CALL} per call)...`);
       
       // Usar RPC o consulta directa para obtener productos no indexados
@@ -185,10 +186,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`[index-products-rag] Found ${products.length} products to index`);
 
     let indexed = 0;
-    // CONFIGURABLE: Aumentar batch size si la conexión es estable (5 → 10, 15, etc.)
-    // Con batch de 10 productos: ~50-100 chunks por batch ≈ 10-20 segundos
+    // OPTIMIZADO PARA MÁXIMA COBERTURA: Batch size aumentado para procesar más productos eficientemente
+    // Con batch de 15 productos: ~75-150 chunks por batch ≈ 15-30 segundos
     // Esto permite procesar más productos sin riesgo de timeout
-    const batchSize = 10; // Aumentado de 5 a 10 para procesar más rápido
+    const batchSize = 15; // Aumentado para máxima eficiencia y cobertura
     const errors: string[] = [];
 
     for (let i = 0; i < products.length; i += batchSize) {
