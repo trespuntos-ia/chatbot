@@ -64,7 +64,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    console.log('[index-products-rag-auto] Starting automatic indexing...');
+    // Log detallado para verificar que el cron funciona
+    const source = isVercelCron ? 'Vercel Cron' : isManual ? 'Manual Test' : 'Authorized';
+    console.log(`[index-products-rag-auto] Starting automatic indexing... Source: ${source}`);
+    console.log(`[index-products-rag-auto] Headers: x-vercel-cron=${req.headers['x-vercel-cron']}, manual=${isManual}`);
 
     // OPTIMIZADO: Aumentado para máxima cobertura y velocidad
     // Con chunking optimizado (~5-10 chunks/producto), 150 productos = ~750-1500 chunks ≈ 2-3 min
@@ -226,7 +229,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const remaining = Math.max(0, (totalProducts || 0) - totalIndexed);
 
-    return res.status(200).json({
+    const responseMessage = {
       success: true,
       message: `✅ Indexados ${indexed} productos automáticamente. Quedan ${remaining} por indexar.${remaining > 0 ? ' El cron job continuará automáticamente.' : ' ¡Completado!'}`,
       indexed,
@@ -236,7 +239,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       completed: remaining === 0,
       errors: errors.length > 0 ? errors : undefined,
       nextRun: remaining > 0 ? 'El cron job ejecutará de nuevo en 5 minutos' : 'No hay más productos por indexar',
-    });
+      source: isVercelCron ? 'Vercel Cron' : isManual ? 'Manual Test' : 'Authorized',
+      timestamp: new Date().toISOString(),
+    };
+
+    console.log(`[index-products-rag-auto] ✅ Completed: ${indexed} products indexed, ${remaining} remaining`);
+    
+    return res.status(200).json(responseMessage);
   } catch (error) {
     console.error('[index-products-rag-auto] Error:', error);
     return res.status(500).json({
