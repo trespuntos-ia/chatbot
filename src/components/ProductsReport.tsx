@@ -40,11 +40,34 @@ export function ProductsReport() {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [indexing, setIndexing] = useState(false);
+  const [indexingProgress, setIndexingProgress] = useState<string>('');
+  const [indexedStats, setIndexedStats] = useState<{ total: number; uniqueProducts: number } | null>(null);
   const itemsPerPage = 20;
 
   useEffect(() => {
     fetchProducts();
+    fetchIndexedStats();
+    
+    // Auto-refresh de estadísticas cada 30 segundos para ver progreso del cron
+    const statsInterval = setInterval(() => {
+      fetchIndexedStats();
+    }, 30000); // Actualizar cada 30 segundos
+    
+    return () => clearInterval(statsInterval);
   }, [currentPage, searchTerm, selectedCategory]);
+
+  const fetchIndexedStats = async () => {
+    try {
+      const response = await fetch('/api/get-indexed-stats');
+      if (response.ok) {
+        const data = await response.json();
+        setIndexedStats(data);
+      }
+    } catch (err) {
+      console.error('Error fetching indexed stats:', err);
+    }
+  };
 
   // Log para depuración: verificar si los productos tienen all_categories
   useEffect(() => {
@@ -175,8 +198,101 @@ export function ProductsReport() {
       .flatMap(cat => cat.split(',').map(c => c.trim()))
       .filter(Boolean)));
 
+  const handleIndexProducts = async (limit?: number) => {
+    setIndexing(true);
+    setIndexingProgress('Iniciando indexación...');
+    setError('');
+
+    try {
+      const response = await fetch('/api/index-products-rag', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          limit: limit || undefined,
+          force: !limit,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.details || 'Error al indexar productos');
+      }
+
+      setIndexingProgress(`✅ ${data.message || `Indexados ${data.indexed || 0} productos`}`);
+      
+      // Actualizar estadísticas de indexación inmediatamente
+      await fetchIndexedStats();
+      
+      // También actualizar después de 2 segundos para asegurar que se refleje el cambio
+      setTimeout(() => {
+        fetchIndexedStats();
+      }, 2000);
+      
+      // Esperar un momento antes de ocultar el mensaje
+      setTimeout(() => {
+        setIndexingProgress('');
+        setIndexing(false);
+      }, 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al indexar productos');
+      setIndexing(false);
+      setIndexingProgress('');
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Indexación RAG - Simplificado */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">
+              Búsqueda Semántica (RAG)
+            </h3>
+            {indexedStats && (
+              <div className="flex flex-wrap gap-4 text-sm mb-2">
+                <span className="text-slate-700">
+                  <strong>Chunks:</strong> {indexedStats.total.toLocaleString()}
+                </span>
+                <span className="text-slate-700">
+                  <strong>Productos:</strong> {indexedStats.uniqueProducts.toLocaleString()}
+                </span>
+              </div>
+            )}
+            {indexingProgress && (
+              <p className="text-sm text-indigo-700 font-medium">{indexingProgress}</p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleIndexProducts()}
+              disabled={indexing}
+              className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
+            >
+              {indexing ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Indexando...
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  Indexar Productos
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Estadísticas */}
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
