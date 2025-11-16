@@ -255,20 +255,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Calcular cuántos productos quedan por indexar
+    // Calcular cuántos productos quedan por indexar (usando paginación para obtener todos)
     const { count: totalProductsCount } = await supabase
       .from('products')
       .select('*', { count: 'exact', head: true });
     
-    const { data: indexedProductsData } = await supabase
-      .from('product_embeddings')
-      .select('product_id')
-      .limit(10000);
+    const indexedProductIds = new Set<number>();
+    let offset = 0;
+    const pageSize = 10000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: indexedProductsData, error: fetchError } = await supabase
+        .from('product_embeddings')
+        .select('product_id')
+        .range(offset, offset + pageSize - 1);
+
+      if (fetchError) {
+        console.error('[index-products-rag] Error fetching indexed products:', fetchError);
+        break;
+      }
+
+      if (!indexedProductsData || indexedProductsData.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      indexedProductsData.forEach((item: any) => {
+        if (item.product_id) {
+          indexedProductIds.add(item.product_id);
+        }
+      });
+
+      if (indexedProductsData.length < pageSize) {
+        hasMore = false;
+      } else {
+        offset += pageSize;
+      }
+
+      // Límite de seguridad
+      if (offset > 100000) {
+        console.warn('[index-products-rag] Reached safety limit while counting indexed products');
+        break;
+      }
+    }
     
     const totalProducts = totalProductsCount || 0;
-    const indexedProductIds = new Set(
-      indexedProductsData?.map((p: any) => p.product_id) || []
-    );
     const totalIndexed = indexedProductIds.size;
     const remaining = Math.max(0, totalProducts - totalIndexed);
 

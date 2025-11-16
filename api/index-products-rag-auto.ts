@@ -74,15 +74,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Vercel timeout es 5 minutos, así que tenemos margen de seguridad
     const PRODUCTS_PER_RUN = 150; // Aumentado de 50 a 150 para indexar más rápido
 
-    // Obtener IDs de productos ya indexados
-    const { data: indexedProducts } = await supabase
-      .from('product_embeddings')
-      .select('product_id')
-      .limit(50000);
+    // Obtener IDs de productos ya indexados (usando paginación para obtener todos)
+    const indexedIds = new Set<number>();
+    let offset = 0;
+    const pageSize = 10000;
+    let hasMore = true;
 
-    const indexedIds = new Set(
-      indexedProducts?.map(p => p.product_id) || []
-    );
+    while (hasMore) {
+      const { data: indexedProducts, error: fetchError } = await supabase
+        .from('product_embeddings')
+        .select('product_id')
+        .range(offset, offset + pageSize - 1);
+
+      if (fetchError) {
+        console.error('[index-products-rag-auto] Error fetching indexed products:', fetchError);
+        break;
+      }
+
+      if (!indexedProducts || indexedProducts.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      indexedProducts.forEach((item: any) => {
+        if (item.product_id) {
+          indexedIds.add(item.product_id);
+        }
+      });
+
+      if (indexedProducts.length < pageSize) {
+        hasMore = false;
+      } else {
+        offset += pageSize;
+      }
+
+      // Límite de seguridad
+      if (offset > 100000) {
+        console.warn('[index-products-rag-auto] Reached safety limit while fetching indexed products');
+        break;
+      }
+    }
 
     console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products`);
 
@@ -218,14 +249,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('products')
       .select('*', { count: 'exact', head: true });
 
-    const { data: updatedIndexedProducts } = await supabase
-      .from('product_embeddings')
-      .select('product_id')
-      .limit(50000);
+    // Recontar productos indexados usando paginación para obtener todos
+    const updatedIndexedIds = new Set<number>();
+    offset = 0;
+    hasMore = true;
 
-    const totalIndexed = new Set(
-      updatedIndexedProducts?.map(p => p.product_id) || []
-    ).size;
+    while (hasMore) {
+      const { data: updatedIndexedProducts, error: fetchError } = await supabase
+        .from('product_embeddings')
+        .select('product_id')
+        .range(offset, offset + pageSize - 1);
+
+      if (fetchError) {
+        console.error('[index-products-rag-auto] Error recounting indexed products:', fetchError);
+        break;
+      }
+
+      if (!updatedIndexedProducts || updatedIndexedProducts.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      updatedIndexedProducts.forEach((item: any) => {
+        if (item.product_id) {
+          updatedIndexedIds.add(item.product_id);
+        }
+      });
+
+      if (updatedIndexedProducts.length < pageSize) {
+        hasMore = false;
+      } else {
+        offset += pageSize;
+      }
+
+      // Límite de seguridad
+      if (offset > 100000) {
+        console.warn('[index-products-rag-auto] Reached safety limit while recounting');
+        break;
+      }
+    }
+
+    const totalIndexed = updatedIndexedIds.size;
 
     const remaining = Math.max(0, (totalProducts || 0) - totalIndexed);
 
