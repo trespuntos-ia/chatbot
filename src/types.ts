@@ -8,6 +8,7 @@ export interface CategoryInfo {
 }
 
 export interface Product {
+  id?: number;
   name: string;
   price: string;
   category: string;
@@ -19,6 +20,14 @@ export interface Product {
   date_add?: string; // Fecha de creación en PrestaShop
   colors?: string[]; // Colores disponibles del producto
   all_categories?: CategoryInfo[] | null; // Todas las categorías del producto con jerarquía completa
+}
+
+export interface ProductSummary {
+  id: number;
+  name: string;
+  sku: string;
+  product_url?: string | null;
+  price?: string | null;
 }
 
 export interface ApiConfig {
@@ -133,6 +142,10 @@ export interface Document {
   created_at?: string;
   updated_at?: string;
   has_extracted_text?: boolean; // Indica si el documento tiene texto extraído
+  product_id?: number | null;
+  product_name?: string | null;
+  product_sku?: string | null;
+  product_url?: string | null;
 }
 
 export interface DocumentUploadResponse {
@@ -148,5 +161,16 @@ export interface DocumentSearchResult {
   file_type: string;
   snippet: string;
   created_at?: string;
+}
+
+export interface ProductVideo {
+  id: number;
+  title: string;
+  youtube_url: string;
+  product_id?: number | null;
+  created_at?: string;
+  product_name?: string | null;
+  product_sku?: string | null;
+  product_url?: string | null;
 }
 

@@ -2,6 +2,11 @@ import type { ChatMessage, ChatConfig, ChatResponse } from '../types';
 
 const API_BASE = '/api';
 
+// Flag para usar RAG - ACTIVADO por defecto para usar el nuevo sistema RAG
+// Cambia a false si quieres volver al sistema anterior de búsqueda exacta
+// Para desactivar RAG, crea variable de entorno: VITE_USE_RAG_CHAT=false
+const USE_RAG_CHAT = import.meta.env.VITE_USE_RAG_CHAT !== 'false'; // Por defecto true (usa RAG)
+
 /**
  * Enviar mensaje al chat
  */
@@ -12,7 +17,10 @@ export async function sendChatMessage(
   sessionId?: string
 ): Promise<ChatResponse> {
   try {
-    const response = await fetch(`${API_BASE}/chat`, {
+    // Usar endpoint RAG si está habilitado, sino usar el endpoint tradicional
+    const endpoint = USE_RAG_CHAT ? `${API_BASE}/chat-rag` : `${API_BASE}/chat`;
+    
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

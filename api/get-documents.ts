@@ -42,7 +42,7 @@ export default async function handler(
     // Incluimos extracted_text para verificar si está procesado (pero no lo enviamos completo, solo su longitud)
     const { data, error } = await supabase
       .from('documents')
-      .select('id, filename, original_filename, file_type, file_size, mime_type, created_at, updated_at, extracted_text')
+      .select('id, filename, original_filename, file_type, file_size, mime_type, created_at, updated_at, extracted_text, product_id')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -53,19 +53,57 @@ export default async function handler(
       });
       return;
     }
-    
+    const productIds = Array.from(
+      new Set(
+        (data || [])
+          .map((doc: any) => (typeof doc.product_id === 'number' ? doc.product_id : null))
+          .filter((id): id is number => id !== null)
+      )
+    );
+
+    let productsById: Record<number, { name: string; sku: string; product_url: string | null }> = {};
+
+    if (productIds.length > 0) {
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('id, name, sku, product_url')
+        .in('id', productIds);
+
+      if (productsError) {
+        console.warn('Supabase products fetch error:', productsError);
+      } else if (Array.isArray(productsData)) {
+        productsById = productsData.reduce((acc, product) => {
+          if (typeof product.id === 'number') {
+            acc[product.id] = {
+              name: product.name ?? '',
+              sku: product.sku ?? '',
+              product_url: product.product_url ?? null
+            };
+          }
+          return acc;
+        }, {} as Record<number, { name: string; sku: string; product_url: string | null }>);
+      }
+    }
+
     // Transformar para incluir solo si tiene texto (no el texto completo)
-    const documents = (data || []).map((doc: any) => ({
-      id: doc.id,
-      filename: doc.filename,
-      original_filename: doc.original_filename,
-      file_type: doc.file_type,
-      file_size: doc.file_size,
-      mime_type: doc.mime_type,
-      created_at: doc.created_at,
-      updated_at: doc.updated_at,
-      has_extracted_text: !!(doc.extracted_text && doc.extracted_text.length > 0)
-    }));
+    const documents = (data || []).map((doc: any) => {
+      const product = doc.product_id ? productsById[doc.product_id] : undefined;
+      return {
+        id: doc.id,
+        filename: doc.filename,
+        original_filename: doc.original_filename,
+        file_type: doc.file_type,
+        file_size: doc.file_size,
+        mime_type: doc.mime_type,
+        created_at: doc.created_at,
+        updated_at: doc.updated_at,
+        has_extracted_text: !!(doc.extracted_text && doc.extracted_text.length > 0),
+        product_id: doc.product_id ?? null,
+        product_name: product?.name ?? null,
+        product_sku: product?.sku ?? null,
+        product_url: product?.product_url ?? null
+      };
+    });
 
     res.status(200).json({
       success: true,

@@ -178,11 +178,14 @@ export function PromptConfig() {
   const loadPrompts = async () => {
     try {
       setIsLoading(true);
+      setError('');
       const data = await getPrompts();
       setPrompts(data);
-      setError('');
+      console.log('Prompts cargados:', data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar prompts');
+      const errorMessage = err instanceof Error ? err.message : 'Error al cargar prompts';
+      console.error('Error cargando prompts:', err);
+      setError(`Error al cargar prompts: ${errorMessage}. Verifica que la tabla system_prompts existe en Supabase y que el endpoint /api/prompts funciona.`);
     } finally {
       setIsLoading(false);
     }

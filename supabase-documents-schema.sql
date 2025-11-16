@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS documents (
   file_content BYTEA,
   extracted_text TEXT,
   mime_type TEXT,
+  product_id BIGINT REFERENCES products(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
 );
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS documents (
 DROP INDEX IF EXISTS idx_documents_filename;
 DROP INDEX IF EXISTS idx_documents_extracted_text;
 DROP INDEX IF EXISTS idx_documents_file_type;
+DROP INDEX IF EXISTS idx_documents_product_id;
 
 -- Índice para búsquedas por nombre de archivo
 CREATE INDEX idx_documents_filename ON documents(filename);
@@ -34,6 +36,7 @@ CREATE INDEX idx_documents_extracted_text ON documents USING gin(to_tsvector('sp
 
 -- Índice para búsquedas por tipo de archivo
 CREATE INDEX idx_documents_file_type ON documents(file_type);
+CREATE INDEX idx_documents_product_id ON documents(product_id);
 
 -- Función para actualizar updated_at automáticamente (idempotente)
 CREATE OR REPLACE FUNCTION update_documents_updated_at()
@@ -61,6 +64,7 @@ COMMENT ON COLUMN documents.file_size IS 'Tamaño del archivo en bytes';
 COMMENT ON COLUMN documents.file_content IS 'Contenido binario del archivo';
 COMMENT ON COLUMN documents.extracted_text IS 'Texto extraído del documento para búsqueda';
 COMMENT ON COLUMN documents.mime_type IS 'Tipo MIME del archivo';
+COMMENT ON COLUMN documents.product_id IS 'ID del producto asociado';
 COMMENT ON COLUMN documents.created_at IS 'Fecha de creación del registro';
 COMMENT ON COLUMN documents.updated_at IS 'Fecha de última actualización';
 

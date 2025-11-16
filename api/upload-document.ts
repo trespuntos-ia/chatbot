@@ -1,6 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '6mb',
+    },
+  },
+};
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
@@ -35,7 +43,7 @@ export default async function handler(
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Obtener datos del body
-    const { file, filename, mimeType, extractedText } = req.body;
+    const { file, filename, mimeType, extractedText, productId } = req.body;
 
     console.log('Request body:', {
       hasFile: !!file,
@@ -75,6 +83,45 @@ export default async function handler(
       bufferType: fileBuffer.constructor.name
     });
 
+    let productDetails:
+      | { id: number; name: string | null; sku: string | null; product_url: string | null }
+      | null = null;
+
+    if (productId !== null && productId !== undefined) {
+      if (typeof productId !== 'number') {
+        res.status(400).json({
+          error: 'ID de producto inválido',
+          details: 'El ID del producto debe ser un número o null',
+        });
+        return;
+      }
+
+      const { data: product, error: productError } = await supabase
+        .from('products')
+        .select('id, name, sku, product_url')
+        .eq('id', productId)
+        .maybeSingle();
+
+      if (productError) {
+        console.error('Supabase product fetch error:', productError);
+        res.status(500).json({
+          error: 'Error verificando el producto',
+          details: productError.message,
+        });
+        return;
+      }
+
+      if (!product) {
+        res.status(404).json({
+          error: 'Producto no encontrado',
+          details: `No existe un producto con ID ${productId}`,
+        });
+        return;
+      }
+
+      productDetails = product;
+    }
+
     // Guardar el archivo con texto extraído (si viene del cliente)
     // El texto se extrae en el cliente usando pdf.js para evitar problemas en Vercel
     try {
@@ -95,7 +142,8 @@ export default async function handler(
           file_size: fileBuffer.length,
           file_content: fileBuffer,
           extracted_text: finalExtractedText,
-          mime_type: mimeType || 'application/octet-stream'
+          mime_type: mimeType || 'application/octet-stream',
+          product_id: typeof productId === 'number' ? productId : null,
         })
         .select()
         .single();
@@ -124,7 +172,11 @@ export default async function handler(
           id: data.id,
           filename: data.original_filename,
           file_type: data.file_type,
-          file_size: data.file_size
+          file_size: data.file_size,
+          product_id: data.product_id ?? null,
+          product_name: productDetails?.name ?? null,
+          product_sku: productDetails?.sku ?? null,
+          product_url: productDetails?.product_url ?? null,
         }
       });
     } catch (dbError) {
