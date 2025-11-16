@@ -119,7 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       // Si no encontramos suficientes, intentar con offset
       if (allProducts.length < MAX_PRODUCTS_PER_CALL && data && data.length === fetchLimit) {
-        console.log('[index-products-rag] Not enough unindexed products, trying with offset...');
+        console.log(`[index-products-rag] Not enough unindexed products (found ${allProducts.length}), trying with offset...`);
         let offset = fetchLimit;
         let attempts = 0;
         const maxAttempts = 5; // Máximo 5 intentos adicionales

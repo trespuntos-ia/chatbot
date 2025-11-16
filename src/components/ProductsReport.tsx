@@ -200,19 +200,20 @@ export function ProductsReport() {
 
   const handleIndexProducts = async (limit?: number) => {
     setIndexing(true);
-    setIndexingProgress('Iniciando indexación...');
+    setIndexingProgress('Iniciando indexación automática...');
     setError('');
 
     try {
-      const response = await fetch('/api/index-products-rag', {
-        method: 'POST',
+      // Usar el endpoint automático que es más eficiente y cuenta correctamente
+      const endpoint = limit 
+        ? `/api/index-products-rag-auto?manual=true` 
+        : `/api/index-products-rag-auto?manual=true`;
+      
+      const response = await fetch(endpoint, {
+        method: 'GET', // El endpoint automático acepta GET
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          limit: limit || undefined,
-          force: !limit,
-        }),
       });
 
       const data = await response.json();
