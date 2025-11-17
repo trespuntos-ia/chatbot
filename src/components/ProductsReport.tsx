@@ -39,7 +39,9 @@ export function ProductsReport() {
   const [error, setError] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedCategory1, setSelectedCategory1] = useState<string>('');
+  const [selectedCategory2, setSelectedCategory2] = useState<string>('');
+  const [selectedCategory3, setSelectedCategory3] = useState<string>('');
   const [indexing, setIndexing] = useState(false);
   const [indexingProgress, setIndexingProgress] = useState<string>('');
   const [indexedStats, setIndexedStats] = useState<{ total: number; uniqueProducts: number } | null>(null);
@@ -55,7 +57,7 @@ export function ProductsReport() {
     }, 30000); // Actualizar cada 30 segundos
     
     return () => clearInterval(statsInterval);
-  }, [currentPage, searchTerm, selectedCategory]);
+  }, [currentPage, searchTerm, selectedCategory1, selectedCategory2, selectedCategory3]);
 
   const fetchIndexedStats = async () => {
     try {
@@ -97,8 +99,14 @@ export function ProductsReport() {
         params.append('search', searchTerm);
       }
 
-      if (selectedCategory) {
-        params.append('category', selectedCategory);
+      if (selectedCategory1) {
+        params.append('category1', selectedCategory1);
+      }
+      if (selectedCategory2) {
+        params.append('category2', selectedCategory2);
+      }
+      if (selectedCategory3) {
+        params.append('category3', selectedCategory3);
       }
 
       const response = await fetch(`/api/get-products?${params.toString()}`);
@@ -145,41 +153,63 @@ export function ProductsReport() {
 
   const totalPages = stats ? Math.ceil(stats.total / itemsPerPage) : 1;
   
-  // Obtener todas las categorías únicas de TODOS los productos (no solo de la página actual)
-  // Necesitamos hacer una llamada separada para obtener todas las categorías
-  const [allCategoriesList, setAllCategoriesList] = useState<string[]>([]);
+  // Estructura jerárquica de categorías
+  interface CategoryHierarchy {
+    level1: Set<string>;
+    level2: Map<string, Set<string>>; // nivel1 -> Set de nivel2
+    level3: Map<string, Set<string>>; // nivel2 -> Set de nivel3
+  }
+
+  const [categoryHierarchy, setCategoryHierarchy] = useState<CategoryHierarchy>({
+    level1: new Set(),
+    level2: new Map(),
+    level3: new Map(),
+  });
   
   useEffect(() => {
-    // Obtener todas las categorías únicas de la base de datos
+    // Obtener todas las categorías únicas de la base de datos y construir jerarquía
     const fetchAllCategories = async () => {
       try {
-        // Hacer una llamada para obtener todas las categorías únicas
-        // Usamos un límite alto para obtener todas las categorías
         const response = await fetch('/api/get-products?limit=10000&offset=0');
         const data = await response.json();
         
         if (data.products && Array.isArray(data.products)) {
-          const categoriesSet = new Set<string>();
+          const hierarchy: CategoryHierarchy = {
+            level1: new Set(),
+            level2: new Map(),
+            level3: new Map(),
+          };
           
-          // Extraer categorías de all_categories (nuevo formato)
+          // Construir jerarquía desde all_categories
           data.products.forEach((p: ProductFromDB) => {
             if (p.all_categories && Array.isArray(p.all_categories)) {
               p.all_categories.forEach((cat: CategoryInfo) => {
-                if (cat.category) categoriesSet.add(cat.category);
-                if (cat.subcategory) categoriesSet.add(cat.subcategory);
-                if (cat.subsubcategory) categoriesSet.add(cat.subsubcategory);
-              });
-            }
-            // También incluir categorías del formato antiguo
-            if (p.category) {
-              p.category.split(',').forEach(c => {
-                const trimmed = c.trim();
-                if (trimmed) categoriesSet.add(trimmed);
+                // Nivel 1
+                if (cat.category) {
+                  hierarchy.level1.add(cat.category);
+                  
+                  // Nivel 2 (solo si hay nivel 1)
+                  if (cat.subcategory) {
+                    if (!hierarchy.level2.has(cat.category)) {
+                      hierarchy.level2.set(cat.category, new Set());
+                    }
+                    hierarchy.level2.get(cat.category)!.add(cat.subcategory);
+                    
+                    // Nivel 3 (solo si hay nivel 2)
+                    if (cat.subsubcategory) {
+                      const level2Key = `${cat.category} > ${cat.subcategory}`;
+                      if (!hierarchy.level3.has(level2Key)) {
+                        hierarchy.level3.set(level2Key, new Set());
+                      }
+                      hierarchy.level3.get(level2Key)!.add(cat.subsubcategory);
+                    }
+                  }
+                }
               });
             }
           });
           
-          setAllCategoriesList(Array.from(categoriesSet).sort());
+          setCategoryHierarchy(hierarchy);
         }
       } catch (err) {
         console.error('Error obteniendo todas las categorías:', err);
@@ -187,16 +217,41 @@ export function ProductsReport() {
     };
     
     fetchAllCategories();
-  }, [stats?.total]); // Re-ejecutar cuando cambie el total de productos
-  
-  // Para el filtro, usar todas las categorías obtenidas
-  const categories = allCategoriesList.length > 0 ? allCategoriesList : 
-    // Fallback: usar categorías de la página actual si no se han cargado todas
-    Array.from(new Set(products
-      .map(p => p.category)
-      .filter(Boolean)
-      .flatMap(cat => cat.split(',').map(c => c.trim()))
-      .filter(Boolean)));
+  }, [stats?.total]);
+
+  // Obtener categorías nivel 2 según la selección de nivel 1
+  const getLevel2Categories = (): string[] => {
+    if (!selectedCategory1) return [];
+    const level2Set = categoryHierarchy.level2.get(selectedCategory1);
+    return level2Set ? Array.from(level2Set).sort() : [];
+  };
+
+  // Obtener categorías nivel 3 según la selección de nivel 2
+  const getLevel3Categories = (): string[] => {
+    if (!selectedCategory1 || !selectedCategory2) return [];
+    const level2Key = `${selectedCategory1} > ${selectedCategory2}`;
+    const level3Set = categoryHierarchy.level3.get(level2Key);
+    return level3Set ? Array.from(level3Set).sort() : [];
+  };
+
+  // Resetear niveles inferiores cuando cambia un nivel superior
+  const handleCategory1Change = (value: string) => {
+    setSelectedCategory1(value);
+    setSelectedCategory2('');
+    setSelectedCategory3('');
+    setCurrentPage(1);
+  };
+
+  const handleCategory2Change = (value: string) => {
+    setSelectedCategory2(value);
+    setSelectedCategory3('');
+    setCurrentPage(1);
+  };
+
+  const handleCategory3Change = (value: string) => {
+    setSelectedCategory3(value);
+    setCurrentPage(1);
+  };
 
   const handleIndexProducts = async (limit?: number) => {
     setIndexing(true);
@@ -401,8 +456,9 @@ export function ProductsReport() {
 
       {/* Filtros y búsqueda */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
+        <div className="flex flex-col gap-4">
+          {/* Búsqueda por nombre o SKU */}
+          <div className="relative">
             <input
               type="text"
               placeholder="Buscar por nombre o SKU..."
@@ -428,21 +484,70 @@ export function ProductsReport() {
               />
             </svg>
           </div>
-          <select
-            value={selectedCategory}
-            onChange={(e) => {
-              setSelectedCategory(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-          >
-            <option value="">Todas las categorías</option>
-            {categories.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
+          
+          {/* Filtros jerárquicos de categorías */}
+          <div className="flex flex-col sm:flex-row gap-4">
+            {/* Categoría Nivel 1 */}
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Categoría Nivel 1
+              </label>
+              <select
+                value={selectedCategory1}
+                onChange={(e) => handleCategory1Change(e.target.value)}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+              >
+                <option value="">Todas las categorías</option>
+                {Array.from(categoryHierarchy.level1).sort().map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Categoría Nivel 2 */}
+            {selectedCategory1 && (
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Categoría Nivel 2
+                </label>
+                <select
+                  value={selectedCategory2}
+                  onChange={(e) => handleCategory2Change(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                >
+                  <option value="">Todas las subcategorías</option>
+                  {getLevel2Categories().map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Categoría Nivel 3 */}
+            {selectedCategory1 && selectedCategory2 && (
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Categoría Nivel 3
+                </label>
+                <select
+                  value={selectedCategory3}
+                  onChange={(e) => handleCategory3Change(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                >
+                  <option value="">Todas las sub-subcategorías</option>
+                  {getLevel3Categories().map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

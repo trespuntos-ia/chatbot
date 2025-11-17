@@ -24,6 +24,10 @@
     {
       "path": "/api/cleanup-old-conversations-cron",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/index-products-rag-auto",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -229,7 +229,10 @@ export default async function handler(
     const { 
       limit = '50', 
       offset = '0', 
-      category,
+      category, // Mantener compatibilidad con el filtro antiguo
+      category1, // Categoría nivel 1
+      category2, // Categoría nivel 2
+      category3, // Categoría nivel 3
       search,
       test_product_id // Nuevo parámetro para probar un solo producto
     } = req.query;
@@ -332,13 +335,31 @@ export default async function handler(
       }
     }
 
-    // Query básica - sin ordenar en Supabase para evitar errores
-    // Incluir has_web_content si existe (compatible con versiones anteriores)
+    // Optimizar: usar límite y offset directamente en Supabase
+    const limitNum = Math.min(parseInt(limit as string), 100); // Máximo 100 productos por página
+    const offsetNum = parseInt(offset as string);
+
+    // Si hay filtros jerárquicos, necesitamos obtener más productos para filtrar correctamente
+    // porque el filtrado se hace en memoria después de obtener los datos
+    const hasHierarchicalFilters = !!(category1 || category2 || category3);
+    const fetchLimit = hasHierarchicalFilters 
+      ? Math.max(limitNum * 10, 1000) // Obtener más productos cuando hay filtros jerárquicos
+      : limitNum;
+
+    // Query básica
     let query = supabase
       .from('products')
       .select('*', { count: 'exact' });
 
-    // Filtrar por categoría si se proporciona
+    // Solo aplicar paginación directamente si NO hay filtros jerárquicos
+    if (!hasHierarchicalFilters) {
+      query = query.range(offsetNum, offsetNum + limitNum - 1);
+    } else {
+      // Si hay filtros jerárquicos, obtener más productos para filtrar
+      query = query.range(0, fetchLimit - 1);
+    }
+
+    // Filtrar por categoría antigua (compatibilidad hacia atrás)
     if (category && typeof category === 'string') {
       query = query.ilike('category', `%${category}%`);
     }
@@ -348,8 +369,55 @@ export default async function handler(
       query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
     }
 
-    // Ejecutar query sin ordenar
+    // Ordenar por id descendente (más rápido que ordenar en memoria)
+    query = query.order('id', { ascending: false });
+
+    // Ejecutar query
     const { data, error, count } = await query;
+
+    // Filtrar por categorías jerárquicas después de obtener los datos
+    // (porque Supabase no tiene operadores JSON avanzados para filtrar en all_categories)
+    let filteredData = data || [];
+    
+    if (hasHierarchicalFilters) {
+      filteredData = filteredData.filter((product: any) => {
+        // Si no tiene all_categories, usar el filtro antiguo
+        if (!product.all_categories || !Array.isArray(product.all_categories) || product.all_categories.length === 0) {
+          // Fallback al filtro antiguo si hay category1
+          if (category1 && product.category) {
+            return product.category.includes(category1 as string);
+          }
+          return false;
+        }
+
+        // Buscar en all_categories si coincide con los filtros jerárquicos
+        return product.all_categories.some((cat: any) => {
+          let matches = true;
+          
+          // Filtrar por nivel 1
+          if (category1 && typeof category1 === 'string') {
+            matches = matches && cat.category === category1;
+          }
+          
+          // Filtrar por nivel 2 (solo si también hay nivel 1)
+          if (category2 && typeof category2 === 'string' && matches) {
+            matches = matches && cat.subcategory === category2;
+          }
+          
+          // Filtrar por nivel 3 (solo si también hay nivel 2)
+          if (category3 && typeof category3 === 'string' && matches) {
+            matches = matches && cat.subsubcategory === category3;
+          }
+          
+          return matches;
+        });
+      });
+
+      // Aplicar paginación después del filtrado jerárquico
+      const startIndex = offsetNum;
+      const endIndex = startIndex + limitNum;
+      filteredData = filteredData.slice(startIndex, endIndex);
+    }
 
     if (error) {
       console.error('Supabase error:', {
@@ -383,65 +451,101 @@ export default async function handler(
       return;
     }
 
-    // Ordenar localmente si tenemos datos
-    let sortedData = data || [];
-    if (sortedData.length > 0) {
-      sortedData = sortedData.sort((a: any, b: any) => {
-        // Intentar ordenar por date_add si existe
-        if (a.date_add && b.date_add) {
-          return new Date(b.date_add).getTime() - new Date(a.date_add).getTime();
+    // Los datos ya vienen paginados y ordenados de Supabase
+    // Pero si hay filtros jerárquicos, ya están filtrados en filteredData
+    const paginatedData = filteredData;
+
+    // Optimizar: obtener todos los IDs de una vez para verificar web_content
+    const productIds = paginatedData.map((p: any) => p.id);
+    
+    // Verificar web_content en batch (una sola consulta en lugar de N consultas)
+    let webContentMap = new Map<number, boolean>();
+    if (productIds.length > 0 && !paginatedData.some((p: any) => 'has_web_content' in p)) {
+      try {
+        const { data: webContentData } = await supabase
+          .from('web_content_index')
+          .select('product_id')
+          .in('product_id', productIds)
+          .eq('status', 'active');
+        
+        if (webContentData) {
+          webContentData.forEach((item: any) => {
+            webContentMap.set(item.product_id, true);
+          });
         }
-        if (a.date_add) return -1;
-        if (b.date_add) return 1;
-        // Si no, por created_at
-        if (a.created_at && b.created_at) {
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        }
-        // Por último, por id
-        return (b.id || 0) - (a.id || 0);
-      });
+      } catch {
+        // Si falla (tabla no existe), todos serán false
+      }
     }
 
-    // Aplicar paginación
-    const start = parseInt(offset as string);
-    const end = start + parseInt(limit as string);
-    const paginatedData = sortedData.slice(start, end);
-
-    // Enriquecer productos con información de contenido web si existe la columna
-    // Si has_web_content no existe, intentar calcularlo dinámicamente
-    const enrichedProducts = await Promise.all(
-      paginatedData.map(async (product: any) => {
-        // Si la columna existe, ya está incluida
-        if ('has_web_content' in product) {
-          return product;
-        }
-        
-        // Si no existe, verificar dinámicamente si hay contenido web
-        try {
-          const { data: webContent } = await supabase
-            .from('web_content_index')
-            .select('id')
-            .eq('product_id', product.id)
-            .eq('status', 'active')
-            .limit(1)
-            .single();
-          
-          product.has_web_content = !!webContent;
-        } catch {
-          // Si falla (tabla no existe o no hay relación), asumir false
-          product.has_web_content = false;
-        }
-        
+    // Enriquecer productos con información de contenido web
+    const enrichedProducts = paginatedData.map((product: any) => {
+      // Si la columna existe, ya está incluida
+      if ('has_web_content' in product) {
         return product;
-      })
-    );
+      }
+      
+      // Usar el mapa para verificar web_content
+      product.has_web_content = webContentMap.has(product.id);
+      
+      return product;
+    });
+
+    // Calcular el total correcto: si hay filtros jerárquicos, necesitamos contar todos los filtrados
+    let totalCount = count || 0;
+    
+    if (hasHierarchicalFilters) {
+      // Obtener todos los productos (con filtros de búsqueda aplicados) para contar los que coinciden con los filtros jerárquicos
+      let countQuery = supabase
+        .from('products')
+        .select('id, all_categories, category');
+
+      if (category && typeof category === 'string') {
+        countQuery = countQuery.ilike('category', `%${category}%`);
+      }
+
+      if (search && typeof search === 'string') {
+        countQuery = countQuery.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
+      }
+
+      countQuery = countQuery.order('id', { ascending: false });
+
+      const { data: allData } = await countQuery;
+
+      if (allData) {
+        const filteredCount = allData.filter((product: any) => {
+          if (!product.all_categories || !Array.isArray(product.all_categories) || product.all_categories.length === 0) {
+            if (category1 && product.category) {
+              return product.category.includes(category1 as string);
+            }
+            return false;
+          }
+
+          return product.all_categories.some((cat: any) => {
+            let matches = true;
+            if (category1 && typeof category1 === 'string') {
+              matches = matches && cat.category === category1;
+            }
+            if (category2 && typeof category2 === 'string' && matches) {
+              matches = matches && cat.subcategory === category2;
+            }
+            if (category3 && typeof category3 === 'string' && matches) {
+              matches = matches && cat.subsubcategory === category3;
+            }
+            return matches;
+          });
+        }).length;
+
+        totalCount = filteredCount;
+      }
+    }
 
     res.status(200).json({ 
       success: true,
       products: enrichedProducts,
-      total: count || sortedData.length,
-      limit: parseInt(limit as string),
-      offset: parseInt(offset as string)
+      total: totalCount,
+      limit: limitNum,
+      offset: offsetNum
     });
   } catch (error) {
     console.error('Get products error:', error);
