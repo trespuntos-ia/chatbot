@@ -124,79 +124,175 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    // Búsqueda vectorial directa (sin LangChain para simplificar)
-    console.log('[chat-rag] Generating query embedding...');
+    // PRIMERO: Búsqueda exacta por nombre (más confiable para nombres de productos)
+    console.log('[chat-rag] Starting search - exact name first...');
+    const searchTerm = message.trim();
+    const normalizedSearch = searchTerm.toLowerCase().trim();
+    
+    let exactMatchProducts: any[] = [];
+    const productIds = new Set<number>();
+    const chunksText: string[] = [];
+    
+    // 1. Búsqueda exacta por nombre completo
+    if (normalizedSearch.length > 0) {
+      console.log('[chat-rag] Searching exact name:', normalizedSearch);
+      const { data: exactResults, error: exactError } = await supabase
+        .from('products')
+        .select('id, name, description, category, subcategory, sku, price, image_url, product_url')
+        .ilike('name', `%${normalizedSearch}%`)
+        .limit(10);
+      
+      if (!exactError && exactResults && exactResults.length > 0) {
+        console.log(`[chat-rag] Found ${exactResults.length} products by exact name match`);
+        exactMatchProducts = exactResults;
+      }
+    }
+    
+    // 2. Si no encontramos, buscar por palabras clave individuales
+    if (exactMatchProducts.length === 0 && normalizedSearch.length > 0) {
+      const keywords = normalizedSearch
+        .split(/\s+/)
+        .filter(word => word.length > 2)
+        .slice(0, 3); // Máximo 3 palabras clave
+      
+      console.log('[chat-rag] Trying keyword search:', keywords);
+      
+      for (const keyword of keywords) {
+        const { data: keywordResults, error: keywordError } = await supabase
+          .from('products')
+          .select('id, name, description, category, subcategory, sku, price, image_url, product_url')
+          .ilike('name', `%${keyword}%`)
+          .limit(10);
+        
+        if (!keywordError && keywordResults) {
+          keywordResults.forEach(p => {
+            if (!exactMatchProducts.find(existing => existing.id === p.id)) {
+              exactMatchProducts.push(p);
+            }
+          });
+        }
+      }
+    }
+    
+    // 3. Si encontramos productos exactos, usarlos directamente
+    if (exactMatchProducts.length > 0) {
+      console.log(`[chat-rag] Using ${exactMatchProducts.length} exact match products`);
+      for (const product of exactMatchProducts) {
+        productIds.add(product.id);
+        
+        let productChunk = product.name || '';
+        if (product.category) {
+          productChunk += ` - ${product.category}`;
+        }
+        if (product.subcategory) {
+          productChunk += ` - ${product.subcategory}`;
+        }
+        if (product.description) {
+          productChunk += `. ${product.description}`;
+        }
+        
+        if (productChunk.trim().length > 0) {
+          chunksText.push(productChunk.trim());
+        }
+      }
+    }
+    
+    // 4. ADEMÁS: Búsqueda semántica para complementar (siempre ejecutar)
+    console.log('[chat-rag] Also searching semantically...');
     const queryEmbedding = await generateEmbedding(message);
-
-    console.log('[chat-rag] Searching similar chunks...');
-    // Reducir threshold y aumentar resultados para mejor cobertura
+    
     const { data: similarChunks, error: searchError } = await supabase.rpc(
       'search_similar_chunks',
       {
         query_embedding: `[${queryEmbedding.join(',')}]`,
-        match_threshold: 0.5, // Reducido de 0.7 a 0.5 para encontrar más resultados
-        match_count: 10, // Aumentado de 5 a 10 para mejor cobertura
+        match_threshold: 0.5,
+        match_count: 10,
       }
     );
 
-    if (searchError) {
-      console.error('[chat-rag] Search error:', searchError);
-      throw new Error(`Search error: ${searchError.message}`);
-    }
-
-    console.log('[chat-rag] Found chunks:', similarChunks?.length || 0);
-
-    // Extraer productos mencionados en el contexto
-    const productIds = new Set<number>();
-    const chunksText: string[] = [];
-    
-    if (similarChunks && similarChunks.length > 0) {
+    if (!searchError && similarChunks && similarChunks.length > 0) {
+      console.log('[chat-rag] Found semantic chunks:', similarChunks.length);
+      
       similarChunks.forEach((chunk: any) => {
-        if (chunk.product_id) {
+        // Solo añadir si no está ya en la lista (evitar duplicados)
+        if (chunk.product_id && !productIds.has(chunk.product_id)) {
           productIds.add(chunk.product_id);
         }
-        if (chunk.content) {
+        if (chunk.content && !chunksText.includes(chunk.content)) {
           chunksText.push(chunk.content);
         }
       });
     }
 
-    // Si no encontramos resultados con búsqueda semántica, intentar búsqueda exacta por nombre
-    if (productIds.size === 0 && message.trim().length > 0) {
-      console.log('[chat-rag] No semantic results found, trying exact name search...');
-      const searchTerm = message.trim().toLowerCase();
-      
-      // Buscar productos por nombre (búsqueda parcial case-insensitive)
-      const { data: exactMatchProducts, error: exactError } = await supabase
-        .from('products')
-        .select('id, name, description, category, subcategory')
-        .ilike('name', `%${searchTerm}%`)
-        .limit(5);
-      
-      if (!exactError && exactMatchProducts && exactMatchProducts.length > 0) {
-        console.log(`[chat-rag] Found ${exactMatchProducts.length} products by exact name match`);
+    console.log(`[chat-rag] Total products found: ${productIds.size}, chunks: ${chunksText.length}`);
+
+    // Obtener documentos asociados a productos ANTES de generar la respuesta
+    let documentsText: string[] = [];
+    if (productIds.size > 0) {
+      try {
+        const productIdsArray = Array.from(productIds);
+        console.log(`[chat-rag] Fetching documents for ${productIdsArray.length} products:`, productIdsArray);
         
-        // Obtener chunks de estos productos
-        for (const product of exactMatchProducts) {
-          productIds.add(product.id);
+        // Obtener TODOS los documentos asociados (incluso sin extracted_text para debugging)
+        const { data: allDocumentsData, error: allDocsError } = await supabase
+          .from('documents')
+          .select('id, original_filename, extracted_text, product_id, has_extracted_text')
+          .in('product_id', productIdsArray);
+        
+        if (allDocsError) {
+          console.warn('[chat-rag] Error obteniendo documentos:', allDocsError);
+        } else {
+          console.log(`[chat-rag] Found ${allDocumentsData?.length || 0} total documents for these products`);
           
-          // Crear chunk con nombre y descripción
-          let productChunk = product.name || '';
-          if (product.category) {
-            productChunk += ` - ${product.category}`;
-          }
-          if (product.subcategory) {
-            productChunk += ` - ${product.subcategory}`;
-          }
-          if (product.description) {
-            productChunk += `. ${product.description}`;
-          }
-          
-          if (productChunk.trim().length > 0) {
-            chunksText.push(productChunk.trim());
+          if (allDocumentsData && allDocumentsData.length > 0) {
+            // Log para debugging
+            allDocumentsData.forEach((doc: any) => {
+              console.log(`[chat-rag] Document ID ${doc.id}: product_id=${doc.product_id}, filename=${doc.original_filename}, has_text=${!!doc.extracted_text}, text_length=${doc.extracted_text?.length || 0}`);
+            });
+            
+            // Filtrar solo documentos con texto extraído
+            const documentsWithText = allDocumentsData.filter((doc: any) => 
+              doc.product_id && 
+              doc.extracted_text && 
+              typeof doc.extracted_text === 'string' &&
+              doc.extracted_text.trim().length > 0
+            );
+            
+            console.log(`[chat-rag] ${documentsWithText.length} documents have extracted text`);
+            
+            if (documentsWithText.length > 0) {
+              // Agrupar documentos por producto para mejor contexto
+              const docsByProduct: Record<number, string[]> = {};
+              
+              documentsWithText.forEach((doc: any) => {
+                if (!docsByProduct[doc.product_id]) {
+                  docsByProduct[doc.product_id] = [];
+                }
+                const docInfo = `[Documento: ${doc.original_filename || 'Sin nombre'}]\n${doc.extracted_text}`;
+                docsByProduct[doc.product_id].push(docInfo);
+              });
+              
+              // Agregar texto de documentos al contexto
+              for (const [productId, docTexts] of Object.entries(docsByProduct)) {
+                if (docTexts.length > 0) {
+                  const productIdNum = parseInt(productId);
+                  documentsText.push(`\n--- Documentación del producto (ID: ${productIdNum}) ---\n${docTexts.join('\n\n')}`);
+                  console.log(`[chat-rag] Added ${docTexts.length} document(s) for product ID ${productIdNum}`);
+                }
+              }
+            } else {
+              console.warn('[chat-rag] No documents with extracted text found. Documents may need to be re-uploaded to extract text.');
+            }
+          } else {
+            console.log('[chat-rag] No documents found for these products');
           }
         }
+      } catch (docError) {
+        console.error('[chat-rag] Error obteniendo documentos:', docError);
+        // Continuar sin documentos si falla
       }
+    } else {
+      console.log('[chat-rag] No product IDs found, skipping document fetch');
     }
 
     // Generar respuesta con OpenAI
@@ -205,21 +301,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       apiKey: process.env.OPENAI_API_KEY!,
     });
 
-    const contextText = chunksText.length > 0
-      ? chunksText.join('\n\n')
+    // Combinar contexto de productos y documentos
+    const allContextParts: string[] = [];
+    
+    if (chunksText.length > 0) {
+      allContextParts.push('--- Información del catálogo de productos ---');
+      allContextParts.push(chunksText.join('\n\n'));
+    }
+    
+    if (documentsText.length > 0) {
+      allContextParts.push('\n--- Documentación adicional de productos ---');
+      allContextParts.push(documentsText.join('\n\n'));
+    }
+    
+    const contextText = allContextParts.length > 0
+      ? allContextParts.join('\n\n')
       : 'No se encontraron productos relevantes en el catálogo.';
 
     const systemPrompt = `Eres ChefCopilot, un asistente experto en cocina profesional y productos de cocina.
 
 REGLAS ESTRICTAS:
-1. SOLO puedes responder usando la información proporcionada en el contexto del catálogo.
+1. SOLO puedes responder usando la información proporcionada en el contexto del catálogo y la documentación asociada.
 2. NUNCA inventes información, precios, características o productos que no estén en el contexto.
 3. NUNCA busques información en internet o fuera de la base de datos.
 4. Si no encuentras información en el contexto, di claramente: "No encontré información sobre [tema] en nuestro catálogo actual."
 5. Si el usuario pregunta sobre un producto específico y no está en el contexto, sugiere que revise el catálogo completo o reformule la búsqueda.
+6. IMPORTANTE: Cuando haya documentación asociada a un producto (recetas, instrucciones, detalles técnicos), úsala para dar respuestas más completas y precisas.
 
 Responde en español de forma clara y útil.
 Si hay información de productos en el contexto, preséntalos de forma organizada con sus características exactas.
+Si hay documentación asociada (recetas, instrucciones, etc.), inclúyela en tu respuesta para dar información más detallada.
 Si no hay productos relevantes, sé honesto y di que no encontraste información en el catálogo.`;
 
     const completion = await openai.chat.completions.create({
