@@ -199,7 +199,8 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
           lastMessageContent: lastMessage?.content,
           lastMessageRole: lastMessage?.role,
           functionResult: response.function_result,
-          conversationHistoryLength: response.conversation_history.length
+          conversationHistoryLength: response.conversation_history.length,
+          conversation_id: response.conversation_id
         });
 
         // Si hay function_result con productos
@@ -212,39 +213,44 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
         }
 
         // Si hay productos y el mensaje recomienda uno específico, filtrar
+        let finalProducts = products;
         if (lastMessage && products.length > 0) {
           if (lastMessage.content) {
             const recommendedProduct = findRecommendedProduct(lastMessage.content, products);
             if (recommendedProduct && products.length > 1) {
-              products = [recommendedProduct];
+              finalProducts = [recommendedProduct];
             }
           }
-          lastMessage.products = products;
         }
 
         // Si el último mensaje está vacío pero hay un mensaje en response.message, usarlo
+        let finalContent = lastMessage?.content;
         if (lastMessage && (!lastMessage.content || lastMessage.content.trim().length === 0) && response.message) {
-          lastMessage.content = response.message;
+          finalContent = response.message;
         }
 
-        // Añadir conversation_id al último mensaje del asistente
-        if (lastMessage && response.conversation_id) {
-          lastMessage.conversation_id = response.conversation_id;
-          lastMessage.feedback_submitted = false;
-        }
-
-        // Adjuntar métricas de tiempo al último mensaje del asistente si no vienen incluidas
+        // Adjuntar métricas de tiempo, conversation_id y productos al último mensaje del asistente
         let updatedHistory = response.conversation_history;
-        if (response.timings && updatedHistory.length > 0) {
+        if (updatedHistory.length > 0) {
           const lastIndex = updatedHistory.length - 1;
           const lastMsg = updatedHistory[lastIndex];
-          if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.response_timings) {
+          if (lastMsg && lastMsg.role === 'assistant') {
             updatedHistory = updatedHistory.map((msg, idx) => {
               if (idx === lastIndex) {
-                return {
+                const updatedMsg = {
                   ...msg,
-                  response_timings: response.timings
+                  content: finalContent || msg.content,
+                  products: finalProducts.length > 0 ? finalProducts : msg.products,
+                  conversation_id: response.conversation_id || msg.conversation_id,
+                  feedback_submitted: false,
+                  response_timings: response.timings || msg.response_timings
                 };
+                console.log('Updated message with conversation_id:', {
+                  conversation_id: updatedMsg.conversation_id,
+                  hasProducts: !!updatedMsg.products && updatedMsg.products.length > 0,
+                  feedback_submitted: updatedMsg.feedback_submitted
+                });
+                return updatedMsg;
               }
               return msg;
             });
@@ -363,6 +369,13 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
         {/* Mensajes de la conversación */}
         {messages.map((message, index) => {
             if (message.role === 'assistant' && message.products && message.products.length > 0) {
+              // Debug: verificar conversation_id en mensajes con productos
+              console.log('Rendering message with products:', {
+                index,
+                conversation_id: message.conversation_id,
+                feedback_submitted: message.feedback_submitted,
+                hasProducts: message.products.length > 0
+              });
               // Dividir mensaje en partes (texto y productos)
               const parts = splitMessageWithProducts(message.content, message.products);
               
@@ -441,27 +454,35 @@ export function Chat({ config, isExpanded = false, onFirstMessage, queuedMessage
                 )}
                 
                 {/* Pregunta de satisfacción */}
-                {message.conversation_id && !message.feedback_submitted && (
-                  <div className="flex justify-start mt-4">
-                    <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50">
-                      <p className="text-sm text-white mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
-                      <div className="flex gap-3">
-                        <button
-                          onClick={() => handleFeedback(message.conversation_id!, true, index)}
-                          className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-                        >
-                          Sí
-                        </button>
-                        <button
-                          onClick={() => handleFeedback(message.conversation_id!, false, index)}
-                          className="px-4 py-2 text-sm font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-                        >
-                          No
-                        </button>
+                {(() => {
+                  const shouldShowFeedback = message.conversation_id && !message.feedback_submitted;
+                  console.log('Feedback check for message with products:', {
+                    conversation_id: message.conversation_id,
+                    feedback_submitted: message.feedback_submitted,
+                    shouldShowFeedback
+                  });
+                  return shouldShowFeedback ? (
+                    <div className="flex justify-start mt-4">
+                      <div className="max-w-[85%] rounded-2xl px-6 py-4 bg-[#2a2a2a] border border-gray-700/50">
+                        <p className="text-sm text-white mb-3 font-medium">¿Te ha ayudado la respuesta?</p>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => handleFeedback(message.conversation_id!, true, index)}
+                            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                          >
+                            Sí
+                          </button>
+                          <button
+                            onClick={() => handleFeedback(message.conversation_id!, false, index)}
+                            className="px-4 py-2 text-sm font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                          >
+                            No
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  ) : null;
+                })()}
                 
                 {/* Confirmación de feedback */}
                 {message.feedback_submitted && (

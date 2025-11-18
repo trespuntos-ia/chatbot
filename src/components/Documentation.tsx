@@ -256,13 +256,42 @@ export function Documentation() {
         // Recargar documentos para mostrar el nuevo
         await loadDocuments();
       } else {
-        const extraDetails = [data.details, data.code, data.hint].filter(Boolean).join(' • ');
-        const detailedError = [data.error, extraDetails].filter(Boolean).join(': ');
-        setError(detailedError || `Error al subir el archivo (${response.status})`);
+        // Manejar errores específicos de timeout o conexión
+        let errorMessage = data.error || 'Error al subir el archivo';
+        
+        if (data.details) {
+          errorMessage += `: ${data.details}`;
+        }
+        
+        // Mensajes más amigables para errores comunes
+        if (errorMessage.includes('timeout') || errorMessage.includes('520') || errorMessage.includes('conexión')) {
+          errorMessage = 'Error de conexión: El archivo es demasiado grande o hay un problema temporal con el servidor. Por favor, intenta de nuevo en unos momentos o con un archivo más pequeño.';
+        } else if (errorMessage.includes('Database error')) {
+          errorMessage = 'Error al guardar en la base de datos. Por favor, verifica que Supabase Storage esté configurado correctamente.';
+        }
+        
+        const extraDetails = [data.code, data.hint].filter(Boolean);
+        if (extraDetails.length > 0) {
+          errorMessage += ` (${extraDetails.join(' • ')})`;
+        }
+        
+        setError(errorMessage || `Error al subir el archivo (${response.status})`);
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Error al procesar el archivo';
-      setError(errorMessage || 'Error al procesar el archivo');
+      let errorMessage = 'Error al procesar el archivo';
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        
+        // Mensajes más específicos para errores de red
+        if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+          errorMessage = 'Error de conexión: No se pudo conectar con el servidor. Por favor, verifica tu conexión a internet e intenta de nuevo.';
+        } else if (err.message.includes('timeout')) {
+          errorMessage = 'Timeout: El archivo es demasiado grande o la conexión es lenta. Por favor, intenta con un archivo más pequeño.';
+        }
+      }
+      
+      setError(errorMessage);
       console.error('Error uploading file:', err);
     } finally {
       setIsUploading(false);

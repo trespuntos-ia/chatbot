@@ -56,35 +56,91 @@ export default async function handler(
     }
 
     // 1. Métricas generales (con filtro de fecha)
-    const { data: conversations, error: conversationsError } = await supabase
+    let conversations: any[] = [];
+    console.log('[Analytics] Consultando conversaciones con filtro de fecha:', {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      dateRange
+    });
+    
+    const { data: conversationsData, error: conversationsError } = await supabase
       .from('chat_conversations')
       .select('*')
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDate.toISOString())
       .order('created_at', { ascending: false });
 
-    if (conversationsError) throw conversationsError;
+    if (conversationsError) {
+      // Si la tabla no existe, devolver datos vacíos en lugar de error
+      if (conversationsError.code === 'PGRST116' || conversationsError.message?.includes('does not exist')) {
+        console.warn('[Analytics] Tabla chat_conversations no existe aún. Ejecuta la migración 006_create_chat_analytics_tables.sql');
+        conversations = [];
+      } else {
+        console.error('[Analytics] Error consultando conversaciones:', {
+          error: conversationsError,
+          code: conversationsError.code,
+          message: conversationsError.message,
+          details: conversationsError.details
+        });
+        throw conversationsError;
+      }
+    } else {
+      conversations = conversationsData || [];
+      console.log('[Analytics] Conversaciones encontradas:', {
+        count: conversations.length,
+        dateRange
+      });
+    }
 
     // 2. Obtener conversaciones recientes (últimas 20, sin importar filtro de fecha)
-    // Primero verificar cuántas hay en total
-    const { count: totalCount } = await supabase
-      .from('chat_conversations')
-      .select('*', { count: 'exact', head: true });
+    let totalCount = 0;
+    let recentConversationsData: any[] = [];
+    
+    try {
+      console.log('[Analytics] Consultando total de conversaciones...');
+      // Primero verificar cuántas hay en total
+      const { count, error: countError } = await supabase
+        .from('chat_conversations')
+        .select('*', { count: 'exact', head: true });
+      
+      if (countError) {
+        console.error('[Analytics] Error contando conversaciones:', countError);
+      } else {
+        totalCount = count || 0;
+        console.log('[Analytics] Total de conversaciones en BD:', totalCount);
+      }
 
-    // Obtener conversaciones recientes - forzar sin caché usando timestamp
-    const { data: recentConversationsData, error: recentError } = await supabase
-      .from('chat_conversations')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(20);
+      // Obtener conversaciones recientes - forzar sin caché usando timestamp
+      console.log('[Analytics] Obteniendo últimas 20 conversaciones...');
+      const { data, error: recentError } = await supabase
+        .from('chat_conversations')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(20);
 
-    if (recentError) {
-      console.error('[Analytics] Error obteniendo conversaciones recientes:', {
-        error: recentError.message,
-        code: recentError.code,
-        details: recentError.details
-      });
-    } else {
+      if (recentError) {
+        // Si la tabla no existe, usar array vacío
+        if (recentError.code === 'PGRST116' || recentError.message?.includes('does not exist')) {
+          console.warn('[Analytics] Tabla chat_conversations no existe aún');
+          recentConversationsData = [];
+        } else {
+          console.error('[Analytics] Error obteniendo conversaciones recientes:', {
+            error: recentError.message,
+            code: recentError.code,
+            details: recentError.details
+          });
+          recentConversationsData = [];
+        }
+      } else {
+        recentConversationsData = data || [];
+        console.log('[Analytics] Conversaciones recientes obtenidas:', recentConversationsData.length);
+      }
+    } catch (err) {
+      console.error('[Analytics] Excepción obteniendo conversaciones recientes:', err);
+      recentConversationsData = [];
+    }
+
+    if (recentConversationsData.length > 0) {
       const latestDate = recentConversationsData?.[0]?.created_at;
       const now = new Date().toISOString();
       const timeDiffMinutes = latestDate 
@@ -310,7 +366,7 @@ export default async function handler(
       lastSummary = summaryData;
     }
 
-    res.status(200).json({
+    const responseData = {
       success: true,
       metrics: {
         totalConversations,
@@ -340,7 +396,17 @@ export default async function handler(
       responseTimesByDay,
       recentConversations: recentConversationsData || [], // Últimas 20 conversaciones (sin filtro de fecha)
       lastSummary: lastSummary || null
+    };
+
+    console.log('[Analytics] Respuesta final:', {
+      totalConversations,
+      uniqueSessions,
+      recentConversationsCount: recentConversationsData.length,
+      totalCountInDB: totalCount,
+      hasRecentConversations: recentConversationsData.length > 0
     });
+
+    res.status(200).json(responseData);
 
   } catch (error) {
     console.error('Error en get-chat-analytics:', error);

@@ -47,8 +47,7 @@ export default async function handler(
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const nowIso = new Date().toISOString();
-
+    // Contar registros antes de borrar
     const { count: conversationsCount, error: conversationsCountError } = await supabase
       .from('chat_conversations')
       .select('*', { count: 'exact', head: true });
@@ -57,15 +56,18 @@ export default async function handler(
       throw conversationsCountError;
     }
 
+    // Borrar TODAS las conversaciones usando una condición que siempre es verdadera
+    // Usamos gte con una fecha muy antigua para que siempre sea verdadero
     const { error: deleteConversationsError } = await supabase
       .from('chat_conversations')
       .delete()
-      .lte('created_at', nowIso);
+      .gte('created_at', '1970-01-01T00:00:00Z');
 
     if (deleteConversationsError) {
       throw deleteConversationsError;
     }
 
+    // Contar resúmenes antes de borrar
     const { count: summariesCount, error: summariesCountError } = await supabase
       .from('chat_analytics_summaries')
       .select('*', { count: 'exact', head: true });
@@ -74,10 +76,11 @@ export default async function handler(
       throw summariesCountError;
     }
 
+    // Borrar TODOS los resúmenes usando una condición que siempre es verdadera
     const { error: deleteSummariesError } = await supabase
       .from('chat_analytics_summaries')
       .delete()
-      .lte('generated_at', nowIso);
+      .gte('generated_at', '1970-01-01T00:00:00Z');
 
     if (deleteSummariesError) {
       throw deleteSummariesError;

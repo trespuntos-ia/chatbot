@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { generateEmbedding } from './embeddings';
+import { generateEmbedding } from './embeddings.js';
 
 interface RetrievedChunk {
   id: number;

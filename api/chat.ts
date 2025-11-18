@@ -812,6 +812,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
+    const startTime = Date.now();
     
     try {
       const matchResult = await findExactMatches(supabase, message);
@@ -843,12 +844,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const conversationHistory: ChatMessage[] = [{ role: 'user', content: message }, assistant];
 
+      // Guardar conversación en la base de datos y obtener el ID
+      const sessionId = req.body?.session_id || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const responseTime = Date.now() - startTime;
+      let conversationId: string | null = null;
+      
+      try {
+        const { data: conversationData, error: conversationError } = await supabase
+          .from('chat_conversations')
+          .insert({
+            session_id: sessionId,
+            user_message: message,
+            bot_response: finalAssistantMessage,
+            function_called: 'exact_match_search',
+            products_consulted: matchResult.products.length > 0 ? matchResult.products.map(m => ({
+              name: m.product.name,
+              category: m.product.category,
+              sku: m.product.sku,
+              id: m.product.id
+            })) : null,
+            category_consulted: matchResult.categories.length > 0 ? matchResult.categories[0].category : null,
+            response_time_ms: responseTime,
+          })
+          .select('id')
+          .single();
+        
+        if (conversationError) {
+          console.error('[chat] Error guardando conversación:', conversationError);
+        } else if (conversationData) {
+          conversationId = conversationData.id;
+          console.log('[chat] Conversación guardada exitosamente, ID:', conversationId);
+        }
+      } catch (err) {
+        console.error('[chat] Excepción al guardar conversación:', err);
+      }
+
       res.status(200).json({
         success: true,
         message: finalAssistantMessage,
         function_called: 'exact_match_search',
         function_result: functionResultPayload,
         conversation_history: conversationHistory,
+        conversation_id: conversationId,
       });
     } catch (dbError) {
       console.error('[chat] Database query error', {

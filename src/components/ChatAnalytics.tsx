@@ -107,11 +107,12 @@ export function ChatAnalytics() {
       }
 
       alert('Se borraron todas las estadísticas correctamente.');
-      setData(null);
-      setSummary(null);
-      setSummaryGeneratedAt(null);
+      // Refrescar los datos después de borrar (esto mostrará todas las métricas en 0)
       await fetchAnalytics();
       await fetchLastSummary();
+      // Limpiar el resumen ya que fue borrado
+      setSummary(null);
+      setSummaryGeneratedAt(null);
     } catch (error) {
       console.error('Error reseteando analytics:', error);
       alert(error instanceof Error ? error.message : 'Error desconocido al borrar estadísticas.');

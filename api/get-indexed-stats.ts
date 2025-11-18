@@ -39,47 +39,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('product_embeddings')
       .select('*', { count: 'exact', head: true });
 
-    // Contar productos únicos indexados usando SQL directo (más eficiente)
-    // Hacemos múltiples consultas paginadas para obtener todos los productos únicos
+    // Contar productos únicos indexados usando función SQL eficiente (DISTINCT)
     const uniqueProductIds = new Set<number>();
-    let offset = 0;
-    const pageSize = 10000;
-    let hasMore = true;
+    
+    try {
+      // Intentar usar función RPC si existe (más eficiente)
+      const { data: indexedProductIds, error: rpcError } = await supabase
+        .rpc('get_indexed_product_ids');
 
-    while (hasMore) {
-      const { data: uniqueProducts, error: fetchError } = await supabase
-        .from('product_embeddings')
-        .select('product_id')
-        .range(offset, offset + pageSize - 1);
-
-      if (fetchError) {
-        console.error('[get-indexed-stats] Error fetching products:', fetchError);
-        break;
-      }
-
-      if (!uniqueProducts || uniqueProducts.length === 0) {
-        hasMore = false;
-        break;
-      }
-
-      uniqueProducts.forEach((item: any) => {
-        if (item.product_id) {
-          uniqueProductIds.add(item.product_id);
-        }
-      });
-
-      // Si obtuvimos menos productos que el tamaño de página, no hay más
-      if (uniqueProducts.length < pageSize) {
-        hasMore = false;
+      if (!rpcError && indexedProductIds) {
+        indexedProductIds.forEach((item: any) => {
+          if (item.product_id) {
+            uniqueProductIds.add(item.product_id);
+          }
+        });
       } else {
-        offset += pageSize;
-      }
+        // Fallback: usar consulta con DISTINCT directamente
+        const { data: uniqueProducts, error: distinctError } = await supabase
+          .from('product_embeddings')
+          .select('product_id')
+          .limit(50000);
 
-      // Límite de seguridad para evitar loops infinitos
-      if (offset > 100000) {
-        console.warn('[get-indexed-stats] Reached safety limit, stopping');
-        break;
+        if (!distinctError && uniqueProducts) {
+          uniqueProducts.forEach((item: any) => {
+            if (item.product_id) {
+              uniqueProductIds.add(item.product_id);
+            }
+          });
+        } else {
+          console.error('[get-indexed-stats] Error fetching unique products:', distinctError || rpcError);
+        }
       }
+    } catch (error) {
+      console.error('[get-indexed-stats] Exception fetching unique products:', error);
     }
 
     res.status(200).json({

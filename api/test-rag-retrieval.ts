@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { retrieveRelevantChunks } from './utils/vectorStore';
+import { retrieveRelevantChunks } from './utils/vectorStore.js';
 import { createClient } from '@supabase/supabase-js';
 
 function setCorsHeaders(res: VercelResponse) {

@@ -217,7 +217,9 @@ export function Connections() {
   };
 
   const handleClearProducts = async () => {
-    if (!confirm('¿Estás seguro de que quieres eliminar TODOS los productos de la base de datos? Esta acción no se puede deshacer.')) {
+    const confirmMessage = '¿Estás seguro de que quieres eliminar TODOS los productos y embeddings de la base de datos?\n\nEsto eliminará:\n- Todos los productos (tabla products)\n- Todos los embeddings indexados (tabla product_embeddings)\n\nEsta acción no se puede deshacer.';
+    
+    if (!confirm(confirmMessage)) {
       return;
     }
 
@@ -225,20 +227,33 @@ export function Connections() {
     setSaveStatus({ type: null, message: '' });
 
     try {
-      const response = await fetch('/api/clear-products', {
+      // Primero eliminar embeddings
+      const embeddingsResponse = await fetch('/api/clear-embeddings', {
+        method: 'DELETE',
+      });
+      
+      // Luego eliminar productos
+      const productsResponse = await fetch('/api/clear-products', {
         method: 'DELETE',
       });
 
-      const data = await response.json();
+      const productsData = await productsResponse.json();
+      const embeddingsData = embeddingsResponse.ok ? await embeddingsResponse.json() : null;
 
-      if (!response.ok) {
-        throw new Error(data.error || data.message || 'Error al eliminar productos');
+      if (!productsResponse.ok) {
+        throw new Error(productsData.error || productsData.message || 'Error al eliminar productos');
       }
 
-      let message = `Se eliminaron ${data.deleted || 0} productos de la base de datos. ${data.verified ? 'Verificado correctamente.' : 'Verifica en Supabase.'}`;
+      let message = `✅ Se eliminaron ${productsData.deleted || 0} productos de la base de datos.`;
       
-      if (data.next_steps && Array.isArray(data.next_steps)) {
-        message += '\n\nPróximos pasos:\n' + data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n');
+      if (embeddingsData && embeddingsData.deleted) {
+        message += `\n✅ Se eliminaron ${embeddingsData.deleted} embeddings indexados.`;
+      }
+      
+      message += `\n\n${productsData.verified ? 'Verificado correctamente.' : 'Verifica en Supabase.'}`;
+      
+      if (productsData.next_steps && Array.isArray(productsData.next_steps)) {
+        message += '\n\nPróximos pasos:\n' + productsData.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n');
       }
       
       setSaveStatus({ 
@@ -325,17 +340,21 @@ export function Connections() {
         </div>
       </div>
 
-      {/* Botones de acción */}
+      {/* Acciones principales - Simplificado */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <div className="flex flex-wrap gap-4">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Flujo de Trabajo</h3>
+        <p className="text-sm text-slate-600 mb-4">
+          Sigue estos pasos en orden: primero escanea productos, luego guárdalos, y finalmente indexa para búsqueda semántica.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <button
             onClick={handleScan}
             disabled={connectionState === 'scanning'}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
           >
             {connectionState === 'scanning' ? (
               <>
-                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
@@ -343,67 +362,23 @@ export function Connections() {
               </>
             ) : (
               <>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
-                Escanear Productos
+                <span>1. Escanear Productos</span>
               </>
             )}
           </button>
 
-            <button
-              onClick={handleClearProducts}
-              disabled={isClearing}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isClearing ? (
-                <>
-                  <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Eliminando...
-                </>
-              ) : (
-                <>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                  Limpiar Base de Datos
-                </>
-              )}
-            </button>
-            {connectionState === 'products-found' && products.length > 0 && (
+          {connectionState === 'products-found' && products.length > 0 && (
             <button
               onClick={handleSaveToDatabase}
               disabled={isSaving}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
             >
               {isSaving ? (
                 <>
-                  <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
@@ -411,25 +386,70 @@ export function Connections() {
                 </>
               ) : (
                 <>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Guardar en Base de Datos
+                  <span>2. Guardar en Base de Datos</span>
                 </>
               )}
             </button>
           )}
+
+          <button
+            onClick={async () => {
+              try {
+                setSaveStatus({ type: null, message: '' });
+                const response = await fetch('/api/index-products-rag', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ force: true }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                  setSaveStatus({ 
+                    type: 'success', 
+                    message: `✅ ${data.message || `Indexados ${data.indexed || 0} productos para búsqueda semántica`}` 
+                  });
+                } else {
+                  throw new Error(data.error || 'Error al indexar');
+                }
+              } catch (err) {
+                setSaveStatus({ 
+                  type: 'error', 
+                  message: err instanceof Error ? err.message : 'Error al indexar productos' 
+                });
+              }
+            }}
+            className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium text-base"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <span>3. Indexar para Búsqueda Semántica</span>
+          </button>
+
+          <button
+            onClick={handleClearProducts}
+            disabled={isClearing}
+            className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
+          >
+            {isClearing ? (
+              <>
+                <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Eliminando...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                <span>Limpiar Todo</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 

@@ -7,6 +7,7 @@ export const config = {
       sizeLimit: '6mb',
     },
   },
+  maxDuration: 30, // Aumentar timeout a 30 segundos para archivos grandes
 };
 
 export default async function handler(
@@ -33,6 +34,7 @@ export default async function handler(
     
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Para Storage
 
     if (!supabaseUrl || !supabaseKey) {
       console.error('Supabase config missing');
@@ -40,7 +42,12 @@ export default async function handler(
       return;
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Usar service key para Storage si está disponible, sino usar anon key
+    const supabase = createClient(
+      supabaseUrl, 
+      supabaseServiceKey || supabaseKey
+    );
+    const supabaseAnon = createClient(supabaseUrl, supabaseKey);
 
     // Obtener datos del body
     const { file, filename, mimeType, extractedText, productId } = req.body;
@@ -76,13 +83,7 @@ export default async function handler(
     // Determinar tipo de archivo simple
     const extension = filename.split('.').pop()?.toLowerCase() || 'txt';
     
-    console.log('Saving to Supabase:', {
-      filename,
-      extension,
-      size: fileBuffer.length,
-      bufferType: fileBuffer.constructor.name
-    });
-
+    // Verificar producto si se proporciona
     let productDetails:
       | { id: number; name: string | null; sku: string | null; product_url: string | null }
       | null = null;
@@ -96,7 +97,7 @@ export default async function handler(
         return;
       }
 
-      const { data: product, error: productError } = await supabase
+      const { data: product, error: productError } = await supabaseAnon
         .from('products')
         .select('id, name, sku, product_url')
         .eq('id', productId)
@@ -122,29 +123,68 @@ export default async function handler(
       productDetails = product;
     }
 
-    // Guardar el archivo con texto extraído (si viene del cliente)
-    // El texto se extrae en el cliente usando pdf.js para evitar problemas en Vercel
-    try {
-      // Limitar texto extraído a 50KB
-      const maxTextLength = 50 * 1024;
-      const finalExtractedText = extractedText && extractedText.length > 0
-        ? (extractedText.length > maxTextLength 
-            ? extractedText.substring(0, maxTextLength) + '...[truncado]'
-            : extractedText)
-        : '';
+    // Intentar subir a Supabase Storage primero (más eficiente)
+    let fileUrl: string | null = null;
+    const storageFilename = `${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const storagePath = `documents/${storageFilename}`;
 
-      const { data, error } = await supabase
+    try {
+      console.log('Uploading to Supabase Storage:', storagePath);
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .insert({
-          filename: `${Date.now()}_${filename}`,
-          original_filename: filename,
-          file_type: extension,
-          file_size: fileBuffer.length,
-          file_content: fileBuffer,
-          extracted_text: finalExtractedText,
-          mime_type: mimeType || 'application/octet-stream',
-          product_id: typeof productId === 'number' ? productId : null,
-        })
+        .upload(storagePath, fileBuffer, {
+          contentType: mimeType || 'application/octet-stream',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.warn('Storage upload failed, falling back to database:', uploadError);
+        // Si falla Storage, continuar con el método anterior (BYTEA)
+      } else {
+        // Obtener URL pública del archivo
+        const { data: urlData } = supabase.storage
+          .from('documents')
+          .getPublicUrl(storagePath);
+        
+        fileUrl = urlData.publicUrl;
+        console.log('File uploaded to Storage:', fileUrl);
+      }
+    } catch (storageError) {
+      console.warn('Storage error, using database fallback:', storageError);
+      // Continuar con el método de base de datos
+    }
+
+    // Limitar texto extraído a 50KB
+    const maxTextLength = 50 * 1024;
+    const finalExtractedText = extractedText && extractedText.length > 0
+      ? (extractedText.length > maxTextLength 
+          ? extractedText.substring(0, maxTextLength) + '...[truncado]'
+          : extractedText)
+      : '';
+
+    // Guardar en la base de datos
+    try {
+      const insertData: any = {
+        filename: `${Date.now()}_${filename}`,
+        original_filename: filename,
+        file_type: extension,
+        file_size: fileBuffer.length,
+        extracted_text: finalExtractedText,
+        mime_type: mimeType || 'application/octet-stream',
+        product_id: typeof productId === 'number' ? productId : null,
+      };
+
+      // Si tenemos URL de Storage, guardarla; si no, guardar el contenido binario
+      if (fileUrl) {
+        insertData.file_url = fileUrl;
+      } else {
+        // Fallback: guardar en BYTEA si Storage no está disponible
+        insertData.file_content = fileBuffer;
+      }
+
+      const { data, error } = await supabaseAnon
+        .from('documents')
+        .insert(insertData)
         .select()
         .single();
 
@@ -155,12 +195,23 @@ export default async function handler(
           hint: error.hint,
           details: error.details
         });
-        res.status(500).json({ 
-          error: 'Database error', 
-          details: error.message,
-          code: error.code,
-          hint: error.hint
-        });
+        
+        // Si el error es de timeout o conexión, sugerir usar Storage
+        if (error.message.includes('timeout') || error.message.includes('520') || error.code === 'PGRST116') {
+          res.status(500).json({ 
+            error: 'Error de conexión con la base de datos', 
+            details: 'El archivo es demasiado grande o hay un problema de conexión. Por favor, intenta de nuevo en unos momentos.',
+            code: error.code,
+            hint: 'Si el problema persiste, verifica la configuración de Supabase Storage'
+          });
+        } else {
+          res.status(500).json({ 
+            error: 'Database error', 
+            details: error.message,
+            code: error.code,
+            hint: error.hint
+          });
+        }
         return;
       }
 
@@ -173,6 +224,7 @@ export default async function handler(
           filename: data.original_filename,
           file_type: data.file_type,
           file_size: data.file_size,
+          file_url: fileUrl || undefined,
           product_id: data.product_id ?? null,
           product_name: productDetails?.name ?? null,
           product_sku: productDetails?.sku ?? null,
@@ -181,18 +233,38 @@ export default async function handler(
       });
     } catch (dbError) {
       console.error('Unexpected error saving to Supabase:', dbError);
-      res.status(500).json({
-        error: 'Internal server error',
-        message: dbError instanceof Error ? dbError.message : 'Unknown error',
-        details: 'Error al guardar en la base de datos'
-      });
+      const errorMessage = dbError instanceof Error ? dbError.message : 'Unknown error';
+      
+      if (errorMessage.includes('timeout') || errorMessage.includes('520')) {
+        res.status(500).json({
+          error: 'Timeout al guardar el archivo',
+          message: 'El archivo es demasiado grande o hay un problema de conexión. Por favor, intenta con un archivo más pequeño o vuelve a intentar más tarde.',
+          details: 'Error de conexión con Supabase'
+        });
+      } else {
+        res.status(500).json({
+          error: 'Internal server error',
+          message: errorMessage,
+          details: 'Error al guardar en la base de datos'
+        });
+      }
       return;
     }
   } catch (error) {
     console.error('Upload error:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    if (errorMessage.includes('timeout') || errorMessage.includes('520')) {
+      res.status(500).json({
+        error: 'Error de conexión',
+        message: 'No se pudo conectar con el servidor. Por favor, intenta de nuevo en unos momentos.',
+        details: errorMessage
+      });
+    } else {
+      res.status(500).json({
+        error: 'Internal server error',
+        message: errorMessage
+      });
+    }
   }
 }
