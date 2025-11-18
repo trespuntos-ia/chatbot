@@ -74,48 +74,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Vercel timeout es 5 minutos, así que tenemos margen de seguridad
     const PRODUCTS_PER_RUN = 150; // Aumentado de 50 a 150 para indexar más rápido
 
-    // Obtener IDs de productos ya indexados (usando paginación para obtener todos)
+    // Obtener IDs de productos ya indexados usando función SQL eficiente (DISTINCT)
+    // Esto es mucho más eficiente que obtener todos los chunks y filtrar
     const indexedIds = new Set<number>();
-    let offset = 0;
-    const pageSize = 10000;
-    let hasMore = true;
+    
+    try {
+      // Intentar usar función RPC si existe (más eficiente)
+      const { data: indexedProductIds, error: rpcError } = await supabase
+        .rpc('get_indexed_product_ids');
 
-    while (hasMore) {
-      const { data: indexedProducts, error: fetchError } = await supabase
-        .from('product_embeddings')
-        .select('product_id')
-        .range(offset, offset + pageSize - 1);
-
-      if (fetchError) {
-        console.error('[index-products-rag-auto] Error fetching indexed products:', fetchError);
-        break;
-      }
-
-      if (!indexedProducts || indexedProducts.length === 0) {
-        hasMore = false;
-        break;
-      }
-
-      indexedProducts.forEach((item: any) => {
-        if (item.product_id) {
-          indexedIds.add(item.product_id);
-        }
-      });
-
-      if (indexedProducts.length < pageSize) {
-        hasMore = false;
+      if (!rpcError && indexedProductIds) {
+        indexedProductIds.forEach((item: any) => {
+          if (item.product_id) {
+            indexedIds.add(item.product_id);
+          }
+        });
+        console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via RPC)`);
       } else {
-        offset += pageSize;
-      }
+        // Fallback: usar consulta con DISTINCT directamente
+        console.log('[index-products-rag-auto] RPC function not available, using DISTINCT query');
+        const { data: uniqueProducts, error: distinctError } = await supabase
+          .from('product_embeddings')
+          .select('product_id')
+          .limit(50000); // Límite alto pero razonable
 
-      // Límite de seguridad
-      if (offset > 100000) {
-        console.warn('[index-products-rag-auto] Reached safety limit while fetching indexed products');
-        break;
+        if (!distinctError && uniqueProducts) {
+          uniqueProducts.forEach((item: any) => {
+            if (item.product_id) {
+              indexedIds.add(item.product_id);
+            }
+          });
+          console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via DISTINCT fallback)`);
+        } else {
+          console.warn('[index-products-rag-auto] Error fetching indexed products:', distinctError || rpcError);
+          // Continuar con Set vacío - indexará todos los productos (no ideal pero funcional)
+        }
       }
+    } catch (error) {
+      console.error('[index-products-rag-auto] Exception fetching indexed products:', error);
+      // Continuar con Set vacío
     }
-
-    console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products`);
 
     // Obtener productos NO indexados (obtener más para filtrar)
     const FETCH_MULTIPLIER = 4; // Obtener 4x más productos para filtrar
@@ -251,8 +249,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Recontar productos indexados usando paginación para obtener todos
     const updatedIndexedIds = new Set<number>();
-    offset = 0;
-    hasMore = true;
+    let offset = 0;
+    let hasMore = true;
+    const pageSize = 1000; // Tamaño de página para paginación
 
     while (hasMore) {
       const { data: updatedIndexedProducts, error: fetchError } = await supabase

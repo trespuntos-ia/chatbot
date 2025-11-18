@@ -11,7 +11,11 @@ export function ChatConfig({ config, onConfigChange }: ChatConfigProps) {
   const [localConfig, setLocalConfig] = useState<ChatConfig>(config);
 
   useEffect(() => {
-    setLocalConfig(config);
+    // Si el config recibido es diferente al local, actualizar
+    // Esto asegura que si DEFAULT_CHAT_CONFIG cambia, se actualice el componente
+    if (JSON.stringify(config) !== JSON.stringify(localConfig)) {
+      setLocalConfig(config);
+    }
   }, [config]);
 
   const handleChange = (updates: Partial<ChatConfig>) => {

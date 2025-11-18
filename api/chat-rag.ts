@@ -129,22 +129,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const searchTerm = message.trim();
     const normalizedSearch = searchTerm.toLowerCase().trim();
     
+    // Extraer posibles nombres de productos de la pregunta
+    // Buscar patrones como "Plato Volcanic Terra", "producto X", etc.
+    // Intentar extraer nombres de productos comunes (palabras con mayúsculas o entre comillas)
+    let productNameToSearch = normalizedSearch;
+    
+    // Si la pregunta contiene un nombre de producto con mayúsculas o formato específico
+    const productNameMatch = message.match(/([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)/);
+    if (productNameMatch) {
+      productNameToSearch = productNameMatch[1].toLowerCase();
+      console.log('[chat-rag] Extracted product name from question:', productNameToSearch);
+    } else {
+      // Intentar extraer palabras clave relevantes (excluir palabras comunes de preguntas)
+      const questionWords = ['el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'es', 'son', 'sirve', 'sirven', 'para', 'con', 'de', 'del', 'en', 'se', 'puede', 'pueden', 'qué', 'cuál', 'cuáles', 'cómo', 'dónde', 'cuándo', 'por', 'qué', 'microondas', 'horno', 'apto', 'apta', 'aptos', 'aptas'];
+      const words = normalizedSearch.split(/\s+/).filter(w => w.length > 2 && !questionWords.includes(w));
+      if (words.length > 0) {
+        // Tomar las primeras 2-4 palabras que parecen ser el nombre del producto
+        productNameToSearch = words.slice(0, 4).join(' ');
+        console.log('[chat-rag] Extracted keywords from question:', productNameToSearch);
+      }
+    }
+    
     let exactMatchProducts: any[] = [];
     const productIds = new Set<number>();
     const chunksText: string[] = [];
     
-    // 1. Búsqueda exacta por nombre completo
-    if (normalizedSearch.length > 0) {
-      console.log('[chat-rag] Searching exact name:', normalizedSearch);
+    // 1. Búsqueda exacta por nombre completo (usando el nombre extraído)
+    if (productNameToSearch.length > 0) {
+      console.log('[chat-rag] Searching exact name:', productNameToSearch);
       const { data: exactResults, error: exactError } = await supabase
         .from('products')
         .select('id, name, description, category, subcategory, sku, price, image_url, product_url')
-        .ilike('name', `%${normalizedSearch}%`)
+        .ilike('name', `%${productNameToSearch}%`)
         .limit(10);
       
       if (!exactError && exactResults && exactResults.length > 0) {
         console.log(`[chat-rag] Found ${exactResults.length} products by exact name match`);
+        exactResults.forEach(p => {
+          console.log(`[chat-rag] Found product: ${p.name} (ID: ${p.id}), description length: ${p.description?.length || 0}`);
+        });
         exactMatchProducts = exactResults;
+      } else {
+        console.log('[chat-rag] No products found with exact name search');
+        if (exactError) {
+          console.error('[chat-rag] Error in exact name search:', exactError);
+        }
       }
     }
     
@@ -188,43 +217,111 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           productChunk += ` - ${product.subcategory}`;
         }
         if (product.description) {
-          productChunk += `. ${product.description}`;
+          // Asegurarse de incluir la descripción completa
+          const cleanDescription = product.description.replace(/<[^>]*>/g, '').trim();
+          if (cleanDescription.length > 0) {
+            productChunk += `. ${cleanDescription}`;
+            console.log(`[chat-rag] Added description for ${product.name}: ${cleanDescription.substring(0, 100)}...`);
+          } else {
+            console.warn(`[chat-rag] Product ${product.name} has empty or invalid description`);
+          }
+        } else {
+          console.warn(`[chat-rag] Product ${product.name} (ID: ${product.id}) has no description field`);
         }
         
         if (productChunk.trim().length > 0) {
           chunksText.push(productChunk.trim());
+          console.log(`[chat-rag] Added chunk for product ${product.name}, total length: ${productChunk.length}`);
         }
       }
+    } else {
+      console.warn('[chat-rag] No exact match products found - will rely on semantic search only');
     }
     
     // 4. ADEMÁS: Búsqueda semántica para complementar (siempre ejecutar)
     console.log('[chat-rag] Also searching semantically...');
-    const queryEmbedding = await generateEmbedding(message);
+    
+    // Si encontramos productos por nombre exacto, hacer búsqueda semántica adicional con palabras clave específicas
+    // Esto ayuda a encontrar chunks con información detallada sobre características específicas
+    let enhancedQuery = message;
+    if (exactMatchProducts.length > 0 && productIds.size > 0) {
+      // Extraer palabras clave de la pregunta (palabras de 4+ caracteres que no sean comunes)
+      const stopWords = ['para', 'sobre', 'tiene', 'puede', 'cual', 'cuales', 'como', 'donde', 'cuando'];
+      const queryWords = message.toLowerCase()
+        .split(/\s+/)
+        .filter(w => w.length >= 4 && !stopWords.includes(w));
+      
+      if (queryWords.length > 0) {
+        // Crear query mejorada con nombre del producto + palabras clave
+        const productNames = exactMatchProducts.map(p => p.name).join(' ');
+        enhancedQuery = `${productNames} ${queryWords.join(' ')}`;
+        console.log(`[chat-rag] Enhanced query for semantic search: "${enhancedQuery}"`);
+      }
+    }
+    
+    const queryEmbedding = await generateEmbedding(enhancedQuery);
     
     const { data: similarChunks, error: searchError } = await supabase.rpc(
       'search_similar_chunks',
       {
         query_embedding: `[${queryEmbedding.join(',')}]`,
-        match_threshold: 0.5,
-        match_count: 10,
+        match_threshold: 0.4, // Reducido de 0.5 a 0.4 para capturar más información relevante
+        match_count: 15, // Aumentado de 10 a 15 para incluir más chunks potencialmente relevantes
       }
     );
 
     if (!searchError && similarChunks && similarChunks.length > 0) {
       console.log('[chat-rag] Found semantic chunks:', similarChunks.length);
       
+      // IMPORTANTE: Añadir chunks semánticos incluso si el producto ya fue encontrado por búsqueda exacta
+      // Esto asegura que incluimos información detallada de chunks indexados que pueden tener más detalles
+      // Los chunks indexados pueden tener información más específica que la descripción completa del producto
       similarChunks.forEach((chunk: any) => {
-        // Solo añadir si no está ya en la lista (evitar duplicados)
+        // Añadir product_id si no está ya en la lista
         if (chunk.product_id && !productIds.has(chunk.product_id)) {
           productIds.add(chunk.product_id);
         }
-        if (chunk.content && !chunksText.includes(chunk.content)) {
-          chunksText.push(chunk.content);
+        
+        // Añadir chunk si tiene contenido
+        if (chunk.content && chunk.content.trim().length > 0) {
+          // Verificar si el contenido es EXACTAMENTE igual (solo evitar duplicados exactos)
+          // NO evitar chunks similares porque pueden tener información complementaria
+          const isExactDuplicate = chunksText.some(existing => {
+            // Solo considerar duplicado si es EXACTAMENTE igual (ignorando espacios al inicio/final)
+            return existing.trim() === chunk.content.trim();
+          });
+          
+          if (!isExactDuplicate) {
+            chunksText.push(chunk.content.trim());
+            console.log(`[chat-rag] ✅ Added semantic chunk for product ${chunk.product_id}: ${chunk.content.substring(0, 150)}...`);
+            // Log adicional si contiene palabras clave relevantes
+            const lowerContent = chunk.content.toLowerCase();
+            const lowerQuery = message.toLowerCase();
+            const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 3);
+            const hasRelevantKeywords = queryWords.some(word => lowerContent.includes(word));
+            if (hasRelevantKeywords) {
+              console.log(`[chat-rag] ⚠️ Chunk contains relevant keywords from query!`);
+            }
+          } else {
+            console.log(`[chat-rag] ⏭️ Skipped exact duplicate chunk for product ${chunk.product_id}`);
+          }
         }
       });
     }
 
     console.log(`[chat-rag] Total products found: ${productIds.size}, chunks: ${chunksText.length}`);
+    
+    // Log detallado del contexto para debugging
+    if (chunksText.length > 0) {
+      console.log(`[chat-rag] 📋 Context summary:`);
+      chunksText.forEach((chunk, idx) => {
+        const preview = chunk.substring(0, 200);
+        const hasKeywords = message.toLowerCase().split(/\s+/).some(word => 
+          word.length > 3 && chunk.toLowerCase().includes(word.toLowerCase())
+        );
+        console.log(`[chat-rag]   Chunk ${idx + 1} (${chunk.length} chars)${hasKeywords ? ' ⭐ HAS KEYWORDS' : ''}: ${preview}...`);
+      });
+    }
 
     // Obtener documentos asociados a productos ANTES de generar la respuesta
     let documentsText: string[] = [];
@@ -320,31 +417,103 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const systemPrompt = `Eres ChefCopilot, un asistente experto en cocina profesional y productos de cocina.
 
-REGLAS ESTRICTAS:
-1. SOLO puedes responder usando la información proporcionada en el contexto del catálogo y la documentación asociada.
-2. NUNCA inventes información, precios, características o productos que no estén en el contexto.
-3. NUNCA busques información en internet o fuera de la base de datos.
-4. Si no encuentras información en el contexto, di claramente: "No encontré información sobre [tema] en nuestro catálogo actual."
-5. Si el usuario pregunta sobre un producto específico y no está en el contexto, sugiere que revise el catálogo completo o reformule la búsqueda.
-6. IMPORTANTE: Cuando haya documentación asociada a un producto (recetas, instrucciones, detalles técnicos), úsala para dar respuestas más completas y precisas.
+REGLAS ESTRICTAS Y CRÍTICAS:
+1. SOLO puedes responder usando EXACTAMENTE la información proporcionada en el contexto del catálogo.
+2. NUNCA inventes, asumas o deduzcas información que no esté EXPLÍCITAMENTE escrita en el contexto.
+3. NUNCA contradigas la información del contexto. Si el contexto dice "aptas para microondas", NO digas que no se pueden usar en microondas.
+4. Si el contexto menciona características específicas (ej: "aptas para microondas, horno, salamandra"), repite EXACTAMENTE esas características sin modificarlas ni negarlas.
+5. Si no encuentras información específica en el contexto sobre una característica, di claramente: "No encontré información sobre [característica específica] en la descripción del producto."
+6. NUNCA uses conocimiento general o información que no esté en el contexto proporcionado.
 
-Responde en español de forma clara y útil.
-Si hay información de productos en el contexto, preséntalos de forma organizada con sus características exactas.
-Si hay documentación asociada (recetas, instrucciones, etc.), inclúyela en tu respuesta para dar información más detallada.
-Si no hay productos relevantes, sé honesto y di que no encontraste información en el catálogo.`;
+INSTRUCCIONES DE RESPUESTA:
+- Lee cuidadosamente TODO el contexto antes de responder. El contexto puede tener múltiples chunks del mismo producto con información complementaria.
+- BUSCA ACTIVAMENTE en TODOS los chunks del contexto. Si un producto aparece en varios chunks, revisa TODOS para encontrar la información completa.
+- Si el contexto dice que un producto es "apto para X" en CUALQUIER parte del contexto, confirma que es apto para X.
+- Si el contexto menciona múltiples características (incluso en diferentes chunks), menciona TODAS las que sean relevantes a la pregunta.
+- Responde en español de forma clara, usando EXACTAMENTE las palabras y frases del contexto cuando sea posible.
+- Si encuentras información sobre la pregunta en CUALQUIER chunk del contexto, úsala para responder.
+- Si hay información contradictoria en el contexto, menciona ambas pero indica la fuente más relevante.
+- SIEMPRE incluye citas de fuentes al final usando el formato [Fuente: Producto: Nombre]
+
+IMPORTANTE: Tu respuesta DEBE reflejar fielmente lo que dice el contexto. No interpretes, no asumas, no deduzcas. Solo repite y organiza la información que está explícitamente escrita. Si después de revisar TODO el contexto no encuentras la información específica, di claramente que no la encontraste.`;
+
+    // Log del contexto completo para debugging (útil para detectar problemas)
+    console.log('[chat-rag] Full context length:', contextText.length);
+    console.log('[chat-rag] Context preview (first 2000 chars):', contextText.substring(0, 2000));
+    
+    // Verificar si el contexto contiene información relevante sobre la pregunta
+    const lowerContext = contextText.toLowerCase();
+    const lowerMessage = message.toLowerCase();
+    
+    // Extraer palabras clave de la pregunta
+    const questionKeywords = lowerMessage
+      .split(/\s+/)
+      .filter(w => w.length > 3 && !['para', 'con', 'del', 'las', 'los', 'una', 'uno'].includes(w));
+    
+    console.log('[chat-rag] Question keywords:', questionKeywords);
+    
+    // Verificar si el contexto contiene las palabras clave
+    const foundKeywords = questionKeywords.filter(kw => lowerContext.includes(kw));
+    console.log('[chat-rag] Keywords found in context:', foundKeywords);
+    console.log('[chat-rag] Keywords NOT found in context:', questionKeywords.filter(kw => !lowerContext.includes(kw)));
+    
+    // Verificación específica para microondas
+    if (lowerMessage.includes('microondas') || lowerMessage.includes('microonda')) {
+      console.log('[chat-rag] ⚠️ Question is about microondas - checking context...');
+      if (lowerContext.includes('microondas')) {
+        console.log('[chat-rag] ✅ Context DOES contain "microondas"');
+        const microondasMatches = contextText.match(/[^.]*microondas[^.]*\./gi);
+        if (microondasMatches) {
+          console.log('[chat-rag] Found microondas mentions in context:', microondasMatches.slice(0, 5));
+        }
+      } else {
+        console.error('[chat-rag] ❌ Context DOES NOT contain "microondas" - this is a problem!');
+        console.log('[chat-rag] Available chunks:', chunksText.length);
+        chunksText.forEach((chunk, idx) => {
+          console.log(`[chat-rag] Chunk ${idx + 1} (${chunk.length} chars):`, chunk.substring(0, 200));
+        });
+      }
+    }
+    
+    // Verificar si el producto específico está en el contexto
+    if (lowerMessage.includes('volcanic') || lowerMessage.includes('plato volcanic')) {
+      console.log('[chat-rag] ⚠️ Question is about Volcanic - checking context...');
+      if (lowerContext.includes('volcanic')) {
+        console.log('[chat-rag] ✅ Context DOES contain "volcanic"');
+        const volcanicMatches = contextText.match(/[^.]*volcanic[^.]*\./gi);
+        if (volcanicMatches) {
+          console.log('[chat-rag] Found volcanic mentions:', volcanicMatches.slice(0, 3));
+        }
+      } else {
+        console.error('[chat-rag] ❌ Context DOES NOT contain "volcanic" - product not found!');
+      }
+    }
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o', // Actualizado a GPT-4o para mejor calidad y razonamiento
       messages: [
         { role: 'system', content: systemPrompt },
         ...conversationHistory.filter((m: any) => m.role !== 'system').slice(-5),
         {
           role: 'user',
-          content: `Contexto del catálogo:\n${contextText}\n\nPregunta del usuario: ${message}`,
+          content: `Contexto del catálogo (usa SOLO esta información):\n${contextText}\n\nPregunta del usuario: ${message}\n\nINSTRUCCIONES CRÍTICAS:
+1. REVISA CADA CHUNK INDIVIDUALMENTE. El contexto tiene ${chunksText.length} chunks. Lee TODOS antes de responder.
+
+2. BUSCA PALABRAS CLAVE ESPECÍFICAS. Si la pregunta menciona "microondas", busca esa palabra en TODOS los chunks. Si menciona "apto para", busca esa frase en TODOS los chunks.
+
+3. NO TE DETENGAS EN EL PRIMER CHUNK. Si el primer chunk no tiene la información, sigue buscando en los demás chunks. Cada chunk puede tener información diferente.
+
+4. SI ENCUENTRAS LA INFORMACIÓN EN CUALQUIER CHUNK, úsala para responder inmediatamente. No digas "no encontré información" si la información está en algún chunk del contexto.
+
+5. SI LA PREGUNTA ES SOBRE UNA CARACTERÍSTICA ESPECÍFICA (ej: "apto para microondas"), busca esa característica en TODOS los chunks del producto mencionado.
+
+6. SIEMPRE incluye citas de fuentes al final usando [Fuente: Producto: Nombre del Producto].
+
+7. SOLO di "No encontré información" si después de revisar TODOS los ${chunksText.length} chunks del contexto, realmente no encuentras ninguna mención de la característica preguntada.`,
         },
       ],
-      temperature: 0.7,
-      max_tokens: 800,
+      temperature: 0.2, // Reducido a 0.2 para GPT-4o (más preciso que GPT-3.5)
+      max_tokens: 1000, // Aumentado para permitir respuestas más completas con citas
     });
 
     const assistantResponse = completion.choices[0]?.message?.content || 'Lo siento, no pude generar una respuesta.';
@@ -429,15 +598,75 @@ Si no hay productos relevantes, sé honesto y di que no encontraste información
       };
     }
 
-    res.status(200).json({
+    // Guardar conversación en la base de datos y obtener el ID
+    const sessionId = req.body?.session_id || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    let conversationId: string | null = null;
+    
+    try {
+      console.log('[chat-rag] Intentando guardar conversación...', {
+        sessionId,
+        hasProducts: formattedProducts.length > 0,
+        responseLength: assistantResponse.length
+      });
+      
+      const { data: conversationData, error: conversationError } = await supabase
+        .from('chat_conversations')
+        .insert({
+          session_id: sessionId,
+          user_message: message,
+          bot_response: assistantResponse,
+          function_called: 'rag_search',
+          products_consulted: formattedProducts.length > 0 ? formattedProducts.map(p => ({
+            name: p.name,
+            category: p.category,
+            sku: p.sku,
+            id: p.id
+          })) : null,
+          category_consulted: formattedProducts.length > 0 && formattedProducts[0]?.category ? formattedProducts[0].category : null,
+          model_used: 'gpt-4o', // Actualizado para reflejar el cambio real
+          response_time_ms: totalTime,
+          tokens_used: completion.usage?.total_tokens || null,
+        })
+        .select('id')
+        .single();
+      
+      if (conversationError) {
+        console.error('[chat-rag] Error guardando conversación:', {
+          error: conversationError,
+          code: conversationError.code,
+          message: conversationError.message,
+          details: conversationError.details
+        });
+      } else if (conversationData) {
+        conversationId = conversationData.id;
+        console.log('[chat-rag] Conversación guardada exitosamente, ID:', conversationId);
+      } else {
+        console.warn('[chat-rag] No se recibió data ni error al guardar conversación');
+      }
+    } catch (err) {
+      console.error('[chat-rag] Excepción al guardar conversación:', err);
+    }
+
+    // Construir fuentes detalladas para mejor citación
+    const detailedSources = formattedProducts.length > 0 ? formattedProducts.map(p => ({
+      type: 'product' as const,
+      id: p.id,
+      name: p.name,
+      url: p.product_url || undefined,
+      category: p.category || undefined,
+    })) : undefined;
+
+    const responsePayload = {
       success: true,
       message: assistantResponse,
       conversation_history: updatedHistory,
+      conversation_id: conversationId,
       products: formattedProducts.length > 0 ? formattedProducts : undefined,
       function_result: formattedProducts.length > 0 ? {
         products: formattedProducts,
       } : undefined,
-      sources: similarChunks && similarChunks.length > 0 ? ['products_db'] : undefined,
+      sources: detailedSources || (similarChunks && similarChunks.length > 0 ? ['products_db'] : undefined),
+      sources_detail: detailedSources, // Nuevo campo con información detallada de fuentes
       timings: {
         total_ms: totalTime,
         steps: [
@@ -445,7 +674,14 @@ Si no hay productos relevantes, sé honesto y di que no encontraste información
           { name: 'LLM Generation', duration_ms: totalTime * 0.7 },
         ],
       },
+    };
+
+    console.log('[chat-rag] Enviando respuesta con conversation_id:', {
+      conversation_id: conversationId,
+      hasConversationId: !!conversationId
     });
+
+    res.status(200).json(responsePayload);
   } catch (error) {
     console.error('[chat-rag] Unhandled error:', {
       error,

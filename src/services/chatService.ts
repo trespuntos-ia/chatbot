@@ -78,12 +78,12 @@ export async function sendChatMessage(
 
 /**
  * Configuración por defecto de OpenAI
- * Usando gpt-3.5-turbo para mejor velocidad y costo
+ * Actualizado a GPT-4o para mejor calidad y razonamiento
  */
 export const DEFAULT_CHAT_CONFIG: ChatConfig = {
-  model: 'gpt-3.5-turbo',
-  temperature: 0.7,
-  max_tokens: 800, // Reducido significativamente para respuestas más rápidas
+  model: 'gpt-4o',
+  temperature: 0.2, // Reducido para respuestas más precisas y menos creativas
+  max_tokens: 1000, // Aumentado para permitir respuestas más completas con citas
   top_p: 1.0,
   frequency_penalty: 0.0,
   presence_penalty: 0.0
@@ -93,6 +93,7 @@ export const DEFAULT_CHAT_CONFIG: ChatConfig = {
  * Modelos disponibles de OpenAI
  */
 export const AVAILABLE_MODELS = [
+  { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4', label: 'GPT-4' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
   { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
