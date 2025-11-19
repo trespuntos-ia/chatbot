@@ -159,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log('[chat-rag] Searching exact name:', productNameToSearch);
       const { data: exactResults, error: exactError } = await supabase
         .from('products')
-        .select('id, name, description, category, subcategory, sku, price, image_url, product_url')
+        .select('id, name, description, description_full, meta_description, features, category, subcategory, sku, price, image_url, product_url')
         .ilike('name', `%${productNameToSearch}%`)
         .limit(10);
       
@@ -189,7 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (const keyword of keywords) {
         const { data: keywordResults, error: keywordError } = await supabase
           .from('products')
-          .select('id, name, description, category, subcategory, sku, price, image_url, product_url')
+          .select('id, name, description, description_full, meta_description, features, category, subcategory, sku, price, image_url, product_url')
           .ilike('name', `%${keyword}%`)
           .limit(10);
         
@@ -216,17 +216,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (product.subcategory) {
           productChunk += ` - ${product.subcategory}`;
         }
+        // IMPORTANTE: Incluir TODAS las descripciones disponibles (description + description_full + meta_description)
+        let allDescriptions = '';
+        
+        // 1. Descripción principal (description)
         if (product.description) {
-          // Asegurarse de incluir la descripción completa
           const cleanDescription = product.description.replace(/<[^>]*>/g, '').trim();
           if (cleanDescription.length > 0) {
-            productChunk += `. ${cleanDescription}`;
+            allDescriptions += cleanDescription;
             console.log(`[chat-rag] Added description for ${product.name}: ${cleanDescription.substring(0, 100)}...`);
-          } else {
-            console.warn(`[chat-rag] Product ${product.name} has empty or invalid description`);
           }
+        }
+        
+        // 2. Descripción larga completa (description_full) - CRÍTICO para información detallada
+        if (product.description_full && product.description_full !== product.description) {
+          const cleanDescriptionFull = product.description_full.replace(/<[^>]*>/g, '').trim();
+          if (cleanDescriptionFull.length > 0) {
+            allDescriptions += (allDescriptions ? '\n\n' : '') + cleanDescriptionFull;
+            console.log(`[chat-rag] ✅ Added description_full for ${product.name}: ${cleanDescriptionFull.substring(0, 100)}...`);
+            // Verificar si contiene palabras clave de la pregunta
+            const lowerDesc = cleanDescriptionFull.toLowerCase();
+            const lowerQuery = message.toLowerCase();
+            if (lowerQuery.includes('microondas') && lowerDesc.includes('microondas')) {
+              console.log(`[chat-rag] ⚠️⚠️⚠️ description_full CONTAINS "microondas" for ${product.name}!`);
+            }
+          }
+        }
+        
+        // 3. Meta descripción (meta_description) - Keywords importantes
+        if (product.meta_description) {
+          const cleanMetaDesc = product.meta_description.replace(/<[^>]*>/g, '').trim();
+          if (cleanMetaDesc.length > 0) {
+            allDescriptions += (allDescriptions ? '\n\n' : '') + cleanMetaDesc;
+            console.log(`[chat-rag] Added meta_description for ${product.name}: ${cleanMetaDesc.substring(0, 100)}...`);
+          }
+        }
+        
+        // 4. Features/Iconos si existen
+        if (product.features && Array.isArray(product.features) && product.features.length > 0) {
+          const featuresText = product.features.join(', ');
+          allDescriptions += (allDescriptions ? '\n\n' : '') + `Características: ${featuresText}`;
+          console.log(`[chat-rag] Added features for ${product.name}: ${featuresText}`);
+        }
+        
+        if (allDescriptions.trim().length > 0) {
+          productChunk += `. ${allDescriptions.trim()}`;
+          console.log(`[chat-rag] ✅ Final chunk for ${product.name}: ${productChunk.length} chars total`);
         } else {
-          console.warn(`[chat-rag] Product ${product.name} (ID: ${product.id}) has no description field`);
+          console.warn(`[chat-rag] Product ${product.name} (ID: ${product.id}) has no description fields at all`);
         }
         
         if (productChunk.trim().length > 0) {
@@ -428,14 +465,19 @@ REGLAS ESTRICTAS Y CRÍTICAS:
 INSTRUCCIONES DE RESPUESTA:
 - Lee cuidadosamente TODO el contexto antes de responder. El contexto puede tener múltiples chunks del mismo producto con información complementaria.
 - BUSCA ACTIVAMENTE en TODOS los chunks del contexto. Si un producto aparece en varios chunks, revisa TODOS para encontrar la información completa.
-- Si el contexto dice que un producto es "apto para X" en CUALQUIER parte del contexto, confirma que es apto para X.
-- Si el contexto menciona múltiples características (incluso en diferentes chunks), menciona TODAS las que sean relevantes a la pregunta.
+- IMPORTANTE: Cada producto puede tener múltiples descripciones combinadas:
+  * Descripción corta (description)
+  * Descripción larga completa (description_full) - Esta contiene la información MÁS DETALLADA
+  * Meta descripción (meta_description) - Contiene keywords importantes
+  * Características/Features - Lista de características específicas
+- Si el contexto dice que un producto es "apto para X" en CUALQUIER parte del contexto (incluso en description_full), confirma que es apto para X.
+- Si el contexto menciona múltiples características (incluso en diferentes descripciones o chunks), menciona TODAS las que sean relevantes a la pregunta.
 - Responde en español de forma clara, usando EXACTAMENTE las palabras y frases del contexto cuando sea posible.
-- Si encuentras información sobre la pregunta en CUALQUIER chunk del contexto, úsala para responder.
+- Si encuentras información sobre la pregunta en CUALQUIER parte del contexto (description, description_full, meta_description, features, chunks semánticos), úsala para responder.
 - Si hay información contradictoria en el contexto, menciona ambas pero indica la fuente más relevante.
 - SIEMPRE incluye citas de fuentes al final usando el formato [Fuente: Producto: Nombre]
 
-IMPORTANTE: Tu respuesta DEBE reflejar fielmente lo que dice el contexto. No interpretes, no asumas, no deduzcas. Solo repite y organiza la información que está explícitamente escrita. Si después de revisar TODO el contexto no encuentras la información específica, di claramente que no la encontraste.`;
+IMPORTANTE: Tu respuesta DEBE reflejar fielmente lo que dice el contexto. No interpretes, no asumas, no deduzcas. Solo repite y organiza la información que está explícitamente escrita. Si después de revisar TODO el contexto (incluyendo description_full y meta_description) no encuentras la información específica, di claramente que no la encontraste.`;
 
     // Log del contexto completo para debugging (útil para detectar problemas)
     console.log('[chat-rag] Full context length:', contextText.length);
@@ -499,17 +541,24 @@ IMPORTANTE: Tu respuesta DEBE reflejar fielmente lo que dice el contexto. No int
           content: `Contexto del catálogo (usa SOLO esta información):\n${contextText}\n\nPregunta del usuario: ${message}\n\nINSTRUCCIONES CRÍTICAS:
 1. REVISA CADA CHUNK INDIVIDUALMENTE. El contexto tiene ${chunksText.length} chunks. Lee TODOS antes de responder.
 
-2. BUSCA PALABRAS CLAVE ESPECÍFICAS. Si la pregunta menciona "microondas", busca esa palabra en TODOS los chunks. Si menciona "apto para", busca esa frase en TODOS los chunks.
+2. IMPORTANTE: Cada producto puede tener múltiples descripciones combinadas en el contexto:
+   - description (descripción corta)
+   - description_full (descripción larga completa - contiene la información MÁS DETALLADA)
+   - meta_description (keywords importantes)
+   - features (características específicas)
+   BUSCA en TODAS estas descripciones. La información más detallada suele estar en description_full.
 
-3. NO TE DETENGAS EN EL PRIMER CHUNK. Si el primer chunk no tiene la información, sigue buscando en los demás chunks. Cada chunk puede tener información diferente.
+3. BUSCA PALABRAS CLAVE ESPECÍFICAS. Si la pregunta menciona "microondas", busca esa palabra en TODOS los chunks y en TODAS las descripciones. Si menciona "apto para", busca esa frase en TODOS los chunks.
 
-4. SI ENCUENTRAS LA INFORMACIÓN EN CUALQUIER CHUNK, úsala para responder inmediatamente. No digas "no encontré información" si la información está en algún chunk del contexto.
+4. NO TE DETENGAS EN EL PRIMER CHUNK. Si el primer chunk no tiene la información, sigue buscando en los demás chunks. Cada chunk puede tener información diferente.
 
-5. SI LA PREGUNTA ES SOBRE UNA CARACTERÍSTICA ESPECÍFICA (ej: "apto para microondas"), busca esa característica en TODOS los chunks del producto mencionado.
+5. SI ENCUENTRAS LA INFORMACIÓN EN CUALQUIER CHUNK, úsala para responder inmediatamente. No digas "no encontré información" si la información está en algún chunk del contexto.
 
-6. SIEMPRE incluye citas de fuentes al final usando [Fuente: Producto: Nombre del Producto].
+6. SI LA PREGUNTA ES SOBRE UNA CARACTERÍSTICA ESPECÍFICA (ej: "apto para microondas"), busca esa característica en TODOS los chunks del producto mencionado y en TODAS las descripciones (description, description_full, meta_description).
 
-7. SOLO di "No encontré información" si después de revisar TODOS los ${chunksText.length} chunks del contexto, realmente no encuentras ninguna mención de la característica preguntada.`,
+7. SIEMPRE incluye citas de fuentes al final usando [Fuente: Producto: Nombre del Producto].
+
+8. SOLO di "No encontré información" si después de revisar TODOS los ${chunksText.length} chunks del contexto y TODAS las descripciones disponibles, realmente no encuentras ninguna mención de la característica preguntada.`,
         },
       ],
       temperature: 0.2, // Reducido a 0.2 para GPT-4o (más preciso que GPT-3.5)

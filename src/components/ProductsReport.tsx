@@ -44,7 +44,13 @@ export function ProductsReport() {
   const [selectedCategory3, setSelectedCategory3] = useState<string>('');
   const [indexing, setIndexing] = useState(false);
   const [indexingProgress, setIndexingProgress] = useState<string>('');
-  const [indexedStats, setIndexedStats] = useState<{ total: number; uniqueProducts: number } | null>(null);
+  const [clearingEmbeddings, setClearingEmbeddings] = useState(false);
+  const [indexedStats, setIndexedStats] = useState<{ 
+    total: number; 
+    uniqueProducts: number;
+    totalProducts?: number;
+    remaining?: number;
+  } | null>(null);
   const itemsPerPage = 20;
 
   useEffect(() => {
@@ -253,6 +259,44 @@ export function ProductsReport() {
     setCurrentPage(1);
   };
 
+  const handleClearEmbeddings = async () => {
+    const confirmMessage = '¿Estás seguro de que quieres eliminar TODOS los embeddings indexados?\n\nEsto eliminará:\n- Todos los chunks indexados (tabla product_embeddings)\n\nLos productos NO se eliminarán, solo los embeddings.\n\nDespués podrás re-indexar los productos con la información actualizada (incluyendo description_full).';
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    setClearingEmbeddings(true);
+    setIndexingProgress('Limpiando embeddings...');
+    setError('');
+
+    try {
+      const response = await fetch('/api/clear-embeddings', {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Error al limpiar embeddings');
+      }
+
+      setIndexingProgress(`✅ ${data.message || `Se eliminaron ${data.deleted || 0} embeddings`}`);
+      
+      // Actualizar estadísticas
+      await fetchIndexedStats();
+      
+      setTimeout(() => {
+        setIndexingProgress('');
+        setClearingEmbeddings(false);
+      }, 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al limpiar embeddings');
+      setClearingEmbeddings(false);
+      setIndexingProgress('');
+    }
+  };
+
   const handleIndexProducts = async (limit?: number) => {
     setIndexing(true);
     setIndexingProgress('Iniciando indexación automática...');
@@ -309,23 +353,42 @@ export function ProductsReport() {
               Búsqueda Semántica (RAG)
             </h3>
             {indexedStats && (
-              <div className="flex flex-wrap gap-4 text-sm mb-2">
-                <span className="text-slate-700">
-                  <strong>Chunks:</strong> {indexedStats.total.toLocaleString()}
-                </span>
-                <span className="text-slate-700">
-                  <strong>Productos:</strong> {indexedStats.uniqueProducts.toLocaleString()}
-                </span>
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <span className="text-slate-700">
+                    <strong>Chunks:</strong> {indexedStats.total.toLocaleString()}
+                  </span>
+                  <span className="text-slate-700">
+                    <strong>Productos indexados:</strong> {indexedStats.uniqueProducts.toLocaleString()}
+                  </span>
+                </div>
+                {indexedStats.totalProducts !== undefined && (
+                  <div className="text-xs text-slate-500">
+                    {indexedStats.totalProducts > 0 ? (
+                      <>
+                        Progreso: {indexedStats.uniqueProducts} de {indexedStats.totalProducts} productos 
+                        ({Math.round((indexedStats.uniqueProducts / indexedStats.totalProducts) * 100)}%)
+                        {indexedStats.remaining !== undefined && indexedStats.remaining > 0 && (
+                          <span className="text-orange-600 ml-2">
+                            • Quedan {indexedStats.remaining} por indexar
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      'Calculando total de productos...'
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {indexingProgress && (
               <p className="text-sm text-indigo-700 font-medium">{indexingProgress}</p>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => handleIndexProducts()}
-              disabled={indexing}
+              disabled={indexing || clearingEmbeddings}
               className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
             >
               {indexing ? (
@@ -342,6 +405,28 @@ export function ProductsReport() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                   Indexar Productos
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleClearEmbeddings}
+              disabled={indexing || clearingEmbeddings}
+              className="px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
+            >
+              {clearingEmbeddings ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Limpiando...
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Limpiar Embeddings
                 </>
               )}
             </button>
