@@ -91,24 +91,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via RPC)`);
       } else {
-        // Fallback: usar consulta con DISTINCT directamente
-        console.log('[index-products-rag-auto] RPC function not available, using DISTINCT query');
-        const { data: uniqueProducts, error: distinctError } = await supabase
-          .from('product_embeddings')
-          .select('product_id')
-          .limit(50000); // Límite alto pero razonable
+        // Fallback: usar consulta con DISTINCT directamente usando paginación
+        console.log('[index-products-rag-auto] RPC function not available, using paginated DISTINCT query');
+        let offset = 0;
+        const pageSize = 10000;
+        let hasMore = true;
+        let totalFetched = 0;
 
-        if (!distinctError && uniqueProducts) {
+        while (hasMore) {
+          const { data: uniqueProducts, error: distinctError } = await supabase
+            .from('product_embeddings')
+            .select('product_id')
+            .range(offset, offset + pageSize - 1);
+
+          if (distinctError) {
+            console.warn('[index-products-rag-auto] Error fetching indexed products:', distinctError);
+            break;
+          }
+
+          if (!uniqueProducts || uniqueProducts.length === 0) {
+            hasMore = false;
+            break;
+          }
+
           uniqueProducts.forEach((item: any) => {
             if (item.product_id) {
               indexedIds.add(item.product_id);
             }
           });
-          console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via DISTINCT fallback)`);
-        } else {
-          console.warn('[index-products-rag-auto] Error fetching indexed products:', distinctError || rpcError);
-          // Continuar con Set vacío - indexará todos los productos (no ideal pero funcional)
+
+          totalFetched += uniqueProducts.length;
+          offset += pageSize;
+
+          // Si obtuvimos menos que pageSize, no hay más datos
+          if (uniqueProducts.length < pageSize) {
+            hasMore = false;
+          }
+
+          // Límite de seguridad
+          if (offset > 200000) {
+            console.warn('[index-products-rag-auto] Reached safety limit while fetching indexed products');
+            break;
+          }
         }
+
+        console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via paginated DISTINCT fallback, fetched ${totalFetched} chunks)`);
       }
     } catch (error) {
       console.error('[index-products-rag-auto] Exception fetching indexed products:', error);
