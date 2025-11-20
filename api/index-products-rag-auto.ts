@@ -267,7 +267,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         
         // Filtrar productos que ya están indexados
         const productsToActuallyIndex = batch.filter(p => !alreadyIndexedInBatch.has(p.id));
-        const chunksToInsert = embeddingsToInsert.filter((_, idx) => !alreadyIndexedInBatch.has(batch[idx].id));
+        // Filtrar chunks basándose en el product_id del chunk, no en el índice del batch
+        const chunksToInsert = embeddingsToInsert.filter(chunk => !alreadyIndexedInBatch.has(chunk.product_id));
         
         if (productsToActuallyIndex.length === 0) {
           console.log(`[index-products-rag-auto] Batch ${batchNumber}: Todos los productos ya están indexados, saltando...`);
