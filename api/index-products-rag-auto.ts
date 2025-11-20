@@ -245,10 +245,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           chunk_index: chunk.metadata.chunk_index,
         }));
 
-        // Guardar embeddings
+        // IMPORTANTE: Verificar que estos productos realmente NO están indexados antes de insertar
+        // Esto previene re-indexación de productos que ya tienen chunks
+        const batchProductIds = new Set(batch.map(p => p.id));
+        const alreadyIndexedInBatch = new Set<number>();
+        
+        // Verificar rápidamente si alguno de estos productos ya tiene chunks
+        const { data: existingChunks, error: checkError } = await supabase
+          .from('product_embeddings')
+          .select('product_id')
+          .in('product_id', Array.from(batchProductIds))
+          .limit(1000);
+        
+        if (!checkError && existingChunks) {
+          existingChunks.forEach((item: any) => {
+            if (item.product_id) {
+              alreadyIndexedInBatch.add(item.product_id);
+            }
+          });
+        }
+        
+        // Filtrar productos que ya están indexados
+        const productsToActuallyIndex = batch.filter(p => !alreadyIndexedInBatch.has(p.id));
+        const chunksToInsert = embeddingsToInsert.filter((_, idx) => !alreadyIndexedInBatch.has(batch[idx].id));
+        
+        if (productsToActuallyIndex.length === 0) {
+          console.log(`[index-products-rag-auto] Batch ${batchNumber}: Todos los productos ya están indexados, saltando...`);
+          continue;
+        }
+        
+        if (chunksToInsert.length === 0) {
+          console.log(`[index-products-rag-auto] Batch ${batchNumber}: No hay chunks nuevos para insertar, saltando...`);
+          continue;
+        }
+        
+        console.log(`[index-products-rag-auto] Batch ${batchNumber}: Insertando ${chunksToInsert.length} chunks para ${productsToActuallyIndex.length} productos nuevos (${alreadyIndexedInBatch.size} ya estaban indexados)`);
+        
+        // Guardar embeddings solo para productos que realmente no están indexados
         const { error: insertError } = await supabase
           .from('product_embeddings')
-          .insert(embeddingsToInsert);
+          .insert(chunksToInsert);
 
         if (insertError) {
           console.error(`[index-products-rag-auto] Error inserting batch ${batchNumber}:`, insertError);
@@ -256,8 +292,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
 
-        indexed += batch.length;
-        console.log(`[index-products-rag-auto] ✅ Indexed batch ${batchNumber}: ${batch.length} products`);
+        indexed += productsToActuallyIndex.length;
+        console.log(`[index-products-rag-auto] ✅ Indexed batch ${batchNumber}: ${productsToActuallyIndex.length} products (${alreadyIndexedInBatch.size} ya estaban indexados)`);
 
         // Pequeño delay entre batches
         if (i + batchSize < productsToIndex.length) {
