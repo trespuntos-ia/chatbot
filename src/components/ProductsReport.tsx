@@ -55,7 +55,7 @@ export function ProductsReport() {
   const itemsPerPage = 20;
 
   // Referencia al intervalo para poder limpiarlo
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<number | null>(null);
 
   // Función para obtener estadísticas de indexación - versión robusta
   const fetchIndexedStats = useCallback(async () => {
