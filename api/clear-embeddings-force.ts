@@ -70,9 +70,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log('[clear-embeddings-force] DELETE failed, trying SQL RPC...');
       
       // Intentar ejecutar TRUNCATE usando rpc (si existe función exec_sql)
-      const { error: truncateError } = await supabase.rpc('exec_sql', {
-        sql: 'TRUNCATE TABLE product_embeddings;'
-      }).catch(() => ({ error: { message: 'RPC function not available' } }));
+      let truncateError: any = null;
+      try {
+        const result = await supabase.rpc('exec_sql', {
+          sql: 'TRUNCATE TABLE product_embeddings;'
+        });
+        truncateError = result.error;
+      } catch (err) {
+        truncateError = { message: 'RPC function not available' };
+      }
       
       if (truncateError) {
         return res.status(500).json({
@@ -119,4 +125,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 }
+
 

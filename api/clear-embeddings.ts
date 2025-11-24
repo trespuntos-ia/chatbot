@@ -58,9 +58,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.log('[clear-embeddings] DELETE blocked by RLS, trying SQL approach...');
         
         // Intentar ejecutar SQL directo usando rpc
-        const { error: sqlError } = await supabase.rpc('exec_sql', {
-          sql: 'DELETE FROM product_embeddings;'
-        }).catch(() => ({ error: { message: 'RPC function not available' } }));
+        let sqlError: any = null;
+        try {
+          const result = await supabase.rpc('exec_sql', {
+            sql: 'DELETE FROM product_embeddings;'
+          });
+          sqlError = result.error;
+        } catch (err) {
+          sqlError = { message: 'RPC function not available' };
+        }
         
         if (sqlError) {
           return res.status(500).json({
