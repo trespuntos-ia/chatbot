@@ -142,42 +142,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Continuar con Set vacío
     }
 
-    // Obtener productos NO indexados (obtener más para filtrar)
-    const FETCH_MULTIPLIER = 4; // Obtener 4x más productos para filtrar
-    const fetchLimit = PRODUCTS_PER_RUN * FETCH_MULTIPLIER;
-    const { data: allProductsData, error: fetchError } = await supabase
-      .from('products')
-      .select('*')
-      .limit(fetchLimit); // Obtener más para tener mejor probabilidad de encontrar productos no indexados
+    // Obtener productos NO indexados de manera más eficiente
+    // Usar ordenamiento por ID y buscar en diferentes rangos para encontrar productos no indexados
+    const fetchLimit = PRODUCTS_PER_RUN * 2; // Obtener el doble para tener mejor probabilidad
+    let productsToIndex: any[] = [];
+    let offset = 0;
+    let attempts = 0;
+    const maxAttempts = 20; // Aumentar intentos para buscar más productos
 
-    if (fetchError) {
-      throw fetchError;
-    }
+    while (productsToIndex.length < PRODUCTS_PER_RUN && attempts < maxAttempts) {
+      const { data: batchData, error: fetchError } = await supabase
+        .from('products')
+        .select('*')
+        .order('id', { ascending: true })
+        .range(offset, offset + fetchLimit - 1);
 
-    // Filtrar solo los que no están indexados
-    const unindexedProducts = (allProductsData || []).filter(p => !indexedIds.has(p.id));
-    const productsToIndex = unindexedProducts.slice(0, PRODUCTS_PER_RUN);
-
-    // Si no encontramos suficientes, intentar con offset
-    if (productsToIndex.length < PRODUCTS_PER_RUN && allProductsData && allProductsData.length === fetchLimit) {
-      let offset = fetchLimit;
-      let attempts = 0;
-      const maxAttempts = 5;
-
-      while (productsToIndex.length < PRODUCTS_PER_RUN && attempts < maxAttempts) {
-        const { data: moreData, error: moreError } = await supabase
-          .from('products')
-          .select('*')
-          .range(offset, offset + fetchLimit - 1);
-
-        if (moreError || !moreData || moreData.length === 0) break;
-
-        const moreUnindexed = moreData.filter(p => !indexedIds.has(p.id));
-        productsToIndex.push(...moreUnindexed.slice(0, PRODUCTS_PER_RUN - productsToIndex.length));
-
-        offset += fetchLimit;
-        attempts++;
+      if (fetchError) {
+        console.error('[index-products-rag-auto] Error fetching products:', fetchError);
+        break;
       }
+
+      if (!batchData || batchData.length === 0) {
+        // Si no hay más datos, intentar desde el principio con diferentes rangos
+        if (offset === 0) break;
+        offset = 0;
+        attempts++;
+        continue;
+      }
+
+      // Filtrar solo los que no están indexados
+      const unindexedInBatch = batchData.filter(p => !indexedIds.has(p.id));
+      productsToIndex.push(...unindexedInBatch.slice(0, PRODUCTS_PER_RUN - productsToIndex.length));
+
+      // Si encontramos suficientes, salir
+      if (productsToIndex.length >= PRODUCTS_PER_RUN) break;
+
+      // Avanzar al siguiente rango
+      offset += fetchLimit;
+      attempts++;
     }
 
     if (productsToIndex.length === 0) {
