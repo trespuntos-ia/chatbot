@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface CategoryInfo {
   category: string;
@@ -71,6 +71,12 @@ export function ProductsReport() {
     }
   }, []);
 
+  // Usar useRef para mantener una referencia estable a la función
+  const fetchIndexedStatsRef = useRef(fetchIndexedStats);
+  useEffect(() => {
+    fetchIndexedStatsRef.current = fetchIndexedStats;
+  }, [fetchIndexedStats]);
+
   // Efecto para cargar productos cuando cambian los filtros
   useEffect(() => {
     fetchProducts();
@@ -84,16 +90,17 @@ export function ProductsReport() {
     fetchIndexedStats();
     
     // Auto-refresh de estadísticas cada 30 segundos para ver progreso del cron
+    // Temporalmente en 5 segundos para pruebas, luego cambiar a 30000
     const statsInterval = setInterval(() => {
       console.log('[ProductsReport] Actualizando estadísticas automáticamente...');
-      fetchIndexedStats();
-    }, 30000); // Actualizar cada 30 segundos
+      fetchIndexedStatsRef.current();
+    }, 5000); // Actualizar cada 5 segundos (temporal para pruebas)
     
     return () => {
       console.log('[ProductsReport] Limpiando intervalo de actualización automática');
       clearInterval(statsInterval);
     };
-  }, [fetchIndexedStats]); // Dependencia de fetchIndexedStats (estable con useCallback)
+  }, []); // Sin dependencias - se ejecuta solo al montar/desmontar
 
   // Log para depuración: verificar si los productos tienen all_categories
   useEffect(() => {
@@ -402,7 +409,7 @@ export function ProductsReport() {
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    Actualizado: {lastStatsUpdate.toLocaleTimeString('es-ES')} (auto-refresh cada 30s)
+                    Actualizado: {lastStatsUpdate.toLocaleTimeString('es-ES')} (auto-refresh cada 5s)
                   </div>
                 )}
               </div>
