@@ -54,36 +54,34 @@ export function ProductsReport() {
   const [lastStatsUpdate, setLastStatsUpdate] = useState<Date | null>(null);
   const itemsPerPage = 20;
 
-  // Referencia al intervalo para poder limpiarlo
-  const intervalRef = useRef<number | null>(null);
-
-  // Función para obtener estadísticas de indexación - versión robusta
+  // Función para obtener estadísticas - versión simple y directa
   const fetchIndexedStats = useCallback(async () => {
     try {
-      console.log('[ProductsReport] 🔄 Iniciando fetch de estadísticas...');
+      console.log('[ProductsReport] 🔄 Fetching stats...', new Date().toLocaleTimeString());
       const timestamp = Date.now();
       const response = await fetch(`/api/get-indexed-stats?t=${timestamp}`, {
         method: 'GET',
-        cache: 'no-cache',
+        cache: 'no-store',
         headers: {
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
         },
       });
       
       if (response.ok) {
         const data = await response.json();
-        console.log('[ProductsReport] ✅ Estadísticas recibidas:', {
+        console.log('[ProductsReport] ✅ Stats updated:', {
           chunks: data.total,
           productos: data.uniqueProducts,
-          timestamp: new Date().toISOString(),
+          time: new Date().toLocaleTimeString(),
         });
         setIndexedStats(data);
         setLastStatsUpdate(new Date());
       } else {
-        console.error('[ProductsReport] ❌ Error en respuesta:', response.status, response.statusText);
+        console.error('[ProductsReport] ❌ Error:', response.status);
       }
     } catch (err) {
-      console.error('[ProductsReport] ❌ Error fetching indexed stats:', err);
+      console.error('[ProductsReport] ❌ Fetch error:', err);
     }
   }, []);
 
@@ -92,30 +90,30 @@ export function ProductsReport() {
     fetchProducts();
   }, [currentPage, searchTerm, selectedCategory1, selectedCategory2, selectedCategory3]);
 
-  // Efecto separado para actualización automática de estadísticas de indexación
-  // Este intervalo es independiente de los filtros y se ejecuta continuamente
+  // Efecto para actualización automática de estadísticas
   useEffect(() => {
-    // Cargar estadísticas inmediatamente al montar
-    console.log('[ProductsReport] 🚀 Componente montado - Iniciando actualización automática');
+    let intervalId: number | null = null;
+
+    // Cargar inmediatamente
+    console.log('[ProductsReport] 🚀 Component mounted, starting auto-refresh');
     fetchIndexedStats();
     
-    // Configurar intervalo usando window.setInterval para mayor compatibilidad
-    intervalRef.current = window.setInterval(() => {
-      console.log('[ProductsReport] ⏰ Ejecutando actualización automática (cada 10s)...');
+    // Configurar intervalo cada 10 segundos
+    intervalId = window.setInterval(() => {
+      console.log('[ProductsReport] ⏰ Auto-refresh triggered at', new Date().toLocaleTimeString());
       fetchIndexedStats();
-    }, 10000); // Actualizar cada 10 segundos
+    }, 10000);
     
-    console.log('[ProductsReport] ✅ Intervalo configurado:', intervalRef.current);
+    console.log('[ProductsReport] ✅ Interval started:', intervalId);
     
-    // Cleanup al desmontar
+    // Cleanup
     return () => {
-      if (intervalRef.current) {
-        console.log('[ProductsReport] 🧹 Limpiando intervalo:', intervalRef.current);
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      console.log('[ProductsReport] 🧹 Cleaning up interval:', intervalId);
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
       }
     };
-  }, []); // Sin dependencias - se ejecuta solo al montar/desmontar
+  }, [fetchIndexedStats]); // Dependencia de fetchIndexedStats
 
   // Log para depuración: verificar si los productos tienen all_categories
   useEffect(() => {
