@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface CategoryInfo {
   category: string;
@@ -51,31 +51,49 @@ export function ProductsReport() {
     totalProducts?: number;
     remaining?: number;
   } | null>(null);
+  const [lastStatsUpdate, setLastStatsUpdate] = useState<Date | null>(null);
   const itemsPerPage = 20;
 
-  useEffect(() => {
-    fetchProducts();
-    fetchIndexedStats();
-    
-    // Auto-refresh de estadísticas cada 30 segundos para ver progreso del cron
-    const statsInterval = setInterval(() => {
-      fetchIndexedStats();
-    }, 30000); // Actualizar cada 30 segundos
-    
-    return () => clearInterval(statsInterval);
-  }, [currentPage, searchTerm, selectedCategory1, selectedCategory2, selectedCategory3]);
-
-  const fetchIndexedStats = async () => {
+  // Función para obtener estadísticas de indexación
+  const fetchIndexedStats = useCallback(async () => {
     try {
       const response = await fetch('/api/get-indexed-stats');
       if (response.ok) {
         const data = await response.json();
         setIndexedStats(data);
+        setLastStatsUpdate(new Date());
+        console.log('[ProductsReport] Estadísticas actualizadas:', data);
+      } else {
+        console.error('[ProductsReport] Error en respuesta:', response.status);
       }
     } catch (err) {
-      console.error('Error fetching indexed stats:', err);
+      console.error('[ProductsReport] Error fetching indexed stats:', err);
     }
-  };
+  }, []);
+
+  // Efecto para cargar productos cuando cambian los filtros
+  useEffect(() => {
+    fetchProducts();
+  }, [currentPage, searchTerm, selectedCategory1, selectedCategory2, selectedCategory3]);
+
+  // Efecto separado para actualización automática de estadísticas de indexación
+  // Este intervalo es independiente de los filtros y se ejecuta continuamente
+  useEffect(() => {
+    // Cargar estadísticas al montar el componente
+    console.log('[ProductsReport] Iniciando actualización automática de estadísticas');
+    fetchIndexedStats();
+    
+    // Auto-refresh de estadísticas cada 30 segundos para ver progreso del cron
+    const statsInterval = setInterval(() => {
+      console.log('[ProductsReport] Actualizando estadísticas automáticamente...');
+      fetchIndexedStats();
+    }, 30000); // Actualizar cada 30 segundos
+    
+    return () => {
+      console.log('[ProductsReport] Limpiando intervalo de actualización automática');
+      clearInterval(statsInterval);
+    };
+  }, [fetchIndexedStats]); // Dependencia de fetchIndexedStats (estable con useCallback)
 
   // Log para depuración: verificar si los productos tienen all_categories
   useEffect(() => {
@@ -377,6 +395,14 @@ export function ProductsReport() {
                     ) : (
                       'Calculando total de productos...'
                     )}
+                  </div>
+                )}
+                {lastStatsUpdate && (
+                  <div className="text-xs text-slate-400 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Actualizado: {lastStatsUpdate.toLocaleTimeString('es-ES')} (auto-refresh cada 30s)
                   </div>
                 )}
               </div>
