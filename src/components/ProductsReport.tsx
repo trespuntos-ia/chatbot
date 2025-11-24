@@ -54,28 +54,38 @@ export function ProductsReport() {
   const [lastStatsUpdate, setLastStatsUpdate] = useState<Date | null>(null);
   const itemsPerPage = 20;
 
-  // Función para obtener estadísticas de indexación
+  // Referencia al intervalo para poder limpiarlo
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Función para obtener estadísticas de indexación - versión robusta
   const fetchIndexedStats = useCallback(async () => {
     try {
-      const response = await fetch('/api/get-indexed-stats');
+      console.log('[ProductsReport] 🔄 Iniciando fetch de estadísticas...');
+      const timestamp = Date.now();
+      const response = await fetch(`/api/get-indexed-stats?t=${timestamp}`, {
+        method: 'GET',
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache',
+        },
+      });
+      
       if (response.ok) {
         const data = await response.json();
+        console.log('[ProductsReport] ✅ Estadísticas recibidas:', {
+          chunks: data.total,
+          productos: data.uniqueProducts,
+          timestamp: new Date().toISOString(),
+        });
         setIndexedStats(data);
         setLastStatsUpdate(new Date());
-        console.log('[ProductsReport] Estadísticas actualizadas:', data);
       } else {
-        console.error('[ProductsReport] Error en respuesta:', response.status);
+        console.error('[ProductsReport] ❌ Error en respuesta:', response.status, response.statusText);
       }
     } catch (err) {
-      console.error('[ProductsReport] Error fetching indexed stats:', err);
+      console.error('[ProductsReport] ❌ Error fetching indexed stats:', err);
     }
   }, []);
-
-  // Usar useRef para mantener una referencia estable a la función
-  const fetchIndexedStatsRef = useRef(fetchIndexedStats);
-  useEffect(() => {
-    fetchIndexedStatsRef.current = fetchIndexedStats;
-  }, [fetchIndexedStats]);
 
   // Efecto para cargar productos cuando cambian los filtros
   useEffect(() => {
@@ -85,20 +95,25 @@ export function ProductsReport() {
   // Efecto separado para actualización automática de estadísticas de indexación
   // Este intervalo es independiente de los filtros y se ejecuta continuamente
   useEffect(() => {
-    // Cargar estadísticas al montar el componente
-    console.log('[ProductsReport] Iniciando actualización automática de estadísticas');
+    // Cargar estadísticas inmediatamente al montar
+    console.log('[ProductsReport] 🚀 Componente montado - Iniciando actualización automática');
     fetchIndexedStats();
     
-    // Auto-refresh de estadísticas cada 30 segundos para ver progreso del cron
-    // Temporalmente en 5 segundos para pruebas, luego cambiar a 30000
-    const statsInterval = setInterval(() => {
-      console.log('[ProductsReport] Actualizando estadísticas automáticamente...');
-      fetchIndexedStatsRef.current();
-    }, 5000); // Actualizar cada 5 segundos (temporal para pruebas)
+    // Configurar intervalo usando window.setInterval para mayor compatibilidad
+    intervalRef.current = window.setInterval(() => {
+      console.log('[ProductsReport] ⏰ Ejecutando actualización automática (cada 10s)...');
+      fetchIndexedStats();
+    }, 10000); // Actualizar cada 10 segundos
     
+    console.log('[ProductsReport] ✅ Intervalo configurado:', intervalRef.current);
+    
+    // Cleanup al desmontar
     return () => {
-      console.log('[ProductsReport] Limpiando intervalo de actualización automática');
-      clearInterval(statsInterval);
+      if (intervalRef.current) {
+        console.log('[ProductsReport] 🧹 Limpiando intervalo:', intervalRef.current);
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
   }, []); // Sin dependencias - se ejecuta solo al montar/desmontar
 
@@ -405,11 +420,22 @@ export function ProductsReport() {
                   </div>
                 )}
                 {lastStatsUpdate && (
-                  <div className="text-xs text-slate-400 flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="text-xs text-slate-400 flex items-center gap-2">
+                    <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    Actualizado: {lastStatsUpdate.toLocaleTimeString('es-ES')} (auto-refresh cada 5s)
+                    <span>Actualizado: {lastStatsUpdate.toLocaleTimeString('es-ES')}</span>
+                    <span className="text-green-600">• Auto-refresh cada 10s</span>
+                    <button
+                      onClick={() => {
+                        console.log('[ProductsReport] 🔄 Refresco manual iniciado');
+                        fetchIndexedStats();
+                      }}
+                      className="ml-2 text-indigo-600 hover:text-indigo-700 underline text-xs"
+                      title="Refrescar ahora"
+                    >
+                      🔄 Actualizar ahora
+                    </button>
                   </div>
                 )}
               </div>
