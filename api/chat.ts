@@ -247,18 +247,18 @@ async function findExactProductMatches(
       
       // Buscar productos cuyo nombre, descripción o URL contenga el término
       searchQueries.push(
-        supabase.from('products').select(selectFields).ilike('name', `%${term}%`).limit(50),
-        supabase.from('products').select(selectFields).ilike('description', `%${term}%`).limit(50),
-        supabase.from('products').select(selectFields).ilike('product_url', `%${term}%`).limit(50),
-        supabase.from('products').select(selectFields).ilike('sku', `%${term}%`).limit(50),
+        Promise.resolve(supabase.from('products').select(selectFields).ilike('name', `%${term}%`).limit(50)),
+        Promise.resolve(supabase.from('products').select(selectFields).ilike('description', `%${term}%`).limit(50)),
+        Promise.resolve(supabase.from('products').select(selectFields).ilike('product_url', `%${term}%`).limit(50)),
+        Promise.resolve(supabase.from('products').select(selectFields).ilike('sku', `%${term}%`).limit(50)),
       );
     }
     
     // También buscar con la consulta completa normalizada (por si acaso)
     if (normalizedQuery.length >= 3) {
       searchQueries.push(
-        supabase.from('products').select(selectFields).ilike('name', `%${normalizedQuery}%`).limit(50),
-        supabase.from('products').select(selectFields).ilike('description', `%${normalizedQuery}%`).limit(50),
+        Promise.resolve(supabase.from('products').select(selectFields).ilike('name', `%${normalizedQuery}%`).limit(50)),
+        Promise.resolve(supabase.from('products').select(selectFields).ilike('description', `%${normalizedQuery}%`).limit(50)),
       );
     }
 

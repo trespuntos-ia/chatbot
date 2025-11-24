@@ -2,7 +2,9 @@ import { ChatOpenAI } from '@langchain/openai';
 import { SupabaseVectorStore } from '@langchain/community/vectorstores/supabase';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { createClient } from '@supabase/supabase-js';
+// @ts-ignore - LangChain v1 import paths
 import { RetrievalQAChain } from 'langchain/chains';
+// @ts-ignore - LangChain v1 import paths  
 import { PromptTemplate } from '@langchain/core/prompts';
 
 const supabaseUrl = process.env.SUPABASE_URL;
