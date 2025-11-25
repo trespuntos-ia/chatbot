@@ -338,7 +338,7 @@ export function ProductsReport() {
     }
   };
 
-  const handleIndexProducts = async (limit?: number) => {
+  const handleIndexProducts = async () => {
     setIndexing(true);
     setIndexingProgress('Iniciando indexación automática...');
     setError('');
