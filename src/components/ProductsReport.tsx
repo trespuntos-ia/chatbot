@@ -55,15 +55,19 @@ export function ProductsReport() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const itemsPerPage = 20;
   const intervalRef = useRef<number | null>(null);
-  const timeoutRef = useRef<number | null>(null);
-  const isMountedRef = useRef(true);
 
-  // Función para obtener estadísticas - versión simple y directa
-  const fetchIndexedStats = useCallback(async () => {
-    if (!isMountedRef.current) return;
+
+  // Efecto para cargar productos cuando cambian los filtros
+  useEffect(() => {
+    fetchProducts();
+  }, [currentPage, searchTerm, selectedCategory1, selectedCategory2, selectedCategory3]);
+
+  // Función de carga de estadísticas (definida fuera del useEffect para que sea estable)
+  const loadIndexedStats = useCallback(async () => {
+    setIsRefreshing(true);
     
     try {
-      console.log('[ProductsReport] 🔄 Fetching stats...', new Date().toLocaleTimeString());
+      console.log('[ProductsReport] ⏰ Fetching stats at', new Date().toLocaleTimeString());
       const timestamp = Date.now();
       const response = await fetch(`/api/get-indexed-stats?t=${timestamp}`, {
         method: 'GET',
@@ -73,8 +77,6 @@ export function ProductsReport() {
           'Pragma': 'no-cache',
         },
       });
-      
-      if (!isMountedRef.current) return;
       
       if (response.ok) {
         const data = await response.json();
@@ -86,108 +88,40 @@ export function ProductsReport() {
         setIndexedStats(data);
         setLastStatsUpdate(new Date());
       } else {
-        console.error('[ProductsReport] ❌ Error:', response.status);
+        console.error('[ProductsReport] ❌ Error response:', response.status, response.statusText);
       }
-    } catch (err) {
-      console.error('[ProductsReport] ❌ Fetch error:', err);
+    } catch (error) {
+      console.error('[ProductsReport] ❌ Error en fetch:', error);
+    } finally {
+      setIsRefreshing(false);
     }
   }, []);
 
-  // Efecto para cargar productos cuando cambian los filtros
+  // Efecto para actualización automática de estadísticas - PATRÓN SIMPLE Y CONFIABLE
   useEffect(() => {
-    fetchProducts();
-  }, [currentPage, searchTerm, selectedCategory1, selectedCategory2, selectedCategory3]);
-
-  // Efecto para actualización automática de estadísticas - MÉTODO MEJORADO CON SETTIMEOUT RECURSIVO
-  useEffect(() => {
-    isMountedRef.current = true;
-    
-    // Función de carga que se puede llamar directamente
-    const loadStats = async () => {
-      if (!isMountedRef.current) {
-        console.log('[ProductsReport] ⚠️ Component unmounted, skipping update');
-        return;
-      }
-      
-      setIsRefreshing(true);
-      
-      try {
-        console.log('[ProductsReport] ⏰ Auto-refresh triggered at', new Date().toLocaleTimeString());
-        const timestamp = Date.now();
-        const response = await fetch(`/api/get-indexed-stats?t=${timestamp}`, {
-          method: 'GET',
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-          },
-        });
-        
-        if (!isMountedRef.current) {
-          console.log('[ProductsReport] ⚠️ Component unmounted after fetch, skipping state update');
-          return;
-        }
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('[ProductsReport] ✅ Stats updated:', {
-            chunks: data.total,
-            productos: data.uniqueProducts,
-            time: new Date().toLocaleTimeString(),
-          });
-          setIndexedStats(data);
-          setLastStatsUpdate(new Date());
-        } else {
-          console.error('[ProductsReport] ❌ Error response:', response.status, response.statusText);
-        }
-      } catch (error) {
-        console.error('[ProductsReport] ❌ Error en auto-refresh:', error);
-        // No detener el polling si hay un error, seguir intentando
-      } finally {
-        setIsRefreshing(false);
-      }
-    };
-
-    // Función recursiva usando setTimeout (más confiable que setInterval)
-    const scheduleNextRefresh = () => {
-      if (!isMountedRef.current) return;
-      
-      timeoutRef.current = window.setTimeout(() => {
-        if (!isMountedRef.current) return;
-        
-        console.log('[ProductsReport] 🔄 Scheduled refresh at', new Date().toLocaleTimeString());
-        loadStats().then(() => {
-          // Programar el siguiente refresh después de completar
-          if (isMountedRef.current) {
-            scheduleNextRefresh();
-          }
-        });
-      }, 10000); // 10 segundos
-    };
-
-    // Cargar inmediatamente
     console.log('[ProductsReport] 🚀 Component mounted, starting auto-refresh');
-    loadStats().then(() => {
-      // Programar el primer refresh después de la carga inicial
-      if (isMountedRef.current) {
-        scheduleNextRefresh();
-      }
-    });
+    
+    // Cargar inmediatamente
+    loadIndexedStats();
+    
+    // Configurar intervalo cada 10 segundos (patrón simple que funciona)
+    const interval = setInterval(() => {
+      console.log('[ProductsReport] 🔄 Interval tick at', new Date().toLocaleTimeString());
+      loadIndexedStats();
+    }, 10000);
+    
+    intervalRef.current = interval;
+    console.log('[ProductsReport] ✅ Interval started:', interval);
     
     // Cleanup
     return () => {
-      console.log('[ProductsReport] 🧹 Cleaning up timeouts');
-      isMountedRef.current = false;
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
+      console.log('[ProductsReport] 🧹 Cleaning up interval:', intervalRef.current);
       if (intervalRef.current !== null) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, []); // Sin dependencias - solo se ejecuta una vez al montar
+  }, [loadIndexedStats]); // Dependencia de loadIndexedStats
 
   // Log para depuración: verificar si los productos tienen all_categories
   useEffect(() => {
@@ -396,7 +330,7 @@ export function ProductsReport() {
       setIndexingProgress(`✅ ${data.message || `Se eliminaron ${data.deleted || 0} embeddings`}`);
       
       // Actualizar estadísticas
-      await fetchIndexedStats();
+      await loadIndexedStats();
       
       setTimeout(() => {
         setIndexingProgress('');
@@ -436,11 +370,11 @@ export function ProductsReport() {
       setIndexingProgress(`✅ ${data.message || `Indexados ${data.indexed || 0} productos`}`);
       
       // Actualizar estadísticas de indexación inmediatamente
-      await fetchIndexedStats();
+      await loadIndexedStats();
       
       // También actualizar después de 2 segundos para asegurar que se refleje el cambio
       setTimeout(() => {
-        fetchIndexedStats();
+        loadIndexedStats();
       }, 2000);
       
       // Esperar un momento antes de ocultar el mensaje
@@ -509,7 +443,7 @@ export function ProductsReport() {
                     <button
                       onClick={() => {
                         console.log('[ProductsReport] 🔄 Refresco manual iniciado');
-                        fetchIndexedStats();
+                        loadIndexedStats();
                       }}
                       disabled={isRefreshing}
                       className="ml-2 text-indigo-600 hover:text-indigo-700 underline text-xs disabled:opacity-50 disabled:cursor-not-allowed"
