@@ -369,13 +369,21 @@ export function ProductsReport() {
 
       setIndexingProgress(`✅ ${data.message || `Indexados ${data.indexed || 0} productos`}`);
       
-      // Actualizar estadísticas de indexación inmediatamente
+      // Esperar un momento para que las transacciones de inserción se completen
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Actualizar estadísticas de indexación después de un breve delay
       await loadIndexedStats();
       
-      // También actualizar después de 2 segundos para asegurar que se refleje el cambio
+      // Actualizar nuevamente después de 3 segundos para asegurar que se refleje el cambio
       setTimeout(() => {
         loadIndexedStats();
-      }, 2000);
+      }, 3000);
+      
+      // Una actualización final después de 5 segundos por si acaso
+      setTimeout(() => {
+        loadIndexedStats();
+      }, 5000);
       
       // Esperar un momento antes de ocultar el mensaje
       setTimeout(() => {
