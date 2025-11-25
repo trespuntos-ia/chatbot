@@ -98,25 +98,19 @@ export function ProductsReport() {
     }
   }, []);
 
-  // Efecto para actualización automática de estadísticas - PATRÓN SIMPLE Y CONFIABLE
+  // Efecto para cargar estadísticas solo al montar el componente (sin auto-refresh)
   useEffect(() => {
-    console.log('[ProductsReport] 🚀 Component mounted, starting auto-refresh');
+    console.log('[ProductsReport] 🚀 Component mounted, loading stats once');
     
-    // Cargar inmediatamente
+    // Cargar solo una vez al montar el componente
     loadIndexedStats();
     
-    // Configurar intervalo cada 10 segundos (patrón simple que funciona)
-    const interval = setInterval(() => {
-      console.log('[ProductsReport] 🔄 Interval tick at', new Date().toLocaleTimeString());
-      loadIndexedStats();
-    }, 10000);
+    // NO configurar intervalo automático para evitar sobrecarga del servidor
+    // El usuario puede actualizar manualmente con el botón "Actualizar ahora"
     
-    intervalRef.current = interval;
-    console.log('[ProductsReport] ✅ Interval started:', interval);
-    
-    // Cleanup
+    // Cleanup (aunque no hay intervalo, mantenemos la estructura por si acaso)
     return () => {
-      console.log('[ProductsReport] 🧹 Cleaning up interval:', intervalRef.current);
+      console.log('[ProductsReport] 🧹 Component unmounting');
       if (intervalRef.current !== null) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -433,8 +427,8 @@ export function ProductsReport() {
                         </div>
                         {indexedStats.remaining !== undefined && indexedStats.remaining > 0 && (
                           <div className="text-slate-400 italic">
-                            💡 Los números se actualizan cada 10s, pero la indexación automática se ejecuta cada 5 minutos.
-                            Presiona "Indexar Productos" para indexar manualmente ahora.
+                            💡 La indexación automática se ejecuta cada 5 minutos.
+                            Presiona "Indexar Productos" para indexar manualmente ahora, o "Actualizar ahora" para refrescar las estadísticas.
                           </div>
                         )}
                       </>
@@ -457,7 +451,6 @@ export function ProductsReport() {
                     <span className={isRefreshing ? 'text-indigo-600 font-medium' : ''}>
                       {isRefreshing ? 'Actualizando...' : `Actualizado: ${lastStatsUpdate.toLocaleTimeString('es-ES')}`}
                     </span>
-                    <span className="text-green-600">• Auto-refresh cada 10s</span>
                     <span className="text-slate-500 text-xs">
                       • Indexación automática cada 5 min
                       {lastIndexingTime && (
