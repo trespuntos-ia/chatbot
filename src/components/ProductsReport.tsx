@@ -345,10 +345,9 @@ export function ProductsReport() {
 
     try {
       // Usar el endpoint automático que es más eficiente y cuenta correctamente
-      const endpoint = limit 
-        ? `/api/index-products-rag-auto?manual=true` 
-        : `/api/index-products-rag-auto?manual=true`;
+      const endpoint = `/api/index-products-rag-auto?manual=true`;
       
+      console.log('[ProductsReport] 🚀 Starting manual indexing...');
       const response = await fetch(endpoint, {
         method: 'GET', // El endpoint automático acepta GET
         headers: {
@@ -359,11 +358,21 @@ export function ProductsReport() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || data.details || 'Error al indexar productos');
+        console.error('[ProductsReport] ❌ Indexing error:', data);
+        const errorMessage = data.message || data.error || data.details || `Error ${response.status}: ${response.statusText}`;
+        throw new Error(errorMessage);
       }
 
-      setIndexingProgress(`✅ ${data.message || `Indexados ${data.indexed || 0} productos`}`);
+      console.log('[ProductsReport] ✅ Indexing completed:', data);
+      const successMessage = `✅ ${data.message || `Indexados ${data.indexed || 0} productos`}`;
+      setIndexingProgress(successMessage);
       setLastIndexingTime(new Date()); // Guardar cuándo se ejecutó la indexación
+      
+      // Si hay errores parciales, mostrarlos
+      if (data.errors && data.errors.length > 0) {
+        console.warn('[ProductsReport] ⚠️ Partial errors:', data.errors);
+        setIndexingProgress(`${successMessage} (Algunos errores: ${data.errors.length})`);
+      }
       
       // Esperar un momento para que las transacciones de inserción se completen
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -385,9 +394,11 @@ export function ProductsReport() {
       setTimeout(() => {
         setIndexingProgress('');
         setIndexing(false);
-      }, 3000);
+      }, 5000); // Aumentado a 5 segundos para que el usuario vea el mensaje
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al indexar productos');
+      console.error('[ProductsReport] ❌ Fatal indexing error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Error desconocido al indexar productos';
+      setError(errorMessage);
       setIndexing(false);
       setIndexingProgress('');
     }

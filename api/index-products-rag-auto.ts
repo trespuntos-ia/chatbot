@@ -63,6 +63,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
+  // Validar que OpenAI API key esté configurada
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('[index-products-rag-auto] OPENAI_API_KEY missing');
+    return res.status(500).json({
+      success: false,
+      error: 'OpenAI API key not configured',
+      message: 'La clave de API de OpenAI no está configurada',
+    });
+  }
+
   try {
     // Log detallado para verificar que el cron funciona
     const source = isVercelCron ? 'Vercel Cron' : isManual ? 'Manual Test' : 'Authorized';
@@ -229,23 +239,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
 
-        // Generar embeddings
-        const embeddings = await generateEmbeddings(
-          allChunks.map(chunk => chunk.content)
-        );
-
-        if (embeddings.length !== allChunks.length) {
-          throw new Error(`Mismatch: ${allChunks.length} chunks but ${embeddings.length} embeddings`);
+        // Generar embeddings con manejo de errores mejorado
+        let embeddings: number[][];
+        try {
+          console.log(`[index-products-rag-auto] Generating embeddings for ${allChunks.length} chunks...`);
+          embeddings = await generateEmbeddings(
+            allChunks.map(chunk => chunk.content)
+          );
+          
+          if (!embeddings || embeddings.length === 0) {
+            throw new Error('No embeddings generated');
+          }
+          
+          if (embeddings.length !== allChunks.length) {
+            console.warn(`[index-products-rag-auto] Mismatch: ${allChunks.length} chunks but ${embeddings.length} embeddings`);
+            // Continuar con los embeddings que tenemos
+          }
+        } catch (embeddingError) {
+          console.error(`[index-products-rag-auto] Error generating embeddings for batch ${batchNumber}:`, embeddingError);
+          errors.push(`Batch ${batchNumber}: Error generando embeddings - ${embeddingError instanceof Error ? embeddingError.message : 'Unknown error'}`);
+          continue; // Saltar este batch y continuar con el siguiente
         }
 
-        // Preparar datos para insertar
-        const embeddingsToInsert = allChunks.map((chunk, idx) => ({
-          product_id: chunk.metadata.product_id,
-          content: chunk.content,
-          embedding: `[${embeddings[idx].join(',')}]`,
-          metadata: chunk.metadata,
-          chunk_index: chunk.metadata.chunk_index,
-        }));
+        // Preparar datos para insertar (solo los que tienen embeddings)
+        const embeddingsToInsert = allChunks
+          .slice(0, embeddings.length) // Solo tomar los chunks que tienen embeddings
+          .map((chunk, idx) => ({
+            product_id: chunk.metadata.product_id,
+            content: chunk.content,
+            embedding: `[${embeddings[idx].join(',')}]`,
+            metadata: chunk.metadata,
+            chunk_index: chunk.metadata.chunk_index,
+          }));
 
         // IMPORTANTE: Verificar que estos productos realmente NO están indexados antes de insertar
         // Esto previene re-indexación de productos que ya tienen chunks
@@ -376,11 +401,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     return res.status(200).json(responseMessage);
   } catch (error) {
-    console.error('[index-products-rag-auto] Error:', error);
+    console.error('[index-products-rag-auto] Fatal error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    // Log detallado para debugging
+    console.error('[index-products-rag-auto] Error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      name: error instanceof Error ? error.name : undefined,
+    });
+    
     return res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      details: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined,
+      error: errorMessage,
+      message: `Error al indexar productos: ${errorMessage}`,
+      details: process.env.NODE_ENV === 'development' ? errorStack : undefined,
+      timestamp: new Date().toISOString(),
     });
   }
 }
