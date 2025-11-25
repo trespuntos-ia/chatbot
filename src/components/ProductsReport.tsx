@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface CategoryInfo {
   category: string;
@@ -52,10 +52,16 @@ export function ProductsReport() {
     remaining?: number;
   } | null>(null);
   const [lastStatsUpdate, setLastStatsUpdate] = useState<Date | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const itemsPerPage = 20;
+  const intervalRef = useRef<number | null>(null);
+  const timeoutRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
 
   // Función para obtener estadísticas - versión simple y directa
   const fetchIndexedStats = useCallback(async () => {
+    if (!isMountedRef.current) return;
+    
     try {
       console.log('[ProductsReport] 🔄 Fetching stats...', new Date().toLocaleTimeString());
       const timestamp = Date.now();
@@ -67,6 +73,8 @@ export function ProductsReport() {
           'Pragma': 'no-cache',
         },
       });
+      
+      if (!isMountedRef.current) return;
       
       if (response.ok) {
         const data = await response.json();
@@ -90,30 +98,96 @@ export function ProductsReport() {
     fetchProducts();
   }, [currentPage, searchTerm, selectedCategory1, selectedCategory2, selectedCategory3]);
 
-  // Efecto para actualización automática de estadísticas
+  // Efecto para actualización automática de estadísticas - MÉTODO MEJORADO CON SETTIMEOUT RECURSIVO
   useEffect(() => {
-    let intervalId: number | null = null;
+    isMountedRef.current = true;
+    
+    // Función de carga que se puede llamar directamente
+    const loadStats = async () => {
+      if (!isMountedRef.current) {
+        console.log('[ProductsReport] ⚠️ Component unmounted, skipping update');
+        return;
+      }
+      
+      setIsRefreshing(true);
+      
+      try {
+        console.log('[ProductsReport] ⏰ Auto-refresh triggered at', new Date().toLocaleTimeString());
+        const timestamp = Date.now();
+        const response = await fetch(`/api/get-indexed-stats?t=${timestamp}`, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+        });
+        
+        if (!isMountedRef.current) {
+          console.log('[ProductsReport] ⚠️ Component unmounted after fetch, skipping state update');
+          return;
+        }
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[ProductsReport] ✅ Stats updated:', {
+            chunks: data.total,
+            productos: data.uniqueProducts,
+            time: new Date().toLocaleTimeString(),
+          });
+          setIndexedStats(data);
+          setLastStatsUpdate(new Date());
+        } else {
+          console.error('[ProductsReport] ❌ Error response:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('[ProductsReport] ❌ Error en auto-refresh:', error);
+        // No detener el polling si hay un error, seguir intentando
+      } finally {
+        setIsRefreshing(false);
+      }
+    };
+
+    // Función recursiva usando setTimeout (más confiable que setInterval)
+    const scheduleNextRefresh = () => {
+      if (!isMountedRef.current) return;
+      
+      timeoutRef.current = window.setTimeout(() => {
+        if (!isMountedRef.current) return;
+        
+        console.log('[ProductsReport] 🔄 Scheduled refresh at', new Date().toLocaleTimeString());
+        loadStats().then(() => {
+          // Programar el siguiente refresh después de completar
+          if (isMountedRef.current) {
+            scheduleNextRefresh();
+          }
+        });
+      }, 10000); // 10 segundos
+    };
 
     // Cargar inmediatamente
     console.log('[ProductsReport] 🚀 Component mounted, starting auto-refresh');
-    fetchIndexedStats();
-    
-    // Configurar intervalo cada 10 segundos
-    intervalId = window.setInterval(() => {
-      console.log('[ProductsReport] ⏰ Auto-refresh triggered at', new Date().toLocaleTimeString());
-      fetchIndexedStats();
-    }, 10000);
-    
-    console.log('[ProductsReport] ✅ Interval started:', intervalId);
+    loadStats().then(() => {
+      // Programar el primer refresh después de la carga inicial
+      if (isMountedRef.current) {
+        scheduleNextRefresh();
+      }
+    });
     
     // Cleanup
     return () => {
-      console.log('[ProductsReport] 🧹 Cleaning up interval:', intervalId);
-      if (intervalId !== null) {
-        window.clearInterval(intervalId);
+      console.log('[ProductsReport] 🧹 Cleaning up timeouts');
+      isMountedRef.current = false;
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
-  }, [fetchIndexedStats]); // Dependencia de fetchIndexedStats
+  }, []); // Sin dependencias - solo se ejecuta una vez al montar
 
   // Log para depuración: verificar si los productos tienen all_categories
   useEffect(() => {
@@ -418,18 +492,27 @@ export function ProductsReport() {
                   </div>
                 )}
                 {lastStatsUpdate && (
-                  <div className="text-xs text-slate-400 flex items-center gap-2">
-                    <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Actualizado: {lastStatsUpdate.toLocaleTimeString('es-ES')}</span>
+                  <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+                    {isRefreshing ? (
+                      <svg className="w-3 h-3 animate-spin text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    )}
+                    <span className={isRefreshing ? 'text-indigo-600 font-medium' : ''}>
+                      {isRefreshing ? 'Actualizando...' : `Actualizado: ${lastStatsUpdate.toLocaleTimeString('es-ES')}`}
+                    </span>
                     <span className="text-green-600">• Auto-refresh cada 10s</span>
                     <button
                       onClick={() => {
                         console.log('[ProductsReport] 🔄 Refresco manual iniciado');
                         fetchIndexedStats();
                       }}
-                      className="ml-2 text-indigo-600 hover:text-indigo-700 underline text-xs"
+                      disabled={isRefreshing}
+                      className="ml-2 text-indigo-600 hover:text-indigo-700 underline text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Refrescar ahora"
                     >
                       🔄 Actualizar ahora
