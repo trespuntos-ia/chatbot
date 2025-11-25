@@ -14,6 +14,18 @@ interface Product {
   price: string;
   category: string;
   description: string;
+  description_full?: string;
+  meta_description?: string | null;
+  features?: string[];
+  width?: number | null;
+  height?: number | null;
+  depth?: number | null;
+  weight?: number | null;
+  reference?: string | null;
+  mpn?: string | null;
+  available_for_order?: boolean;
+  condition?: string | null;
+  quantity?: number;
   sku: string;
   image: string;
   product_url: string;
@@ -208,15 +220,128 @@ async function getCategoryInfo(
   return cache.get(categoryId)!;
 }
 
+/**
+ * Obtiene los nombres de los product_features de PrestaShop
+ */
+async function getProductFeatures(
+  productFeatures: any[],
+  config: ApiConfig
+): Promise<string[]> {
+  const features: string[] = [];
+  
+  if (!productFeatures || productFeatures.length === 0) {
+    return features;
+  }
+  
+  // Obtener nombres de features (con cache para evitar múltiples llamadas)
+  const featureCache = new Map<number, string>();
+  
+  for (const featureItem of productFeatures) {
+    const featureId = typeof featureItem === 'object' ? featureItem.id : featureItem;
+    if (!featureId) continue;
+    
+    const featureIdNum = parseInt(String(featureId));
+    // Bug fix: usar isNaN en lugar de !featureIdNum para permitir ID 0 (válido)
+    if (isNaN(featureIdNum) || featureCache.has(featureIdNum)) {
+      if (featureCache.has(featureIdNum)) {
+        features.push(featureCache.get(featureIdNum)!);
+      }
+      continue;
+    }
+    
+    try {
+      const query = {
+        language: String(config.langCode || 1),
+      };
+      const featureResponse = await prestashopGet(`product_features/${featureIdNum}`, query, config);
+      
+      if (featureResponse?.product_feature) {
+        const featureName = extractMultilanguageValue(featureResponse.product_feature.name);
+        if (featureName) {
+          featureCache.set(featureIdNum, featureName);
+          features.push(featureName);
+          
+          // También obtener el valor del feature si existe
+          const featureValueId = featureItem.id_feature_value || featureItem.id_feature_value?.value;
+          if (featureValueId) {
+            try {
+              const valueResponse = await prestashopGet(`product_feature_values/${featureValueId}`, query, config);
+              if (valueResponse?.product_feature_value) {
+                const featureValue = extractMultilanguageValue(valueResponse.product_feature_value.value);
+                if (featureValue) {
+                  features.push(`${featureName}: ${featureValue}`);
+                }
+              }
+            } catch (error) {
+              // Ignorar errores al obtener valores de features
+              console.warn(`Error obteniendo valor de feature ${featureIdNum}:`, error);
+            }
+          }
+        }
+      }
+      
+      // Pequeño delay para no sobrecargar la API
+      await new Promise(resolve => setTimeout(resolve, 50));
+    } catch (error) {
+      console.warn(`Error obteniendo feature ${featureIdNum}:`, error);
+    }
+  }
+  
+  return features;
+}
+
 async function mapProduct(
   product: any,
   categoryCache: Map<number, CategoryInfo>,
   config: ApiConfig
 ): Promise<Product & { subcategory?: string | null }> {
   const name = extractMultilanguageValue(product.name);
-  const description = product.description_short
+  
+  // Combinar description_short + description (descripción larga)
+  const descriptionShort = product.description_short
     ? sanitizeDescription(extractMultilanguageValue(product.description_short))
     : '';
+  const descriptionFull = product.description
+    ? sanitizeDescription(extractMultilanguageValue(product.description))
+    : '';
+  
+  // Combinar ambas descripciones, priorizando la larga
+  const description = descriptionFull || descriptionShort;
+  
+  // Meta description
+  const metaDescription = product.meta_description
+    ? sanitizeDescription(extractMultilanguageValue(product.meta_description))
+    : null;
+  
+  // Obtener product_features
+  let features: string[] = [];
+  if (product.associations?.product_features) {
+    let featureList: any[] = [];
+    if (Array.isArray(product.associations.product_features)) {
+      featureList = product.associations.product_features;
+    } else if (product.associations.product_features.product_feature) {
+      featureList = Array.isArray(product.associations.product_features.product_feature)
+        ? product.associations.product_features.product_feature
+        : [product.associations.product_features.product_feature];
+    }
+    
+    if (featureList.length > 0) {
+      features = await getProductFeatures(featureList, config);
+    }
+  }
+  
+  // Especificaciones técnicas
+  const width = product.width ? parseFloat(product.width) : null;
+  const height = product.height ? parseFloat(product.height) : null;
+  const depth = product.depth ? parseFloat(product.depth) : null;
+  const weight = product.weight ? parseFloat(product.weight) : null;
+  const reference = product.reference || null;
+  const mpn = product.mpn || null;
+  
+  // Información de disponibilidad
+  const availableForOrder = product.available_for_order === '1' || product.available_for_order === 1;
+  const condition = product.condition || null;
+  const quantity = product.quantity ? parseInt(product.quantity) : 0;
   
   let category = '';
   let subcategory: string | null = null;
@@ -447,6 +572,18 @@ async function mapProduct(
     price: priceValue,
     category,
     description,
+    description_full: descriptionFull || undefined,
+    meta_description: metaDescription,
+    features: features.length > 0 ? features : undefined,
+    width,
+    height,
+    depth,
+    weight,
+    reference,
+    mpn,
+    available_for_order: availableForOrder,
+    condition,
+    quantity,
     sku: product.reference || product.ean13 || '',
     image: imageUrl,
     product_url: productUrl,
@@ -568,6 +705,10 @@ export default async function handler(
     return;
   }
 
+  // Declarar variables fuera del try para que estén disponibles en el catch externo
+  let syncId: string | undefined;
+  let logMessages: Array<{ timestamp: string; message: string; type?: string }> = [];
+
   try {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
@@ -626,8 +767,7 @@ export default async function handler(
       throw new Error(`Error creating sync record: ${syncCreateError.message}`);
     }
 
-    const syncId = syncRecord.id;
-    const logMessages: Array<{ timestamp: string; message: string; type?: string }> = [];
+    syncId = syncRecord.id;
 
     const addLog = (message: string, type: string = 'info') => {
       logMessages.push({
@@ -653,11 +793,11 @@ export default async function handler(
         langSlug: connection.lang_slug || 'es',
       };
 
-      // Obtener productos existentes (todos los campos para comparar cambios)
+      // Obtener productos existentes (todos los campos para comparar cambios, incluyendo nuevos campos)
       addLog('Obteniendo productos existentes de la base de datos...', 'info');
       const { data: existingProducts, error: existingError } = await supabase
         .from('products')
-        .select('sku, name, price, category, subcategory, description, image_url, product_url, all_categories');
+        .select('sku, name, price, category, subcategory, description, description_full, meta_description, features, width, height, depth, weight, reference, mpn, available_for_order, condition, quantity, image_url, product_url, all_categories');
       
       if (existingError) {
         addLog(`Error obteniendo productos existentes: ${existingError.message}`, 'error');
@@ -828,35 +968,86 @@ export default async function handler(
           const existingCategoriesJson = JSON.stringify(existing.all_categories || []);
           const newCategoriesJson = JSON.stringify(product.all_categories || []);
           
-          // Producto existe: verificar si necesita actualización
+          // IMPORTANTE: Siempre actualizar si faltan campos nuevos (description_full, features, etc.)
+          // Esto asegura que productos antiguos se actualicen con los nuevos campos
+          const missingNewFields = (
+            !existing.description_full || 
+            existing.description_full === 'L' || // Valor incorrecto detectado
+            !existing.meta_description || 
+            !existing.features || 
+            (Array.isArray(existing.features) && existing.features.length === 0) ||
+            existing.features === 0 || // Valor incorrecto detectado
+            !existing.width || !existing.height || !existing.depth || !existing.weight
+          );
+          
+          // Verificar si el producto tiene campos nuevos para añadir
+          const hasNewFieldsToAdd = !!(
+            product.description_full || 
+            product.meta_description || 
+            (product.features && product.features.length > 0) || 
+            product.width || product.height || product.depth || product.weight || 
+            product.reference || product.mpn
+          );
+          
           const needsUpdate = 
             (product.name?.trim() || '') !== (existing.name?.trim() || '') ||
             (product.price?.trim() || '') !== (existing.price?.trim() || '') ||
             (product.category?.trim() || '') !== (existing.category?.trim() || '') ||
             (product.subcategory || null) !== (existing.subcategory || null) ||
             (product.description?.trim() || '') !== (existing.description?.trim() || '') ||
+            (product.description_full || null) !== (existing.description_full || null) ||
+            (product.meta_description || null) !== (existing.meta_description || null) ||
+            JSON.stringify(product.features || []) !== JSON.stringify(existing.features || []) ||
+            (product.width || null) !== (existing.width || null) ||
+            (product.height || null) !== (existing.height || null) ||
+            (product.depth || null) !== (existing.depth || null) ||
+            (product.weight || null) !== (existing.weight || null) ||
+            (product.reference || null) !== (existing.reference || null) ||
+            (product.mpn || null) !== (existing.mpn || null) ||
+            (product.available_for_order ?? true) !== (existing.available_for_order ?? true) ||
+            (product.condition || null) !== (existing.condition || null) ||
+            (product.quantity || 0) !== (existing.quantity || 0) ||
             (product.image?.trim() || '') !== (existing.image_url?.trim() || '') ||
             (product.product_url?.trim() || '') !== (existing.product_url?.trim() || '') ||
-            existingCategoriesJson !== newCategoriesJson;
+            existingCategoriesJson !== newCategoriesJson ||
+            (missingNewFields && hasNewFieldsToAdd); // SIEMPRE actualizar si faltan campos nuevos Y hay campos nuevos para añadir
 
           if (needsUpdate) {
             productsToUpdate.push({ product, existing });
           }
         } else {
-          // Producto nuevo
+          // Producto nuevo - verificar que realmente no existe
           const normalizedSku = sku ? sku.toLowerCase().replace(/\s+/g, '') : '';
           const normalizedName = name ? name.toLowerCase().replace(/\s+/g, ' ').trim() : '';
           
+          // Solo añadir como nuevo si realmente no existe
           if (normalizedSku && !existingSkus.has(normalizedSku)) {
             trulyNewProducts.push(product);
           } else if (!normalizedSku && normalizedName && !existingNameSkuPairs.has(normalizedName)) {
             trulyNewProducts.push(product);
+          } else {
+            // Si llegamos aquí, el producto existe pero no se encontró en el mapa
+            // Esto puede pasar si hay problemas con la normalización
+            // Por ahora, lo tratamos como nuevo pero debería investigarse
+            addLog(`Producto no encontrado en mapa pero debería existir: ${name} (SKU: ${sku})`, 'warn');
+            // Añadir como nuevo por ahora (se actualizará en la próxima sincronización)
+            if (normalizedSku) {
+              trulyNewProducts.push(product);
+            } else if (normalizedName) {
+              trulyNewProducts.push(product);
+            }
           }
         }
       });
 
       addLog(`Productos que necesitan actualización: ${productsToUpdate.length}`, 'info');
       addLog(`Productos realmente nuevos: ${trulyNewProducts.length}`, 'info');
+      
+      // Log adicional para debugging
+      if (productsToUpdate.length > 0) {
+        const sampleUpdate = productsToUpdate[0];
+        addLog(`Ejemplo de actualización - Producto: ${sampleUpdate.product.name}, tiene description_full: ${!!sampleUpdate.product.description_full}, existing tiene: ${!!sampleUpdate.existing.description_full}`, 'info');
+      }
 
       // Reinicializar contadores para esta sincronización
       imported = 0;
@@ -876,6 +1067,18 @@ export default async function handler(
             category: product.category || '',
             subcategory: product.subcategory || null,
             description: product.description || '',
+            description_full: product.description_full || null,
+            meta_description: product.meta_description || null,
+            features: product.features || [],
+            width: product.width || null,
+            height: product.height || null,
+            depth: product.depth || null,
+            weight: product.weight || null,
+            reference: product.reference || null,
+            mpn: product.mpn || null,
+            available_for_order: product.available_for_order ?? true,
+            condition: product.condition || null,
+            quantity: product.quantity || 0,
             image_url: product.image || '',
             product_url: product.product_url || '',
             all_categories: product.all_categories || [],
@@ -901,6 +1104,18 @@ export default async function handler(
                   category: update.category,
                   subcategory: update.subcategory,
                   description: update.description,
+                  description_full: update.description_full,
+                  meta_description: update.meta_description,
+                  features: update.features,
+                  width: update.width,
+                  height: update.height,
+                  depth: update.depth,
+                  weight: update.weight,
+                  reference: update.reference,
+                  mpn: update.mpn,
+                  available_for_order: update.available_for_order,
+                  condition: update.condition,
+                  quantity: update.quantity,
                   image_url: update.image_url,
                   product_url: update.product_url,
                   all_categories: update.all_categories,
@@ -928,6 +1143,18 @@ export default async function handler(
                   category: update.category,
                   subcategory: update.subcategory,
                   description: update.description,
+                  description_full: update.description_full,
+                  meta_description: update.meta_description,
+                  features: update.features,
+                  width: update.width,
+                  height: update.height,
+                  depth: update.depth,
+                  weight: update.weight,
+                  reference: update.reference,
+                  mpn: update.mpn,
+                  available_for_order: update.available_for_order,
+                  condition: update.condition,
+                  quantity: update.quantity,
                   image_url: update.image_url,
                   product_url: update.product_url,
                   all_categories: update.all_categories,
@@ -985,6 +1212,18 @@ export default async function handler(
             category: product.category || '',
             subcategory: product.subcategory || null,
             description: product.description || '',
+            description_full: product.description_full || null,
+            meta_description: product.meta_description || null,
+            features: product.features || [],
+            width: product.width || null,
+            height: product.height || null,
+            depth: product.depth || null,
+            weight: product.weight || null,
+            reference: product.reference || null,
+            mpn: product.mpn || null,
+            available_for_order: product.available_for_order ?? true,
+            condition: product.condition || null,
+            quantity: product.quantity || 0,
             sku: finalSku,
             image_url: product.image || '',
             product_url: product.product_url || '',
@@ -1000,37 +1239,23 @@ export default async function handler(
         for (let i = 0; i < productsToInsert.length; i += batchSize) {
           const batch = productsToInsert.slice(i, i + batchSize);
           
-          // Verificar una vez más antes de insertar
-          const skusInBatch = batch.map(p => p.sku).filter(Boolean);
-          const { data: existingInBatch } = await supabase
+          // Usar UPSERT en lugar de INSERT para asegurar que productos existentes se actualicen
+          // Esto es crítico: si un producto "nuevo" realmente existe, se actualizará con los nuevos campos
+          const { data: upsertedData, error: upsertError } = await supabase
             .from('products')
-            .select('sku')
-            .in('sku', skusInBatch);
-          
-          const existingSkusInBatch = new Set((existingInBatch || []).map((p: any) => p.sku?.trim().toLowerCase()));
-          const finalBatch = batch.filter(p => {
-            const normalizedSku = p.sku?.trim().toLowerCase() || '';
-            return !existingSkusInBatch.has(normalizedSku);
-          });
-          
-          if (finalBatch.length === 0) {
-            addLog(`Lote ${Math.floor(i / batchSize) + 1}: Todos los productos ya existen, saltando...`, 'info');
-            continue;
-          }
-          
-          // Insertar productos nuevos
-          const { data: insertedData, error: insertError } = await supabase
-            .from('products')
-            .insert(finalBatch)
+            .upsert(batch, {
+              onConflict: 'sku', // Si el SKU existe, actualizar en lugar de insertar
+              ignoreDuplicates: false // Actualizar productos existentes
+            })
             .select();
 
-          if (insertError) {
-            errors.push({ error: insertError.message, batch: i / batchSize + 1 });
-            addLog(`Error en lote ${Math.floor(i / batchSize) + 1}: ${insertError.message}`, 'error');
+          if (upsertError) {
+            errors.push({ error: upsertError.message, batch: i / batchSize + 1 });
+            addLog(`Error en lote ${Math.floor(i / batchSize) + 1}: ${upsertError.message}`, 'error');
           } else {
-            const insertedCount = insertedData?.length || 0;
-            imported += insertedCount;
-            addLog(`Lote ${Math.floor(i / batchSize) + 1} importado: ${insertedCount} productos nuevos`, 'success');
+            const upsertedCount = upsertedData?.length || 0;
+            imported += upsertedCount;
+            addLog(`Lote ${Math.floor(i / batchSize) + 1} procesado (upsert): ${upsertedCount} productos (insertados o actualizados)`, 'success');
           }
         }
       } else {
@@ -1093,6 +1318,38 @@ export default async function handler(
 
   } catch (error) {
     console.error('Sync products error:', error);
+    
+    // Intentar actualizar el estado como fallido si tenemos un syncId
+    // Esto es importante porque si el error ocurre antes de crear el syncId, no podemos actualizarlo
+    if (typeof syncId !== 'undefined') {
+      try {
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_ANON_KEY;
+        if (supabaseUrl && supabaseKey) {
+          const supabase = createClient(supabaseUrl, supabaseKey);
+          const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+          
+          await supabase
+            .from('product_sync_history')
+            .update({
+              sync_completed_at: new Date().toISOString(),
+              status: 'failed',
+              errors: [{ error: errorMessage }],
+              log_messages: logMessages.length > 0 ? logMessages : [
+                {
+                  timestamp: new Date().toISOString(),
+                  message: `Error fatal: ${errorMessage}`,
+                  type: 'error'
+                }
+              ]
+            })
+            .eq('id', syncId);
+        }
+      } catch (updateError) {
+        console.error('Error updating sync status in outer catch:', updateError);
+      }
+    }
+    
     res.status(500).json({ 
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error',
