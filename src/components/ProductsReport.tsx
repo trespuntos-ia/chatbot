@@ -53,6 +53,7 @@ export function ProductsReport() {
   } | null>(null);
   const [lastStatsUpdate, setLastStatsUpdate] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastIndexingTime, setLastIndexingTime] = useState<Date | null>(null);
   const itemsPerPage = 20;
   const intervalRef = useRef<number | null>(null);
 
@@ -368,6 +369,7 @@ export function ProductsReport() {
       }
 
       setIndexingProgress(`✅ ${data.message || `Indexados ${data.indexed || 0} productos`}`);
+      setLastIndexingTime(new Date()); // Guardar cuándo se ejecutó la indexación
       
       // Esperar un momento para que las transacciones de inserción se completen
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -417,15 +419,23 @@ export function ProductsReport() {
                   </span>
                 </div>
                 {indexedStats.totalProducts !== undefined && (
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-slate-500 space-y-1">
                     {indexedStats.totalProducts > 0 ? (
                       <>
-                        Progreso: {indexedStats.uniqueProducts} de {indexedStats.totalProducts} productos 
-                        ({Math.round((indexedStats.uniqueProducts / indexedStats.totalProducts) * 100)}%)
+                        <div>
+                          Progreso: {indexedStats.uniqueProducts} de {indexedStats.totalProducts} productos 
+                          ({Math.round((indexedStats.uniqueProducts / indexedStats.totalProducts) * 100)}%)
+                          {indexedStats.remaining !== undefined && indexedStats.remaining > 0 && (
+                            <span className="text-orange-600 ml-2">
+                              • Quedan {indexedStats.remaining} por indexar
+                            </span>
+                          )}
+                        </div>
                         {indexedStats.remaining !== undefined && indexedStats.remaining > 0 && (
-                          <span className="text-orange-600 ml-2">
-                            • Quedan {indexedStats.remaining} por indexar
-                          </span>
+                          <div className="text-slate-400 italic">
+                            💡 Los números se actualizan cada 10s, pero la indexación automática se ejecuta cada 5 minutos.
+                            Presiona "Indexar Productos" para indexar manualmente ahora.
+                          </div>
                         )}
                       </>
                     ) : (
@@ -448,6 +458,14 @@ export function ProductsReport() {
                       {isRefreshing ? 'Actualizando...' : `Actualizado: ${lastStatsUpdate.toLocaleTimeString('es-ES')}`}
                     </span>
                     <span className="text-green-600">• Auto-refresh cada 10s</span>
+                    <span className="text-slate-500 text-xs">
+                      • Indexación automática cada 5 min
+                      {lastIndexingTime && (
+                        <span className="ml-1">
+                          (Última: {lastIndexingTime.toLocaleTimeString('es-ES')})
+                        </span>
+                      )}
+                    </span>
                     <button
                       onClick={() => {
                         console.log('[ProductsReport] 🔄 Refresco manual iniciado');
