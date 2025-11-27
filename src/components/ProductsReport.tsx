@@ -84,17 +84,22 @@ export function ProductsReport() {
         console.log('[ProductsReport] ✅ Stats updated:', {
           chunks: data.total,
           productos: data.uniqueProducts,
+          remaining: data.remaining,
           time: new Date().toLocaleTimeString(),
         });
         setIndexedStats(data);
         setLastStatsUpdate(new Date());
+        setIsRefreshing(false);
+        return data; // Devolver los datos para uso inmediato
       } else {
         console.error('[ProductsReport] ❌ Error response:', response.status, response.statusText);
+        setIsRefreshing(false);
+        return null;
       }
     } catch (error) {
       console.error('[ProductsReport] ❌ Error en fetch:', error);
-    } finally {
       setIsRefreshing(false);
+      return null;
     }
   }, []);
 
@@ -400,10 +405,9 @@ export function ProductsReport() {
       // Actualizar estadísticas inmediatamente después de indexar
       // Esto asegura que mostremos los números correctos desde get-indexed-stats
       console.log('[ProductsReport] 🔄 Refreshing stats after indexing...');
-      await loadIndexedStats();
+      const updatedStats = await loadIndexedStats();
       
-      // Obtener los datos actualizados para mostrar mensaje correcto
-      const updatedStats = indexedStats;
+      // Mostrar mensaje con los datos actualizados de get-indexed-stats
       if (updatedStats) {
         const actualIndexed = updatedStats.uniqueProducts;
         const actualRemaining = updatedStats.remaining || 0;
