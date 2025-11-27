@@ -222,15 +222,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totalProductsChecked += batchData.length;
       
       // DEBUG: Mostrar algunos IDs del batch para comparar
-      const sampleBatchIds = batchData.slice(0, 5).map(p => Number(p.id));
+      const sampleBatchIds = batchData.slice(0, 10).map(p => Number(p.id));
       console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products, sample IDs:`, sampleBatchIds);
       
       // DEBUG: Verificar si alguno de los sample IDs está en indexedIds
       const sampleCheckResults = sampleBatchIds.map(id => ({
         id,
-        isIndexed: indexedIds.has(id)
+        idType: typeof id,
+        isIndexed: indexedIds.has(id),
+        indexedIdsHasType: typeof Array.from(indexedIds)[0]
       }));
-      console.log(`[index-products-rag-auto] Sample ID check results:`, sampleCheckResults);
+      console.log(`[index-products-rag-auto] Sample ID check results:`, JSON.stringify(sampleCheckResults, null, 2));
+      
+      // DEBUG: Mostrar algunos IDs del Set indexedIds para comparar tipos
+      const sampleIndexedFromSet = Array.from(indexedIds).slice(0, 10);
+      console.log(`[index-products-rag-auto] Sample IDs from indexedIds Set (first 10):`, sampleIndexedFromSet);
       
       // Filtrar solo los que no están indexados
       const unindexedInBatch = batchData.filter(p => {
