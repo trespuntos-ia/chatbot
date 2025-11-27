@@ -165,30 +165,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     console.log(`[index-products-rag-auto] Total products in database: ${totalProductsCount || 0}`);
 
-    // Obtener productos NO indexados usando una estrategia más eficiente:
-    // 1. Obtener productos en batches grandes
-    // 2. Filtrar los que NO están en indexedIds
-    // 3. Usar diferentes rangos para aumentar probabilidad de encontrar no indexados
-    const fetchLimit = 500; // Batch grande para aumentar probabilidad
+    // ESTRATEGIA SIMPLIFICADA: Obtener productos secuencialmente desde el principio
+    // y filtrar los que NO están indexados. Si llegamos al final sin encontrar suficientes,
+    // empezar de nuevo desde el principio (puede haber productos nuevos o cambios)
+    const fetchLimit = 500; // Batch grande para eficiencia
     let productsToIndex: any[] = [];
     let offset = 0;
     let attempts = 0;
-    const maxAttempts = 100; // Muchos intentos para asegurar cobertura completa
+    const maxAttempts = Math.ceil((totalProductsCount || 1608) / fetchLimit) * 2; // Revisar toda la BD 2 veces máximo
     let totalProductsChecked = 0;
-    const checkedRanges = new Set<string>(); // Para evitar revisar el mismo rango dos veces
+    let hasLooped = false; // Para saber si ya revisamos toda la BD una vez
 
-    console.log(`[index-products-rag-auto] Starting search for unindexed products. Need ${PRODUCTS_PER_RUN} products.`);
+    console.log(`[index-products-rag-auto] Starting search for unindexed products. Need ${PRODUCTS_PER_RUN} products. Total products: ${totalProductsCount || 0}, max attempts: ${maxAttempts}`);
 
     while (productsToIndex.length < PRODUCTS_PER_RUN && attempts < maxAttempts) {
-      // Crear un rango único para evitar duplicados
-      const rangeKey = `${offset}-${offset + fetchLimit - 1}`;
-      if (checkedRanges.has(rangeKey)) {
-        // Si ya revisamos este rango, saltar al siguiente
-        offset = (offset + fetchLimit) % (totalProductsCount || 10000);
+      // Si llegamos al final de la BD, volver al principio
+      if (offset >= (totalProductsCount || 1608)) {
+        if (hasLooped) {
+          console.log(`[index-products-rag-auto] Already looped once, stopping search`);
+          break;
+        }
+        console.log(`[index-products-rag-auto] Reached end of products, looping back to start`);
+        offset = 0;
+        hasLooped = true;
         attempts++;
         continue;
       }
-      checkedRanges.add(rangeKey);
 
       const { data: batchData, error: fetchError } = await supabase
         .from('products')
@@ -198,14 +200,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (fetchError) {
         console.error('[index-products-rag-auto] Error fetching products:', fetchError);
-        offset = (offset + fetchLimit) % (totalProductsCount || 10000);
+        offset += fetchLimit;
         attempts++;
         continue;
       }
 
       if (!batchData || batchData.length === 0) {
-        // Si no hay más datos en este rango, probar otro rango
-        offset = (offset + fetchLimit) % (totalProductsCount || 10000);
+        // Si no hay más datos, volver al principio si no hemos looped
+        if (!hasLooped) {
+          console.log(`[index-products-rag-auto] No more products at offset ${offset}, looping back`);
+          offset = 0;
+          hasLooped = true;
+        } else {
+          console.log(`[index-products-rag-auto] No more products and already looped, stopping`);
+          break;
+        }
         attempts++;
         continue;
       }
@@ -214,26 +223,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       // DEBUG: Mostrar algunos IDs del batch para comparar
       const sampleBatchIds = batchData.slice(0, 5).map(p => Number(p.id));
-      console.log(`[index-products-rag-auto] Sample batch IDs (first 5):`, sampleBatchIds);
+      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products, sample IDs:`, sampleBatchIds);
       
       // Filtrar solo los que no están indexados
-      // Asegurarse de que los IDs sean del mismo tipo (Number)
       const unindexedInBatch = batchData.filter(p => {
         const productId = Number(p.id);
         const isIndexed = indexedIds.has(productId);
-        if (!isIndexed) {
-          return true;
-        }
-        return false;
+        return !isIndexed;
       });
       
       const indexedInBatch = batchData.length - unindexedInBatch.length;
-      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products checked, ${unindexedInBatch.length} unindexed found, ${indexedInBatch} already indexed (${Math.round((unindexedInBatch.length / batchData.length) * 100)}% unindexed)`);
+      const unindexedPercent = batchData.length > 0 ? Math.round((unindexedInBatch.length / batchData.length) * 100) : 0;
+      console.log(`[index-products-rag-auto] Batch ${offset}-${offset + batchData.length - 1}: ${unindexedInBatch.length} unindexed, ${indexedInBatch} indexed (${unindexedPercent}% unindexed)`);
       
       // DEBUG: Si encontramos productos no indexados, mostrar algunos IDs
       if (unindexedInBatch.length > 0) {
         const sampleUnindexedIds = unindexedInBatch.slice(0, 5).map(p => Number(p.id));
-        console.log(`[index-products-rag-auto] ✅ Found unindexed products! Sample IDs:`, sampleUnindexedIds);
+        console.log(`[index-products-rag-auto] ✅ Found ${unindexedInBatch.length} unindexed products! Sample IDs:`, sampleUnindexedIds);
       }
       
       // Agregar productos no indexados encontrados
@@ -246,8 +252,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
 
-      // Avanzar al siguiente rango (usar módulo para volver al inicio si es necesario)
-      offset = (offset + fetchLimit) % (totalProductsCount || 10000);
+      // Avanzar al siguiente rango
+      offset += fetchLimit;
       attempts++;
       
       // Log cada 10 intentos
