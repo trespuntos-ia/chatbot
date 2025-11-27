@@ -153,6 +153,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     console.log(`[index-products-rag-auto] Total indexed products found: ${indexedIds.size}`);
+    
+    // DEBUG: Mostrar algunos IDs indexados para verificar
+    const sampleIndexedIds = Array.from(indexedIds).slice(0, 10);
+    console.log(`[index-products-rag-auto] Sample indexed IDs (first 10):`, sampleIndexedIds);
 
     // Obtener el total de productos primero
     const { count: totalProductsCount } = await supabase
@@ -208,15 +212,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       totalProductsChecked += batchData.length;
       
+      // DEBUG: Mostrar algunos IDs del batch para comparar
+      const sampleBatchIds = batchData.slice(0, 5).map(p => Number(p.id));
+      console.log(`[index-products-rag-auto] Sample batch IDs (first 5):`, sampleBatchIds);
+      
       // Filtrar solo los que no están indexados
       // Asegurarse de que los IDs sean del mismo tipo (Number)
       const unindexedInBatch = batchData.filter(p => {
         const productId = Number(p.id);
         const isIndexed = indexedIds.has(productId);
-        return !isIndexed;
+        if (!isIndexed) {
+          return true;
+        }
+        return false;
       });
       
-      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products checked, ${unindexedInBatch.length} unindexed found (${Math.round((unindexedInBatch.length / batchData.length) * 100)}% unindexed)`);
+      const indexedInBatch = batchData.length - unindexedInBatch.length;
+      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products checked, ${unindexedInBatch.length} unindexed found, ${indexedInBatch} already indexed (${Math.round((unindexedInBatch.length / batchData.length) * 100)}% unindexed)`);
+      
+      // DEBUG: Si encontramos productos no indexados, mostrar algunos IDs
+      if (unindexedInBatch.length > 0) {
+        const sampleUnindexedIds = unindexedInBatch.slice(0, 5).map(p => Number(p.id));
+        console.log(`[index-products-rag-auto] ✅ Found unindexed products! Sample IDs:`, sampleUnindexedIds);
+      }
       
       // Agregar productos no indexados encontrados
       const remaining = PRODUCTS_PER_RUN - productsToIndex.length;
