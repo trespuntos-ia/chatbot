@@ -98,21 +98,26 @@ export function ProductsReport() {
     }
   }, []);
 
-  // Efecto para cargar estadísticas solo al montar el componente (sin auto-refresh)
+  // Efecto para cargar estadísticas y configurar auto-refresh
   useEffect(() => {
-    console.log('[ProductsReport] 🚀 Component mounted, loading stats once');
+    console.log('[ProductsReport] 🚀 Component mounted, starting auto-refresh');
     
-    // Cargar solo una vez al montar el componente
+    // Cargar inmediatamente al montar
     loadIndexedStats();
     
-    // NO configurar intervalo automático para evitar sobrecarga del servidor
-    // El usuario puede actualizar manualmente con el botón "Actualizar ahora"
+    // Configurar intervalo automático cada 10 segundos
+    intervalRef.current = window.setInterval(() => {
+      console.log('[ProductsReport] ⏰ Auto-refresh triggered at', new Date().toLocaleTimeString());
+      loadIndexedStats();
+    }, 10000); // Actualizar cada 10 segundos
     
-    // Cleanup (aunque no hay intervalo, mantenemos la estructura por si acaso)
+    console.log('[ProductsReport] ✅ Auto-refresh interval started:', intervalRef.current);
+    
+    // Cleanup al desmontar
     return () => {
-      console.log('[ProductsReport] 🧹 Component unmounting');
+      console.log('[ProductsReport] 🧹 Component unmounting, cleaning up interval');
       if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current);
+        window.clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
