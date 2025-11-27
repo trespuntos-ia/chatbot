@@ -103,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         // Fallback: usar consulta con DISTINCT directamente usando paginación
         console.log('[index-products-rag-auto] RPC function not available, using paginated DISTINCT query');
-        let offset = 0;
+        let embeddingsOffset = 0;
         const pageSize = 10000;
         let hasMore = true;
         let totalFetched = 0;
@@ -112,7 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { data: uniqueProducts, error: distinctError } = await supabase
             .from('product_embeddings')
             .select('product_id')
-            .range(offset, offset + pageSize - 1);
+            .range(embeddingsOffset, embeddingsOffset + pageSize - 1);
 
           if (distinctError) {
             console.warn('[index-products-rag-auto] Error fetching indexed products:', distinctError);
@@ -131,7 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
 
           totalFetched += uniqueProducts.length;
-          offset += pageSize;
+          embeddingsOffset += pageSize;
 
           // Si obtuvimos menos que pageSize, no hay más datos
           if (uniqueProducts.length < pageSize) {
@@ -139,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           // Límite de seguridad
-          if (offset > 200000) {
+          if (embeddingsOffset > 200000) {
             console.warn('[index-products-rag-auto] Reached safety limit while fetching indexed products');
             break;
           }
@@ -340,7 +340,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Recontar productos indexados usando paginación para obtener todos
     const updatedIndexedIds = new Set<number>();
-    let offset = 0;
+    let recountOffset = 0;
     let hasMore = true;
     const pageSize = 1000; // Tamaño de página para paginación
 
@@ -348,7 +348,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: updatedIndexedProducts, error: fetchError } = await supabase
         .from('product_embeddings')
         .select('product_id')
-        .range(offset, offset + pageSize - 1);
+        .range(recountOffset, recountOffset + pageSize - 1);
 
       if (fetchError) {
         console.error('[index-products-rag-auto] Error recounting indexed products:', fetchError);
@@ -369,7 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (updatedIndexedProducts.length < pageSize) {
         hasMore = false;
       } else {
-        offset += pageSize;
+        recountOffset += pageSize;
       }
 
       // Límite de seguridad

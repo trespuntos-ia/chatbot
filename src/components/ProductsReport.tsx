@@ -360,7 +360,18 @@ export function ProductsReport() {
         },
       });
 
-      const data = await response.json();
+      // Verificar si la respuesta es JSON antes de parsear
+      const contentType = response.headers.get('content-type');
+      let data: any;
+      
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        // Si no es JSON, leer como texto para ver el error
+        const text = await response.text();
+        console.error('[ProductsReport] ❌ Non-JSON response:', text.substring(0, 200));
+        throw new Error(`Error del servidor (${response.status}): ${text.substring(0, 100)}`);
+      }
 
       if (!response.ok) {
         console.error('[ProductsReport] ❌ Indexing error:', data);
