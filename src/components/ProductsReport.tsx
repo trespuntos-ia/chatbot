@@ -391,20 +391,23 @@ export function ProductsReport() {
       }
       
       // Esperar un momento para que las transacciones de inserción se completen
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Actualizar estadísticas de indexación después de un breve delay
+      // Actualizar estadísticas inmediatamente después de indexar
+      console.log('[ProductsReport] 🔄 Refreshing stats after indexing...');
       await loadIndexedStats();
       
-      // Actualizar nuevamente después de 3 segundos para asegurar que se refleje el cambio
+      // Actualizar nuevamente después de 5 segundos para asegurar que se refleje el cambio
       setTimeout(() => {
-        loadIndexedStats();
-      }, 3000);
-      
-      // Una actualización final después de 5 segundos por si acaso
-      setTimeout(() => {
+        console.log('[ProductsReport] 🔄 Second refresh after indexing...');
         loadIndexedStats();
       }, 5000);
+      
+      // Una actualización final después de 10 segundos por si acaso
+      setTimeout(() => {
+        console.log('[ProductsReport] 🔄 Final refresh after indexing...');
+        loadIndexedStats();
+      }, 10000);
       
       // Esperar un momento antes de ocultar el mensaje
       setTimeout(() => {
