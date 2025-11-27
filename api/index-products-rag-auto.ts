@@ -154,18 +154,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`[index-products-rag-auto] Total indexed products found: ${indexedIds.size}`);
 
-    // Obtener productos NO indexados de manera más eficiente
-    // Usar ordenamiento por ID y buscar en diferentes rangos para encontrar productos no indexados
-    const fetchLimit = PRODUCTS_PER_RUN * 2; // Obtener el doble para tener mejor probabilidad
+    // Obtener el total de productos primero
+    const { count: totalProductsCount } = await supabase
+      .from('products')
+      .select('*', { count: 'exact', head: true });
+    
+    console.log(`[index-products-rag-auto] Total products in database: ${totalProductsCount || 0}`);
+
+    // Obtener productos NO indexados usando una estrategia más eficiente:
+    // 1. Obtener productos en batches grandes
+    // 2. Filtrar los que NO están en indexedIds
+    // 3. Usar diferentes rangos para aumentar probabilidad de encontrar no indexados
+    const fetchLimit = 500; // Batch grande para aumentar probabilidad
     let productsToIndex: any[] = [];
     let offset = 0;
     let attempts = 0;
-    const maxAttempts = 50; // Aumentar intentos significativamente para buscar más productos
+    const maxAttempts = 100; // Muchos intentos para asegurar cobertura completa
     let totalProductsChecked = 0;
+    const checkedRanges = new Set<string>(); // Para evitar revisar el mismo rango dos veces
 
     console.log(`[index-products-rag-auto] Starting search for unindexed products. Need ${PRODUCTS_PER_RUN} products.`);
 
     while (productsToIndex.length < PRODUCTS_PER_RUN && attempts < maxAttempts) {
+      // Crear un rango único para evitar duplicados
+      const rangeKey = `${offset}-${offset + fetchLimit - 1}`;
+      if (checkedRanges.has(rangeKey)) {
+        // Si ya revisamos este rango, saltar al siguiente
+        offset = (offset + fetchLimit) % (totalProductsCount || 10000);
+        attempts++;
+        continue;
+      }
+      checkedRanges.add(rangeKey);
+
       const { data: batchData, error: fetchError } = await supabase
         .from('products')
         .select('*')
@@ -174,17 +194,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (fetchError) {
         console.error('[index-products-rag-auto] Error fetching products:', fetchError);
-        break;
+        offset = (offset + fetchLimit) % (totalProductsCount || 10000);
+        attempts++;
+        continue;
       }
 
       if (!batchData || batchData.length === 0) {
-        // Si no hay más datos y ya revisamos desde el principio, salir
-        if (offset === 0 || attempts > 10) {
-          console.log(`[index-products-rag-auto] No more products to check. Checked ${totalProductsChecked} products, found ${productsToIndex.length} unindexed.`);
-          break;
-        }
-        // Volver al principio y continuar buscando
-        offset = 0;
+        // Si no hay más datos en este rango, probar otro rango
+        offset = (offset + fetchLimit) % (totalProductsCount || 10000);
         attempts++;
         continue;
       }
@@ -196,15 +213,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const unindexedInBatch = batchData.filter(p => {
         const productId = Number(p.id);
         const isIndexed = indexedIds.has(productId);
-        if (!isIndexed && productsToIndex.length < PRODUCTS_PER_RUN) {
-          return true;
-        }
-        return false;
+        return !isIndexed;
       });
       
-      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products checked, ${unindexedInBatch.length} unindexed found`);
+      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products checked, ${unindexedInBatch.length} unindexed found (${Math.round((unindexedInBatch.length / batchData.length) * 100)}% unindexed)`);
       
-      productsToIndex.push(...unindexedInBatch.slice(0, PRODUCTS_PER_RUN - productsToIndex.length));
+      // Agregar productos no indexados encontrados
+      const remaining = PRODUCTS_PER_RUN - productsToIndex.length;
+      productsToIndex.push(...unindexedInBatch.slice(0, remaining));
 
       // Si encontramos suficientes, salir
       if (productsToIndex.length >= PRODUCTS_PER_RUN) {
@@ -212,8 +228,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
 
-      // Avanzar al siguiente rango
-      offset += fetchLimit;
+      // Avanzar al siguiente rango (usar módulo para volver al inicio si es necesario)
+      offset = (offset + fetchLimit) % (totalProductsCount || 10000);
       attempts++;
       
       // Log cada 10 intentos
