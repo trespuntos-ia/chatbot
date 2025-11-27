@@ -152,13 +152,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Continuar con Set vacío
     }
 
+    console.log(`[index-products-rag-auto] Total indexed products found: ${indexedIds.size}`);
+
     // Obtener productos NO indexados de manera más eficiente
     // Usar ordenamiento por ID y buscar en diferentes rangos para encontrar productos no indexados
     const fetchLimit = PRODUCTS_PER_RUN * 2; // Obtener el doble para tener mejor probabilidad
     let productsToIndex: any[] = [];
     let offset = 0;
     let attempts = 0;
-    const maxAttempts = 20; // Aumentar intentos para buscar más productos
+    const maxAttempts = 50; // Aumentar intentos significativamente para buscar más productos
+    let totalProductsChecked = 0;
+
+    console.log(`[index-products-rag-auto] Starting search for unindexed products. Need ${PRODUCTS_PER_RUN} products.`);
 
     while (productsToIndex.length < PRODUCTS_PER_RUN && attempts < maxAttempts) {
       const { data: batchData, error: fetchError } = await supabase
@@ -173,24 +178,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (!batchData || batchData.length === 0) {
-        // Si no hay más datos, intentar desde el principio con diferentes rangos
-        if (offset === 0) break;
+        // Si no hay más datos y ya revisamos desde el principio, salir
+        if (offset === 0 || attempts > 10) {
+          console.log(`[index-products-rag-auto] No more products to check. Checked ${totalProductsChecked} products, found ${productsToIndex.length} unindexed.`);
+          break;
+        }
+        // Volver al principio y continuar buscando
         offset = 0;
         attempts++;
         continue;
       }
 
+      totalProductsChecked += batchData.length;
+      
       // Filtrar solo los que no están indexados
-      const unindexedInBatch = batchData.filter(p => !indexedIds.has(p.id));
+      // Asegurarse de que los IDs sean del mismo tipo (Number)
+      const unindexedInBatch = batchData.filter(p => {
+        const productId = Number(p.id);
+        const isIndexed = indexedIds.has(productId);
+        if (!isIndexed && productsToIndex.length < PRODUCTS_PER_RUN) {
+          return true;
+        }
+        return false;
+      });
+      
+      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products checked, ${unindexedInBatch.length} unindexed found`);
+      
       productsToIndex.push(...unindexedInBatch.slice(0, PRODUCTS_PER_RUN - productsToIndex.length));
 
       // Si encontramos suficientes, salir
-      if (productsToIndex.length >= PRODUCTS_PER_RUN) break;
+      if (productsToIndex.length >= PRODUCTS_PER_RUN) {
+        console.log(`[index-products-rag-auto] ✅ Found enough products: ${productsToIndex.length}`);
+        break;
+      }
 
       // Avanzar al siguiente rango
       offset += fetchLimit;
       attempts++;
+      
+      // Log cada 10 intentos
+      if (attempts % 10 === 0) {
+        console.log(`[index-products-rag-auto] Progress: ${attempts} attempts, checked ${totalProductsChecked} products, found ${productsToIndex.length} unindexed so far`);
+      }
     }
+    
+    console.log(`[index-products-rag-auto] Final search result: checked ${totalProductsChecked} products across ${attempts} attempts, found ${productsToIndex.length} products to index`);
 
     if (productsToIndex.length === 0) {
       console.log('[index-products-rag-auto] No products to index - all done!');
