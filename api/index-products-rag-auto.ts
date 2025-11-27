@@ -95,8 +95,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (!rpcError && indexedProductIds) {
         indexedProductIds.forEach((item: any) => {
-          if (item.product_id) {
-            indexedIds.add(item.product_id);
+          if (item.product_id !== null && item.product_id !== undefined) {
+            indexedIds.add(Number(item.product_id));
           }
         });
         console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via RPC)`);
@@ -125,8 +125,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           uniqueProducts.forEach((item: any) => {
-            if (item.product_id) {
-              indexedIds.add(item.product_id);
+            if (item.product_id !== null && item.product_id !== undefined) {
+              indexedIds.add(Number(item.product_id));
             }
           });
 
@@ -225,6 +225,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const sampleBatchIds = batchData.slice(0, 5).map(p => Number(p.id));
       console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products, sample IDs:`, sampleBatchIds);
       
+      // DEBUG: Verificar si alguno de los sample IDs está en indexedIds
+      const sampleCheckResults = sampleBatchIds.map(id => ({
+        id,
+        isIndexed: indexedIds.has(id)
+      }));
+      console.log(`[index-products-rag-auto] Sample ID check results:`, sampleCheckResults);
+      
       // Filtrar solo los que no están indexados
       const unindexedInBatch = batchData.filter(p => {
         const productId = Number(p.id);
@@ -240,6 +247,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (unindexedInBatch.length > 0) {
         const sampleUnindexedIds = unindexedInBatch.slice(0, 5).map(p => Number(p.id));
         console.log(`[index-products-rag-auto] ✅ Found ${unindexedInBatch.length} unindexed products! Sample IDs:`, sampleUnindexedIds);
+      } else if (batchData.length > 0) {
+        // Si no encontramos productos no indexados, mostrar algunos IDs del batch para debug
+        console.log(`[index-products-rag-auto] ⚠️ No unindexed products in this batch. All ${batchData.length} products are already indexed.`);
       }
       
       // Agregar productos no indexados encontrados
