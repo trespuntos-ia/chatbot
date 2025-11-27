@@ -155,8 +155,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`[index-products-rag-auto] Total indexed products found: ${indexedIds.size}`);
     
     // DEBUG: Mostrar algunos IDs indexados para verificar
-    const sampleIndexedIds = Array.from(indexedIds).slice(0, 10);
+    const indexedIdsArray = Array.from(indexedIds).sort((a, b) => a - b);
+    const sampleIndexedIds = indexedIdsArray.slice(0, 10);
+    const minIndexedId = indexedIdsArray.length > 0 ? indexedIdsArray[0] : null;
+    const maxIndexedId = indexedIdsArray.length > 0 ? indexedIdsArray[indexedIdsArray.length - 1] : null;
     console.log(`[index-products-rag-auto] Sample indexed IDs (first 10):`, sampleIndexedIds);
+    console.log(`[index-products-rag-auto] Indexed IDs range: ${minIndexedId} - ${maxIndexedId}`);
 
     // Obtener el total de productos primero
     const { count: totalProductsCount } = await supabase
@@ -222,8 +226,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totalProductsChecked += batchData.length;
       
       // DEBUG: Mostrar algunos IDs del batch para comparar
-      const sampleBatchIds = batchData.slice(0, 10).map(p => Number(p.id));
+      const batchIds = batchData.map(p => Number(p.id)).sort((a, b) => a - b);
+      const sampleBatchIds = batchIds.slice(0, 10);
+      const minBatchId = batchIds.length > 0 ? batchIds[0] : null;
+      const maxBatchId = batchIds.length > 0 ? batchIds[batchIds.length - 1] : null;
       console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products, sample IDs:`, sampleBatchIds);
+      console.log(`[index-products-rag-auto] Batch IDs range: ${minBatchId} - ${maxBatchId}`);
       
       // DEBUG: Verificar si alguno de los sample IDs está en indexedIds
       const sampleCheckResults = sampleBatchIds.map(id => ({
