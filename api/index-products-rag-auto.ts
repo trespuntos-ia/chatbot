@@ -373,7 +373,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // Límite de seguridad
-      if (offset > 100000) {
+      if (recountOffset > 100000) {
         console.warn('[index-products-rag-auto] Reached safety limit while recounting');
         break;
       }
