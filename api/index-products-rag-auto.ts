@@ -338,45 +338,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('products')
       .select('*', { count: 'exact', head: true });
 
-    // Recontar productos indexados usando paginación para obtener todos
+    // Recontar productos indexados usando el MISMO método que get-indexed-stats para consistencia
+    // Usar el mismo método exacto para evitar discrepancias
     const updatedIndexedIds = new Set<number>();
-    let recountOffset = 0;
-    let hasMore = true;
-    const pageSize = 1000; // Tamaño de página para paginación
+    
+    try {
+      // Intentar usar función RPC si existe (mismo método que get-indexed-stats)
+      const { data: indexedProductIds, error: rpcError } = await supabase
+        .rpc('get_indexed_product_ids');
 
-    while (hasMore) {
-      const { data: updatedIndexedProducts, error: fetchError } = await supabase
-        .from('product_embeddings')
-        .select('product_id')
-        .range(recountOffset, recountOffset + pageSize - 1);
-
-      if (fetchError) {
-        console.error('[index-products-rag-auto] Error recounting indexed products:', fetchError);
-        break;
-      }
-
-      if (!updatedIndexedProducts || updatedIndexedProducts.length === 0) {
-        hasMore = false;
-        break;
-      }
-
-      updatedIndexedProducts.forEach((item: any) => {
-        if (item.product_id) {
-          updatedIndexedIds.add(item.product_id);
-        }
-      });
-
-      if (updatedIndexedProducts.length < pageSize) {
-        hasMore = false;
+      if (!rpcError && indexedProductIds) {
+        indexedProductIds.forEach((item: any) => {
+          if (item.product_id) {
+            updatedIndexedIds.add(Number(item.product_id));
+          }
+        });
+        console.log(`[index-products-rag-auto] Recounted ${updatedIndexedIds.size} unique products (via RPC)`);
       } else {
-        recountOffset += pageSize;
-      }
+        // Fallback: usar paginación completa (mismo método que get-indexed-stats)
+        console.log('[index-products-rag-auto] RPC not available, using paginated query for recount');
+        let recountOffset = 0;
+        const pageSize = 10000; // Mismo tamaño que get-indexed-stats
+        let hasMore = true;
+        let totalFetched = 0;
 
-      // Límite de seguridad
-      if (recountOffset > 100000) {
-        console.warn('[index-products-rag-auto] Reached safety limit while recounting');
-        break;
+        while (hasMore) {
+          const { data: updatedIndexedProducts, error: fetchError } = await supabase
+            .from('product_embeddings')
+            .select('product_id')
+            .range(recountOffset, recountOffset + pageSize - 1);
+
+          if (fetchError) {
+            console.error('[index-products-rag-auto] Error recounting indexed products:', fetchError);
+            break;
+          }
+
+          if (!updatedIndexedProducts || updatedIndexedProducts.length === 0) {
+            hasMore = false;
+            break;
+          }
+
+          updatedIndexedProducts.forEach((item: any) => {
+            if (item.product_id !== null && item.product_id !== undefined) {
+              updatedIndexedIds.add(Number(item.product_id));
+            }
+          });
+
+          totalFetched += updatedIndexedProducts.length;
+          
+          if (updatedIndexedProducts.length < pageSize) {
+            hasMore = false;
+          } else {
+            recountOffset += pageSize;
+          }
+
+          // Límite de seguridad
+          if (recountOffset > 200000) {
+            console.warn('[index-products-rag-auto] Reached safety limit while recounting');
+            break;
+          }
+        }
+        
+        console.log(`[index-products-rag-auto] Recounted ${updatedIndexedIds.size} unique products (via pagination, fetched ${totalFetched} chunks)`);
       }
+    } catch (error) {
+      console.error('[index-products-rag-auto] Exception recounting indexed products:', error);
     }
 
     const totalIndexed = updatedIndexedIds.size;

@@ -380,33 +380,48 @@ export function ProductsReport() {
       }
 
       console.log('[ProductsReport] ✅ Indexing completed:', data);
-      const successMessage = `✅ ${data.message || `Indexados ${data.indexed || 0} productos`}`;
-      setIndexingProgress(successMessage);
+      
+      // Mostrar mensaje inicial basado en la respuesta
+      const initialMessage = data.indexed > 0 
+        ? `✅ Indexando productos... (${data.indexed} procesados)`
+        : `✅ Procesando...`;
+      setIndexingProgress(initialMessage);
       setLastIndexingTime(new Date()); // Guardar cuándo se ejecutó la indexación
       
       // Si hay errores parciales, mostrarlos
       if (data.errors && data.errors.length > 0) {
         console.warn('[ProductsReport] ⚠️ Partial errors:', data.errors);
-        setIndexingProgress(`${successMessage} (Algunos errores: ${data.errors.length})`);
+        setIndexingProgress(`${initialMessage} (Algunos errores: ${data.errors.length})`);
       }
       
       // Esperar un momento para que las transacciones de inserción se completen
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
       // Actualizar estadísticas inmediatamente después de indexar
+      // Esto asegura que mostremos los números correctos desde get-indexed-stats
       console.log('[ProductsReport] 🔄 Refreshing stats after indexing...');
       await loadIndexedStats();
       
+      // Obtener los datos actualizados para mostrar mensaje correcto
+      const updatedStats = indexedStats;
+      if (updatedStats) {
+        const actualIndexed = updatedStats.uniqueProducts;
+        const actualRemaining = updatedStats.remaining || 0;
+        setIndexingProgress(`✅ Indexación completada. ${actualIndexed} productos indexados. Quedan ${actualRemaining} por indexar.`);
+      } else {
+        setIndexingProgress(`✅ Indexación completada. Actualizando estadísticas...`);
+      }
+      
       // Actualizar nuevamente después de 5 segundos para asegurar que se refleje el cambio
-      setTimeout(() => {
+      setTimeout(async () => {
         console.log('[ProductsReport] 🔄 Second refresh after indexing...');
-        loadIndexedStats();
+        await loadIndexedStats();
       }, 5000);
       
       // Una actualización final después de 10 segundos por si acaso
-      setTimeout(() => {
+      setTimeout(async () => {
         console.log('[ProductsReport] 🔄 Final refresh after indexing...');
-        loadIndexedStats();
+        await loadIndexedStats();
       }, 10000);
       
       // Esperar un momento antes de ocultar el mensaje
