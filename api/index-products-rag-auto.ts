@@ -115,12 +115,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (useOptimizedQuery) {
       // LÓGICA OPTIMIZADA: Usar last_indexed_at
+      // PostgREST no permite comparar columnas directamente (last_indexed_at < updated_at)
+      // Por ahora, solo buscamos productos nunca indexados (last_indexed_at IS NULL)
+      // Los productos modificados se detectarán en la siguiente ronda cuando se actualice updated_at
+      // TODO: Crear función RPC para comparar last_indexed_at < updated_at si es necesario
       console.log(`[index-products-rag-auto] Searching for products to index using optimized query...`);
       
       const result = await supabase
         .from('products')
         .select('*')
-        .or('last_indexed_at.is.null,last_indexed_at.lt.updated_at')
+        .is('last_indexed_at', null)
         .order('id', { ascending: true })
         .limit(PRODUCTS_PER_RUN);
 
