@@ -45,80 +45,117 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     console.log(`[get-indexed-stats] Total chunks: ${totalChunks || 0}`);
 
+    // Verificar si la columna last_indexed_at existe (mismo método que index-products-rag-auto)
+    let useOptimizedQuery = false;
+    try {
+      const { data: testData, error: testError } = await supabase
+        .from('products')
+        .select('last_indexed_at')
+        .limit(1);
+      
+      if (!testError) {
+        useOptimizedQuery = true;
+        console.log(`[get-indexed-stats] ✅ Columna last_indexed_at detectada - usando conteo optimizado`);
+      } else {
+        console.log(`[get-indexed-stats] ⚠️ Columna last_indexed_at no existe - usando método de respaldo`);
+      }
+    } catch (error) {
+      console.log(`[get-indexed-stats] ⚠️ No se pudo verificar last_indexed_at - usando método de respaldo`);
+    }
+
     // Contar productos únicos indexados - MÉTODO MEJORADO Y MÁS CONFIABLE
     // Usar el mismo método que index-products-rag-auto para consistencia
-    const uniqueProductIds = new Set<number>();
-    
-    try {
-      // Intentar usar función RPC si existe (más eficiente y consistente con index-products-rag-auto)
-      const { data: indexedProductIds, error: rpcError } = await supabase
-        .rpc('get_indexed_product_ids');
+    if (useOptimizedQuery) {
+      // MÉTODO OPTIMIZADO: Usar last_indexed_at (instantáneo)
+      const { count: indexedProductsCount, error: countError } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true })
+        .not('last_indexed_at', 'is', null);
 
-      if (!rpcError && indexedProductIds) {
-        indexedProductIds.forEach((item: any) => {
-          if (item.product_id) {
-            uniqueProductIds.add(Number(item.product_id));
-          }
-        });
-        console.log(`[get-indexed-stats] Found ${uniqueProductIds.size} unique products (via RPC)`);
+      if (countError) {
+        console.error('[get-indexed-stats] Error counting with last_indexed_at:', countError);
+        uniqueProducts = 0;
       } else {
-        // Fallback: usar paginación completa (mismo método que index-products-rag-auto)
-        console.log('[get-indexed-stats] RPC function not available, using paginated query');
-        let statsOffset = 0;
-        const pageSize = 10000;
-        let hasMore = true;
-        let totalFetched = 0;
-        const startTime = Date.now();
+        uniqueProducts = indexedProductsCount || 0;
+        console.log(`[get-indexed-stats] ✅ Found ${uniqueProducts} indexed products (via last_indexed_at)`);
+      }
+    } else {
+      // MÉTODO DE RESPALDO: Contar productos con embeddings (más lento)
+      const uniqueProductIds = new Set<number>();
+      
+      try {
+        // Intentar usar función RPC si existe (más eficiente y consistente con index-products-rag-auto)
+        const { data: indexedProductIds, error: rpcError } = await supabase
+          .rpc('get_indexed_product_ids');
 
-        while (hasMore) {
-          const { data: chunks, error: fetchError } = await supabase
-            .from('product_embeddings')
-            .select('product_id')
-            .range(statsOffset, statsOffset + pageSize - 1);
-
-          if (fetchError) {
-            console.error('[get-indexed-stats] Error fetching chunks:', fetchError);
-            break;
-          }
-
-          if (!chunks || chunks.length === 0) {
-            hasMore = false;
-            break;
-          }
-
-          // Agregar todos los product_id al Set (automáticamente elimina duplicados)
-          chunks.forEach((item: any) => {
-            if (item.product_id !== null && item.product_id !== undefined) {
+        if (!rpcError && indexedProductIds) {
+          indexedProductIds.forEach((item: any) => {
+            if (item.product_id) {
               uniqueProductIds.add(Number(item.product_id));
             }
           });
+          console.log(`[get-indexed-stats] Found ${uniqueProductIds.size} unique products (via RPC)`);
+        } else {
+          // Fallback: usar paginación completa (mismo método que index-products-rag-auto)
+          console.log('[get-indexed-stats] RPC function not available, using paginated query');
+          let statsOffset = 0;
+          const pageSize = 10000;
+          let hasMore = true;
+          let totalFetched = 0;
+          const startTime = Date.now();
 
-          totalFetched += chunks.length;
-          statsOffset += pageSize;
-          
-          // Si obtuvimos menos que pageSize, no hay más datos
-          if (chunks.length < pageSize) {
-            hasMore = false;
+          while (hasMore) {
+            const { data: chunks, error: fetchError } = await supabase
+              .from('product_embeddings')
+              .select('product_id')
+              .range(statsOffset, statsOffset + pageSize - 1);
+
+            if (fetchError) {
+              console.error('[get-indexed-stats] Error fetching chunks:', fetchError);
+              break;
+            }
+
+            if (!chunks || chunks.length === 0) {
+              hasMore = false;
+              break;
+            }
+
+            // Agregar todos los product_id al Set (automáticamente elimina duplicados)
+            chunks.forEach((item: any) => {
+              if (item.product_id !== null && item.product_id !== undefined) {
+                uniqueProductIds.add(Number(item.product_id));
+              }
+            });
+
+            totalFetched += chunks.length;
+            statsOffset += pageSize;
+            
+            // Si obtuvimos menos que pageSize, no hay más datos
+            if (chunks.length < pageSize) {
+              hasMore = false;
+            }
+            
+            // Límite de seguridad
+            if (statsOffset > 200000) {
+              console.warn('[get-indexed-stats] Reached safety limit');
+              break;
+            }
+            
+            // Log de progreso cada 10000 chunks
+            if (totalFetched % 10000 === 0) {
+              console.log(`[get-indexed-stats] Progress: fetched ${totalFetched} chunks, found ${uniqueProductIds.size} unique products so far...`);
+            }
           }
           
-          // Límite de seguridad
-          if (statsOffset > 200000) {
-            console.warn('[get-indexed-stats] Reached safety limit');
-            break;
-          }
-          
-          // Log de progreso cada 10000 chunks
-          if (totalFetched % 10000 === 0) {
-            console.log(`[get-indexed-stats] Progress: fetched ${totalFetched} chunks, found ${uniqueProductIds.size} unique products so far...`);
-          }
+          const elapsedTime = Date.now() - startTime;
+          console.log(`[get-indexed-stats] ✅ Completed: fetched ${totalFetched} chunks, found ${uniqueProductIds.size} unique products in ${elapsedTime}ms`);
         }
         
-        const elapsedTime = Date.now() - startTime;
-        console.log(`[get-indexed-stats] ✅ Completed: fetched ${totalFetched} chunks, found ${uniqueProductIds.size} unique products in ${elapsedTime}ms`);
+        uniqueProducts = uniqueProductIds.size;
+      } catch (error) {
+        console.error('[get-indexed-stats] Exception fetching unique products:', error);
+        uniqueProducts = 0;
       }
-      
-    } catch (error) {
-      console.error('[get-indexed-stats] Exception fetching unique products:', error);
     }
 
     // Obtener total de productos en la base de datos para calcular progreso
@@ -127,7 +164,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select('*', { count: 'exact', head: true });
     
     const totalProducts = totalProductsCount || 0;
-    const uniqueProducts = uniqueProductIds.size;
     const remaining = Math.max(0, totalProducts - uniqueProducts);
     const progress = totalProducts > 0 ? Math.round((uniqueProducts / totalProducts) * 100) : 0;
 
