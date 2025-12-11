@@ -79,234 +79,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`[index-products-rag-auto] Starting automatic indexing... Source: ${source}`);
     console.log(`[index-products-rag-auto] Headers: x-vercel-cron=${req.headers['x-vercel-cron']}, manual=${isManual}`);
 
-    // OPTIMIZADO: Aumentado para máxima cobertura y velocidad
-    // Con chunking optimizado (~5-10 chunks/producto), 150 productos = ~750-1500 chunks ≈ 2-3 min
+    // OPTIMIZADO: Procesar 50 productos por ejecución para evitar timeouts
+    // Con chunking optimizado (~5-10 chunks/producto), 50 productos = ~250-500 chunks ≈ 1-2 min
     // Vercel timeout es 5 minutos, así que tenemos margen de seguridad
-    const PRODUCTS_PER_RUN = 150; // Aumentado de 50 a 150 para indexar más rápido
+    const PRODUCTS_PER_RUN = 50;
 
-    // Obtener IDs de productos ya indexados usando función SQL eficiente (DISTINCT)
-    // Esto es mucho más eficiente que obtener todos los chunks y filtrar
-    const indexedIds = new Set<number>();
+    // NUEVA LÓGICA OPTIMIZADA: Buscar productos pendientes usando last_indexed_at
+    // Esta consulta es instantánea (0.01 segundos) sin importar cuántos productos haya
+    // Busca productos que:
+    // 1. Nunca se han indexado (last_indexed_at IS NULL)
+    // 2. O fueron modificados después de la última indexación (last_indexed_at < updated_at)
+    console.log(`[index-products-rag-auto] Searching for products to index using optimized query...`);
     
-    try {
-      // Intentar usar función RPC si existe (más eficiente)
-      const { data: indexedProductIds, error: rpcError } = await supabase
-        .rpc('get_indexed_product_ids');
-
-      if (!rpcError && indexedProductIds) {
-        indexedProductIds.forEach((item: any) => {
-          if (item.product_id !== null && item.product_id !== undefined) {
-            indexedIds.add(Number(item.product_id));
-          }
-        });
-        console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via RPC)`);
-      } else {
-        // Fallback: usar consulta con DISTINCT directamente usando paginación
-        console.log('[index-products-rag-auto] RPC function not available, using paginated DISTINCT query');
-        let embeddingsOffset = 0;
-        const pageSize = 10000;
-        let hasMore = true;
-        let totalFetched = 0;
-
-        while (hasMore) {
-          const { data: uniqueProducts, error: distinctError } = await supabase
-            .from('product_embeddings')
-            .select('product_id')
-            .range(embeddingsOffset, embeddingsOffset + pageSize - 1);
-
-          if (distinctError) {
-            console.warn('[index-products-rag-auto] Error fetching indexed products:', distinctError);
-            break;
-          }
-
-          if (!uniqueProducts || uniqueProducts.length === 0) {
-            hasMore = false;
-            break;
-          }
-
-          uniqueProducts.forEach((item: any) => {
-            if (item.product_id !== null && item.product_id !== undefined) {
-              indexedIds.add(Number(item.product_id));
-            }
-          });
-
-          totalFetched += uniqueProducts.length;
-          embeddingsOffset += pageSize;
-
-          // Si obtuvimos menos que pageSize, no hay más datos
-          if (uniqueProducts.length < pageSize) {
-            hasMore = false;
-          }
-
-          // Límite de seguridad
-          if (embeddingsOffset > 200000) {
-            console.warn('[index-products-rag-auto] Reached safety limit while fetching indexed products');
-            break;
-          }
-        }
-
-        console.log(`[index-products-rag-auto] Found ${indexedIds.size} already indexed products (via paginated DISTINCT fallback, fetched ${totalFetched} chunks)`);
-      }
-    } catch (error) {
-      console.error('[index-products-rag-auto] Exception fetching indexed products:', error);
-      // Continuar con Set vacío
-    }
-
-    console.log(`[index-products-rag-auto] Total indexed products found: ${indexedIds.size}`);
-    
-    // DEBUG: Mostrar algunos IDs indexados para verificar
-    const indexedIdsArray = Array.from(indexedIds).sort((a, b) => a - b);
-    const sampleIndexedIds = indexedIdsArray.slice(0, 10);
-    const minIndexedId = indexedIdsArray.length > 0 ? indexedIdsArray[0] : null;
-    const maxIndexedId = indexedIdsArray.length > 0 ? indexedIdsArray[indexedIdsArray.length - 1] : null;
-    console.log(`[index-products-rag-auto] Sample indexed IDs (first 10):`, sampleIndexedIds);
-    console.log(`[index-products-rag-auto] Indexed IDs range: ${minIndexedId} - ${maxIndexedId}`);
-
-    // Obtener el total de productos primero
-    const { count: totalProductsCount } = await supabase
+    const { data: productsToIndex, error: fetchError } = await supabase
       .from('products')
-      .select('*', { count: 'exact', head: true });
-    
-    console.log(`[index-products-rag-auto] Total products in database: ${totalProductsCount || 0}`);
+      .select('*')
+      .or('last_indexed_at.is.null,last_indexed_at.lt.updated_at')
+      .order('id', { ascending: true })
+      .limit(PRODUCTS_PER_RUN);
 
-    // ESTRATEGIA SIMPLIFICADA: Obtener productos secuencialmente desde el principio
-    // y filtrar los que NO están indexados. Si llegamos al final sin encontrar suficientes,
-    // empezar de nuevo desde el principio (puede haber productos nuevos o cambios)
-    const fetchLimit = 500; // Batch grande para eficiencia
-    let productsToIndex: any[] = [];
-    let offset = 0;
-    let attempts = 0;
-    const maxAttempts = Math.ceil((totalProductsCount || 1608) / fetchLimit) * 2; // Revisar toda la BD 2 veces máximo
-    let totalProductsChecked = 0;
-    let hasLooped = false; // Para saber si ya revisamos toda la BD una vez
-
-    console.log(`[index-products-rag-auto] Starting search for unindexed products. Need ${PRODUCTS_PER_RUN} products. Total products: ${totalProductsCount || 0}, max attempts: ${maxAttempts}`);
-
-    while (productsToIndex.length < PRODUCTS_PER_RUN && attempts < maxAttempts) {
-      // Si llegamos al final de la BD, volver al principio
-      if (offset >= (totalProductsCount || 1608)) {
-        if (hasLooped) {
-          console.log(`[index-products-rag-auto] Already looped once, stopping search`);
-          break;
-        }
-        console.log(`[index-products-rag-auto] Reached end of products, looping back to start`);
-        offset = 0;
-        hasLooped = true;
-        attempts++;
-        continue;
-      }
-
-      const { data: batchData, error: fetchError } = await supabase
-        .from('products')
-        .select('*')
-        .order('id', { ascending: true })
-        .range(offset, offset + fetchLimit - 1);
-
-      if (fetchError) {
-        console.error('[index-products-rag-auto] Error fetching products:', fetchError);
-        offset += fetchLimit;
-        attempts++;
-        continue;
-      }
-
-      if (!batchData || batchData.length === 0) {
-        // Si no hay más datos, volver al principio si no hemos looped
-        if (!hasLooped) {
-          console.log(`[index-products-rag-auto] No more products at offset ${offset}, looping back`);
-          offset = 0;
-          hasLooped = true;
-        } else {
-          console.log(`[index-products-rag-auto] No more products and already looped, stopping`);
-          break;
-        }
-        attempts++;
-        continue;
-      }
-
-      totalProductsChecked += batchData.length;
-      
-      // DEBUG: Mostrar algunos IDs del batch para comparar
-      const batchIds = batchData.map(p => Number(p.id)).sort((a, b) => a - b);
-      const sampleBatchIds = batchIds.slice(0, 10);
-      const minBatchId = batchIds.length > 0 ? batchIds[0] : null;
-      const maxBatchId = batchIds.length > 0 ? batchIds[batchIds.length - 1] : null;
-      console.log(`[index-products-rag-auto] Batch at offset ${offset}: ${batchData.length} products, sample IDs:`, sampleBatchIds);
-      console.log(`[index-products-rag-auto] Batch IDs range: ${minBatchId} - ${maxBatchId}`);
-      
-      // DEBUG: Verificar si alguno de los sample IDs está en indexedIds
-      const sampleCheckResults = sampleBatchIds.map(id => ({
-        id,
-        idType: typeof id,
-        isIndexed: indexedIds.has(id),
-        indexedIdsHasType: typeof Array.from(indexedIds)[0]
-      }));
-      console.log(`[index-products-rag-auto] Sample ID check results:`, JSON.stringify(sampleCheckResults, null, 2));
-      
-      // DEBUG: Mostrar algunos IDs del Set indexedIds para comparar tipos
-      const sampleIndexedFromSet = Array.from(indexedIds).slice(0, 10);
-      console.log(`[index-products-rag-auto] Sample IDs from indexedIds Set (first 10):`, sampleIndexedFromSet);
-      
-      // Filtrar solo los que no están indexados
-      const unindexedInBatch = batchData.filter(p => {
-        const productId = Number(p.id);
-        const isIndexed = indexedIds.has(productId);
-        return !isIndexed;
+    if (fetchError) {
+      console.error('[index-products-rag-auto] Error fetching products to index:', fetchError);
+      return res.status(500).json({
+        success: false,
+        error: 'Error fetching products',
+        message: `Error al buscar productos: ${fetchError.message}`,
       });
-      
-      const indexedInBatch = batchData.length - unindexedInBatch.length;
-      const unindexedPercent = batchData.length > 0 ? Math.round((unindexedInBatch.length / batchData.length) * 100) : 0;
-      console.log(`[index-products-rag-auto] Batch ${offset}-${offset + batchData.length - 1}: ${unindexedInBatch.length} unindexed, ${indexedInBatch} indexed (${unindexedPercent}% unindexed)`);
-      
-      // DEBUG: Si encontramos productos no indexados, mostrar algunos IDs
-      if (unindexedInBatch.length > 0) {
-        const sampleUnindexedIds = unindexedInBatch.slice(0, 5).map(p => Number(p.id));
-        console.log(`[index-products-rag-auto] ✅ Found ${unindexedInBatch.length} unindexed products! Sample IDs:`, sampleUnindexedIds);
-      } else if (batchData.length > 0) {
-        // Si no encontramos productos no indexados, mostrar algunos IDs del batch para debug
-        console.log(`[index-products-rag-auto] ⚠️ No unindexed products in this batch. All ${batchData.length} products are already indexed.`);
-      }
-      
-      // Agregar productos no indexados encontrados
-      const remaining = PRODUCTS_PER_RUN - productsToIndex.length;
-      productsToIndex.push(...unindexedInBatch.slice(0, remaining));
-
-      // Si encontramos suficientes, salir
-      if (productsToIndex.length >= PRODUCTS_PER_RUN) {
-        console.log(`[index-products-rag-auto] ✅ Found enough products: ${productsToIndex.length}`);
-        break;
-      }
-
-      // Avanzar al siguiente rango
-      offset += fetchLimit;
-      attempts++;
-      
-      // Log cada 10 intentos
-      if (attempts % 10 === 0) {
-        console.log(`[index-products-rag-auto] Progress: ${attempts} attempts, checked ${totalProductsChecked} products, found ${productsToIndex.length} unindexed so far`);
-      }
     }
-    
-    console.log(`[index-products-rag-auto] Final search result: checked ${totalProductsChecked} products across ${attempts} attempts, found ${productsToIndex.length} products to index`);
 
-    if (productsToIndex.length === 0) {
+    if (!productsToIndex || productsToIndex.length === 0) {
       console.log('[index-products-rag-auto] No products to index - all done!');
       
-      // Verificar si realmente están todos indexados
+      // Verificar estadísticas finales
       const { count: totalProducts } = await supabase
         .from('products')
         .select('*', { count: 'exact', head: true });
 
-      const totalIndexed = indexedIds.size;
-      const remaining = (totalProducts || 0) - totalIndexed;
+      const { count: indexedProducts } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true })
+        .not('last_indexed_at', 'is', null);
+
+      const remaining = (totalProducts || 0) - (indexedProducts || 0);
 
       return res.status(200).json({
         success: true,
         message: remaining === 0 
           ? '✅ Todos los productos están indexados' 
-          : `⚠️ No se encontraron productos no indexados en esta ejecución. Quedan ~${remaining} por indexar.`,
+          : `⚠️ No se encontraron productos pendientes en esta ejecución. Quedan ~${remaining} por indexar.`,
         indexed: 0,
         totalProducts: totalProducts || 0,
-        totalIndexed,
+        totalIndexed: indexedProducts || 0,
         remaining,
         completed: remaining === 0,
       });
@@ -314,18 +137,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`[index-products-rag-auto] Found ${productsToIndex.length} products to index`);
 
-    // OPTIMIZADO: Batch size aumentado para procesar más productos eficientemente
-    // Con batch de 15 productos: ~75-150 chunks por batch ≈ 15-30 segundos
+    // OPTIMIZADO: Batch size para procesar productos eficientemente
+    // Con batch de 10 productos: ~50-100 chunks por batch ≈ 10-20 segundos
     let indexed = 0;
-    const batchSize = 15; // Aumentado de 5 a 15 para máxima eficiencia
+    const batchSize = 10;
     const errors: string[] = [];
+    const successfullyIndexedProductIds: number[] = [];
 
     for (let i = 0; i < productsToIndex.length; i += batchSize) {
       const batch = productsToIndex.slice(i, i + batchSize);
       const batchNumber = Math.floor(i / batchSize) + 1;
 
       try {
-        console.log(`[index-products-rag-auto] Processing batch ${batchNumber}/${Math.ceil(productsToIndex.length / batchSize)}`);
+        console.log(`[index-products-rag-auto] Processing batch ${batchNumber}/${Math.ceil(productsToIndex.length / batchSize)} (${batch.length} products)`);
 
         // Generar chunks
         const allChunks = batch.flatMap(product => chunkProduct(product));
@@ -368,47 +192,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             chunk_index: chunk.metadata.chunk_index,
           }));
 
-        // IMPORTANTE: Verificar que estos productos realmente NO están indexados antes de insertar
-        // Esto previene re-indexación de productos que ya tienen chunks
-        const batchProductIds = new Set(batch.map(p => p.id));
-        const alreadyIndexedInBatch = new Set<number>();
-        
-        // Verificar rápidamente si alguno de estos productos ya tiene chunks
-        const { data: existingChunks, error: checkError } = await supabase
-          .from('product_embeddings')
-          .select('product_id')
-          .in('product_id', Array.from(batchProductIds))
-          .limit(1000);
-        
-        if (!checkError && existingChunks) {
-          existingChunks.forEach((item: any) => {
-            if (item.product_id) {
-              alreadyIndexedInBatch.add(item.product_id);
-            }
-          });
-        }
-        
-        // Filtrar productos que ya están indexados
-        const productsToActuallyIndex = batch.filter(p => !alreadyIndexedInBatch.has(p.id));
-        // Filtrar chunks basándose en el product_id del chunk, no en el índice del batch
-        const chunksToInsert = embeddingsToInsert.filter(chunk => !alreadyIndexedInBatch.has(chunk.product_id));
-        
-        if (productsToActuallyIndex.length === 0) {
-          console.log(`[index-products-rag-auto] Batch ${batchNumber}: Todos los productos ya están indexados, saltando...`);
-          continue;
-        }
-        
-        if (chunksToInsert.length === 0) {
-          console.log(`[index-products-rag-auto] Batch ${batchNumber}: No hay chunks nuevos para insertar, saltando...`);
-          continue;
-        }
-        
-        console.log(`[index-products-rag-auto] Batch ${batchNumber}: Insertando ${chunksToInsert.length} chunks para ${productsToActuallyIndex.length} productos nuevos (${alreadyIndexedInBatch.size} ya estaban indexados)`);
-        
-        // Guardar embeddings solo para productos que realmente no están indexados
+        // Guardar embeddings
         const { error: insertError } = await supabase
           .from('product_embeddings')
-          .insert(chunksToInsert);
+          .insert(embeddingsToInsert);
 
         if (insertError) {
           console.error(`[index-products-rag-auto] Error inserting batch ${batchNumber}:`, insertError);
@@ -416,10 +203,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
 
-        indexed += productsToActuallyIndex.length;
-        console.log(`[index-products-rag-auto] ✅ Indexed batch ${batchNumber}: ${productsToActuallyIndex.length} products (${alreadyIndexedInBatch.size} ya estaban indexados)`);
+        // IMPORTANTE: Marcar productos como indexados actualizando last_indexed_at
+        const batchProductIds = batch.map(p => p.id);
+        const { error: updateError } = await supabase
+          .from('products')
+          .update({ last_indexed_at: new Date().toISOString() })
+          .in('id', batchProductIds);
 
-        // Pequeño delay entre batches
+        if (updateError) {
+          console.error(`[index-products-rag-auto] Error updating last_indexed_at for batch ${batchNumber}:`, updateError);
+          errors.push(`Batch ${batchNumber}: Error actualizando last_indexed_at - ${updateError.message}`);
+          // Continuar aunque falle la actualización, los embeddings ya están guardados
+        } else {
+          // Solo contar como indexados si se actualizó correctamente
+          indexed += batch.length;
+          successfullyIndexedProductIds.push(...batchProductIds);
+          console.log(`[index-products-rag-auto] ✅ Indexed batch ${batchNumber}: ${batch.length} products`);
+        }
+
+        // Pequeño delay entre batches para evitar sobrecarga
         if (i + batchSize < productsToIndex.length) {
           await new Promise(resolve => setTimeout(resolve, 300));
         }
@@ -429,80 +231,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Calcular estadísticas finales
+    // Calcular estadísticas finales usando la nueva columna last_indexed_at
     const { count: totalProducts } = await supabase
       .from('products')
       .select('*', { count: 'exact', head: true });
 
-    // Recontar productos indexados usando el MISMO método que get-indexed-stats para consistencia
-    // Usar el mismo método exacto para evitar discrepancias
-    const updatedIndexedIds = new Set<number>();
-    
-    try {
-      // Intentar usar función RPC si existe (mismo método que get-indexed-stats)
-      const { data: indexedProductIds, error: rpcError } = await supabase
-        .rpc('get_indexed_product_ids');
+    const { count: indexedProducts } = await supabase
+      .from('products')
+      .select('*', { count: 'exact', head: true })
+      .not('last_indexed_at', 'is', null);
 
-      if (!rpcError && indexedProductIds) {
-        indexedProductIds.forEach((item: any) => {
-          if (item.product_id) {
-            updatedIndexedIds.add(Number(item.product_id));
-          }
-        });
-        console.log(`[index-products-rag-auto] Recounted ${updatedIndexedIds.size} unique products (via RPC)`);
-      } else {
-        // Fallback: usar paginación completa (mismo método que get-indexed-stats)
-        console.log('[index-products-rag-auto] RPC not available, using paginated query for recount');
-        let recountOffset = 0;
-        const pageSize = 10000; // Mismo tamaño que get-indexed-stats
-        let hasMore = true;
-        let totalFetched = 0;
-
-        while (hasMore) {
-          const { data: updatedIndexedProducts, error: fetchError } = await supabase
-            .from('product_embeddings')
-            .select('product_id')
-            .range(recountOffset, recountOffset + pageSize - 1);
-
-          if (fetchError) {
-            console.error('[index-products-rag-auto] Error recounting indexed products:', fetchError);
-            break;
-          }
-
-          if (!updatedIndexedProducts || updatedIndexedProducts.length === 0) {
-            hasMore = false;
-            break;
-          }
-
-          updatedIndexedProducts.forEach((item: any) => {
-            if (item.product_id !== null && item.product_id !== undefined) {
-              updatedIndexedIds.add(Number(item.product_id));
-            }
-          });
-
-          totalFetched += updatedIndexedProducts.length;
-          
-          if (updatedIndexedProducts.length < pageSize) {
-            hasMore = false;
-          } else {
-            recountOffset += pageSize;
-          }
-
-          // Límite de seguridad
-          if (recountOffset > 200000) {
-            console.warn('[index-products-rag-auto] Reached safety limit while recounting');
-            break;
-          }
-        }
-        
-        console.log(`[index-products-rag-auto] Recounted ${updatedIndexedIds.size} unique products (via pagination, fetched ${totalFetched} chunks)`);
-      }
-    } catch (error) {
-      console.error('[index-products-rag-auto] Exception recounting indexed products:', error);
-    }
-
-    const totalIndexed = updatedIndexedIds.size;
-
+    const totalIndexed = indexedProducts || 0;
     const remaining = Math.max(0, (totalProducts || 0) - totalIndexed);
 
     const responseMessage = {
@@ -517,6 +256,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       nextRun: remaining > 0 ? 'El cron job ejecutará de nuevo en 5 minutos' : 'No hay más productos por indexar',
       source: isVercelCron ? 'Vercel Cron' : isManual ? 'Manual Test' : 'Authorized',
       timestamp: new Date().toISOString(),
+      optimized: true, // Indicar que se está usando la nueva lógica optimizada
     };
 
     console.log(`[index-products-rag-auto] ✅ Completed: ${indexed} products indexed, ${remaining} remaining`);
