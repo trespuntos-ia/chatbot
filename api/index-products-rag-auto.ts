@@ -89,14 +89,101 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Busca productos que:
     // 1. Nunca se han indexado (last_indexed_at IS NULL)
     // 2. O fueron modificados después de la última indexación (last_indexed_at < updated_at)
-    console.log(`[index-products-rag-auto] Searching for products to index using optimized query...`);
     
-    const { data: productsToIndex, error: fetchError } = await supabase
-      .from('products')
-      .select('*')
-      .or('last_indexed_at.is.null,last_indexed_at.lt.updated_at')
-      .order('id', { ascending: true })
-      .limit(PRODUCTS_PER_RUN);
+    // Primero verificar si la columna last_indexed_at existe
+    let useOptimizedQuery = false;
+    try {
+      const { data: testData, error: testError } = await supabase
+        .from('products')
+        .select('last_indexed_at')
+        .limit(1);
+      
+      // Si no hay error, la columna existe
+      if (!testError) {
+        useOptimizedQuery = true;
+        console.log(`[index-products-rag-auto] ✅ Columna last_indexed_at detectada - usando consulta optimizada`);
+      } else {
+        console.log(`[index-products-rag-auto] ⚠️ Columna last_indexed_at no existe - usando lógica de respaldo`);
+        console.log(`[index-products-rag-auto] Error de prueba: ${testError.message}`);
+      }
+    } catch (error) {
+      console.log(`[index-products-rag-auto] ⚠️ No se pudo verificar last_indexed_at - usando lógica de respaldo`);
+    }
+
+    let productsToIndex: any[] = [];
+    let fetchError: any = null;
+
+    if (useOptimizedQuery) {
+      // LÓGICA OPTIMIZADA: Usar last_indexed_at
+      console.log(`[index-products-rag-auto] Searching for products to index using optimized query...`);
+      
+      const result = await supabase
+        .from('products')
+        .select('*')
+        .or('last_indexed_at.is.null,last_indexed_at.lt.updated_at')
+        .order('id', { ascending: true })
+        .limit(PRODUCTS_PER_RUN);
+
+      productsToIndex = result.data || [];
+      fetchError = result.error;
+    } else {
+      // LÓGICA DE RESPALDO: Usar el método antiguo (más lento pero funciona sin last_indexed_at)
+      console.log(`[index-products-rag-auto] Using fallback method to find unindexed products...`);
+      
+      // Obtener IDs de productos ya indexados
+      const indexedIds = new Set<number>();
+      try {
+        const { data: indexedProductIds, error: rpcError } = await supabase
+          .rpc('get_indexed_product_ids');
+
+        if (!rpcError && indexedProductIds) {
+          indexedProductIds.forEach((item: any) => {
+            if (item.product_id !== null && item.product_id !== undefined) {
+              indexedIds.add(Number(item.product_id));
+            }
+          });
+        } else {
+          // Fallback: obtener productos indexados con paginación
+          let offset = 0;
+          const pageSize = 10000;
+          while (true) {
+            const { data: uniqueProducts, error: distinctError } = await supabase
+              .from('product_embeddings')
+              .select('product_id')
+              .range(offset, offset + pageSize - 1);
+
+            if (distinctError || !uniqueProducts || uniqueProducts.length === 0) break;
+
+            uniqueProducts.forEach((item: any) => {
+              if (item.product_id !== null && item.product_id !== undefined) {
+                indexedIds.add(Number(item.product_id));
+              }
+            });
+
+            if (uniqueProducts.length < pageSize) break;
+            offset += pageSize;
+          }
+        }
+      } catch (error) {
+        console.error('[index-products-rag-auto] Error fetching indexed products:', error);
+      }
+
+      // Obtener productos no indexados
+      const { data: allProducts, error: allError } = await supabase
+        .from('products')
+        .select('*')
+        .order('id', { ascending: true })
+        .limit(PRODUCTS_PER_RUN * 3); // Obtener más para filtrar
+
+      if (allError) {
+        fetchError = allError;
+      } else if (allProducts) {
+        // Filtrar productos no indexados
+        productsToIndex = allProducts
+          .filter(p => !indexedIds.has(Number(p.id)))
+          .slice(0, PRODUCTS_PER_RUN);
+      }
+    }
 
     if (fetchError) {
       console.error('[index-products-rag-auto] Error fetching products to index:', fetchError);
@@ -104,6 +191,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         success: false,
         error: 'Error fetching products',
         message: `Error al buscar productos: ${fetchError.message}`,
+        hint: useOptimizedQuery 
+          ? undefined 
+          : 'Ejecuta el SQL en Supabase para habilitar la consulta optimizada. Ver: supabase-add-last-indexed-at.sql',
       });
     }
 
@@ -120,7 +210,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('*', { count: 'exact', head: true })
         .not('last_indexed_at', 'is', null);
 
-      const remaining = (totalProducts || 0) - (indexedProducts || 0);
+      // Calcular remaining usando el método apropiado
+      let remaining = 0;
+      let totalIndexedCount = 0;
+      
+      // Intentar usar last_indexed_at si está disponible
+      try {
+        const { count: indexedProducts } = await supabase
+          .from('products')
+          .select('*', { count: 'exact', head: true })
+          .not('last_indexed_at', 'is', null);
+        
+        if (indexedProducts !== null) {
+          totalIndexedCount = indexedProducts;
+          remaining = (totalProducts || 0) - totalIndexedCount;
+        } else {
+          // Fallback: usar método antiguo
+          const indexedIds = new Set<number>();
+          const { data: indexedProductIds } = await supabase.rpc('get_indexed_product_ids');
+          if (indexedProductIds) {
+            indexedProductIds.forEach((item: any) => {
+              if (item.product_id) indexedIds.add(Number(item.product_id));
+            });
+            totalIndexedCount = indexedIds.size;
+            remaining = (totalProducts || 0) - totalIndexedCount;
+          }
+        }
+      } catch (error) {
+        console.error('[index-products-rag-auto] Error calculating remaining:', error);
+      }
 
       return res.status(200).json({
         success: true,
@@ -129,9 +247,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : `⚠️ No se encontraron productos pendientes en esta ejecución. Quedan ~${remaining} por indexar.`,
         indexed: 0,
         totalProducts: totalProducts || 0,
-        totalIndexed: indexedProducts || 0,
+        totalIndexed: totalIndexedCount,
         remaining,
         completed: remaining === 0,
+        optimized: useOptimizedQuery,
       });
     }
 
@@ -203,22 +322,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
 
-        // IMPORTANTE: Marcar productos como indexados actualizando last_indexed_at
+        // IMPORTANTE: Marcar productos como indexados actualizando last_indexed_at (si existe)
         const batchProductIds = batch.map(p => p.id);
-        const { error: updateError } = await supabase
-          .from('products')
-          .update({ last_indexed_at: new Date().toISOString() })
-          .in('id', batchProductIds);
+        
+        if (useOptimizedQuery) {
+          const { error: updateError } = await supabase
+            .from('products')
+            .update({ last_indexed_at: new Date().toISOString() })
+            .in('id', batchProductIds);
 
-        if (updateError) {
-          console.error(`[index-products-rag-auto] Error updating last_indexed_at for batch ${batchNumber}:`, updateError);
-          errors.push(`Batch ${batchNumber}: Error actualizando last_indexed_at - ${updateError.message}`);
-          // Continuar aunque falle la actualización, los embeddings ya están guardados
+          if (updateError) {
+            console.error(`[index-products-rag-auto] Error updating last_indexed_at for batch ${batchNumber}:`, updateError);
+            errors.push(`Batch ${batchNumber}: Error actualizando last_indexed_at - ${updateError.message}`);
+            // Continuar aunque falle la actualización, los embeddings ya están guardados
+          } else {
+            indexed += batch.length;
+            successfullyIndexedProductIds.push(...batchProductIds);
+            console.log(`[index-products-rag-auto] ✅ Indexed batch ${batchNumber}: ${batch.length} products`);
+          }
         } else {
-          // Solo contar como indexados si se actualizó correctamente
+          // Sin last_indexed_at, solo contar como indexados
           indexed += batch.length;
           successfullyIndexedProductIds.push(...batchProductIds);
-          console.log(`[index-products-rag-auto] ✅ Indexed batch ${batchNumber}: ${batch.length} products`);
+          console.log(`[index-products-rag-auto] ✅ Indexed batch ${batchNumber}: ${batch.length} products (sin last_indexed_at)`);
         }
 
         // Pequeño delay entre batches para evitar sobrecarga
@@ -231,17 +357,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Calcular estadísticas finales usando la nueva columna last_indexed_at
+    // Calcular estadísticas finales
     const { count: totalProducts } = await supabase
       .from('products')
       .select('*', { count: 'exact', head: true });
 
-    const { count: indexedProducts } = await supabase
-      .from('products')
-      .select('*', { count: 'exact', head: true })
-      .not('last_indexed_at', 'is', null);
+    let totalIndexed = 0;
+    if (useOptimizedQuery) {
+      // Usar last_indexed_at si está disponible
+      const { count: indexedProducts } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true })
+        .not('last_indexed_at', 'is', null);
+      totalIndexed = indexedProducts || 0;
+    } else {
+      // Contar productos con embeddings (método antiguo)
+      const indexedIds = new Set<number>();
+      try {
+        const { data: indexedProductIds, error: rpcError } = await supabase
+          .rpc('get_indexed_product_ids');
 
-    const totalIndexed = indexedProducts || 0;
+        if (!rpcError && indexedProductIds) {
+          indexedProductIds.forEach((item: any) => {
+            if (item.product_id !== null && item.product_id !== undefined) {
+              indexedIds.add(Number(item.product_id));
+            }
+          });
+        } else {
+          // Fallback: obtener productos indexados con paginación
+          let offset = 0;
+          const pageSize = 10000;
+          while (true) {
+            const { data: uniqueProducts, error: distinctError } = await supabase
+              .from('product_embeddings')
+              .select('product_id')
+              .range(offset, offset + pageSize - 1);
+
+            if (distinctError || !uniqueProducts || uniqueProducts.length === 0) break;
+
+            uniqueProducts.forEach((item: any) => {
+              if (item.product_id !== null && item.product_id !== undefined) {
+                indexedIds.add(Number(item.product_id));
+              }
+            });
+
+            if (uniqueProducts.length < pageSize) break;
+            offset += pageSize;
+          }
+        }
+        totalIndexed = indexedIds.size;
+      } catch (error) {
+        console.error('[index-products-rag-auto] Error counting indexed products:', error);
+      }
+    }
+
     const remaining = Math.max(0, (totalProducts || 0) - totalIndexed);
 
     const responseMessage = {
