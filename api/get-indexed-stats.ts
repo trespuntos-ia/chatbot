@@ -65,6 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Contar productos únicos indexados - MÉTODO MEJORADO Y MÁS CONFIABLE
     // Usar el mismo método que index-products-rag-auto para consistencia
+    let uniqueProducts = 0;
+    
     if (useOptimizedQuery) {
       // MÉTODO OPTIMIZADO: Usar last_indexed_at (instantáneo)
       const { count: indexedProductsCount, error: countError } = await supabase
