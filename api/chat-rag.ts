@@ -479,13 +479,155 @@ INSTRUCCIONES DE RESPUESTA:
 
 IMPORTANTE: Tu respuesta DEBE reflejar fielmente lo que dice el contexto. No interpretes, no asumas, no deduzcas. Solo repite y organiza la información que está explícitamente escrita. Si después de revisar TODO el contexto (incluyendo description_full y meta_description) no encuentras la información específica, di claramente que no la encontraste.`;
 
+    // Detectar si el usuario está cambiando de tema/producto
+    // Si detectamos un cambio de tema, limitamos el historial para evitar confusión
+    const lowerMessage = message.toLowerCase();
+    
+    // Indicadores claros de cambio de tema (frases completas o contextos específicos)
+    const strongChangeIndicators = [
+      'quiero buscar otro',
+      'buscar otro producto',
+      'otro producto',
+      'diferente producto',
+      'nuevo producto',
+      'otra cosa',
+      'ahora busco',
+      'ahora quiero',
+      'también quiero',
+      'además quiero',
+      'cambiar de',
+      'cambiar a',
+      'recomiéndame', // Cuando se usa solo, indica nueva búsqueda
+      'recomienda',   // Cuando se usa solo, indica nueva búsqueda
+    ];
+    
+    // Indicadores débiles (solo cuentan si aparecen con contexto de búsqueda)
+    const weakChangeIndicators = [
+      'necesito',
+      'busco',
+      'quiero',
+      'dame',
+      'muéstrame',
+      'enseña'
+    ];
+    
+    // Detectar indicadores fuertes
+    const hasStrongIndicator = strongChangeIndicators.some(indicator => 
+      lowerMessage.includes(indicator)
+    );
+    
+    // Detectar indicadores débiles solo si aparecen al inicio o con contexto de búsqueda
+    const hasWeakIndicator = weakChangeIndicators.some(indicator => {
+      const index = lowerMessage.indexOf(indicator);
+      // Solo contar si está al inicio (primeras 50 caracteres) o seguido de palabras de búsqueda
+      if (index === -1) return false;
+      if (index < 50) return true; // Al inicio del mensaje
+      
+      // Verificar si está seguido de palabras relacionadas con productos/búsqueda
+      const afterIndicator = lowerMessage.substring(index + indicator.length, index + indicator.length + 30);
+      const productKeywords = ['producto', 'productos', 'carro', 'carros', 'plato', 'platos', 'copa', 'copas', 'vaso', 'vasos', 'herramienta', 'herramientas', 'máquina', 'maquina', 'equipo', 'equipos'];
+      return productKeywords.some(keyword => afterIndicator.includes(keyword));
+    });
+    
+    const isChangingTopic = hasStrongIndicator || hasWeakIndicator;
+    
+    // También detectar si el mensaje menciona un producto específico diferente
+    // al que se estaba discutiendo en el historial anterior
+    let isDifferentProduct = false;
+    if (conversationHistory.length > 0 && !isChangingTopic) {
+      // Extraer palabras clave del mensaje actual (palabras de 4+ caracteres, excluyendo palabras comunes)
+      const stopWords = ['para', 'sobre', 'tiene', 'puede', 'cual', 'cuales', 'como', 'donde', 'cuando', 'quiero', 'busco', 'necesito', 'dame', 'muestrame', 'recomienda', 'recomiendame'];
+      const currentKeywords = lowerMessage
+        .split(/\s+/)
+        .filter(w => w.length >= 4 && !stopWords.includes(w))
+        .slice(0, 5); // Top 5 palabras clave
+      
+      // Extraer palabras clave del historial anterior
+      const previousMessages = conversationHistory
+        .filter((m: any) => m.role !== 'system')
+        .slice(-4) // Últimos 4 mensajes
+        .map((m: any) => (m.content || '').toLowerCase())
+        .join(' ');
+      
+      const previousKeywords = previousMessages
+        .split(/\s+/)
+        .filter(w => w.length >= 4 && !stopWords.includes(w))
+        .slice(0, 10); // Top 10 palabras clave del historial
+      
+      // Si hay palabras clave en el mensaje actual
+      if (currentKeywords.length > 0 && previousKeywords.length > 0) {
+        // Verificar si hay palabras clave en común
+        const commonKeywords = currentKeywords.filter(ck => 
+          previousKeywords.some(pk => pk.includes(ck) || ck.includes(pk))
+        );
+        
+        // Si menos del 30% de las palabras clave son comunes, probablemente es un producto diferente
+        const similarityRatio = commonKeywords.length / currentKeywords.length;
+        isDifferentProduct = similarityRatio < 0.3;
+        
+        console.log('[chat-rag] Product similarity check:', {
+          currentKeywords,
+          previousKeywords: previousKeywords.slice(0, 5),
+          commonKeywords,
+          similarityRatio,
+          isDifferentProduct
+        });
+      }
+      
+      // También verificar nombres de productos con mayúsculas (más específico)
+      const currentProductMatches = message.match(/([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)/g);
+      const currentProducts = currentProductMatches ? currentProductMatches.map(p => p.toLowerCase()) : [];
+      
+      const previousProductMatches = previousMessages.match(/([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)/g);
+      const previousProducts = previousProductMatches ? previousProductMatches.map(p => p.toLowerCase()) : [];
+      
+      // Si hay productos con mayúsculas y son diferentes, marcar como diferente
+      if (currentProducts.length > 0 && previousProducts.length > 0) {
+        const hasCommonProduct = currentProducts.some(cp => 
+          previousProducts.some(pp => pp.includes(cp) || cp.includes(pp))
+        );
+        if (!hasCommonProduct) {
+          isDifferentProduct = true;
+          console.log('[chat-rag] Different product names detected:', {
+            current: currentProducts,
+            previous: previousProducts
+          });
+        }
+      }
+    }
+    
+    // Determinar si debemos limitar el historial
+    const shouldLimitHistory = isChangingTopic || isDifferentProduct;
+    
+    // Preparar historial de conversación
+    // Si detectamos cambio de tema, solo usar el último intercambio o ninguno
+    let filteredHistory: ChatMessage[] = [];
+    if (shouldLimitHistory) {
+      console.log('[chat-rag] Detected topic change - limiting conversation history');
+      // En caso de cambio de tema, no incluir historial anterior o solo el último mensaje
+      // Esto evita que el modelo se confunda con el contexto anterior
+      filteredHistory = [];
+    } else {
+      // Usar historial normal pero limitado a los últimos 3 mensajes (reducido de 5)
+      filteredHistory = conversationHistory
+        .filter((m: any) => m.role !== 'system')
+        .slice(-3);
+    }
+    
+    console.log('[chat-rag] Conversation history:', {
+      originalLength: conversationHistory.length,
+      filteredLength: filteredHistory.length,
+      isChangingTopic,
+      isDifferentProduct,
+      shouldLimitHistory
+    });
+
     // Log del contexto completo para debugging (útil para detectar problemas)
     console.log('[chat-rag] Full context length:', contextText.length);
     console.log('[chat-rag] Context preview (first 2000 chars):', contextText.substring(0, 2000));
     
     // Verificar si el contexto contiene información relevante sobre la pregunta
     const lowerContext = contextText.toLowerCase();
-    const lowerMessage = message.toLowerCase();
     
     // Extraer palabras clave de la pregunta
     const questionKeywords = lowerMessage
@@ -535,7 +677,7 @@ IMPORTANTE: Tu respuesta DEBE reflejar fielmente lo que dice el contexto. No int
       model: 'gpt-4o', // Actualizado a GPT-4o para mejor calidad y razonamiento
       messages: [
         { role: 'system', content: systemPrompt },
-        ...conversationHistory.filter((m: any) => m.role !== 'system').slice(-5),
+        ...filteredHistory,
         {
           role: 'user',
           content: `Contexto del catálogo (usa SOLO esta información):\n${contextText}\n\nPregunta del usuario: ${message}\n\nINSTRUCCIONES CRÍTICAS:
@@ -611,8 +753,10 @@ IMPORTANTE: Tu respuesta DEBE reflejar fielmente lo que dice el contexto. No int
       content: assistantResponse,
     };
 
+    // Construir historial actualizado
+    // Si limitamos el historial anteriormente, mantener esa limitación en la respuesta
     const updatedHistory: ChatMessage[] = [
-      ...conversationHistory.filter((m: any) => m.role !== 'system'),
+      ...(shouldLimitHistory ? [] : conversationHistory.filter((m: any) => m.role !== 'system')),
       { role: 'user', content: message },
       assistantMessage,
     ];
