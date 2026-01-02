@@ -28,7 +28,7 @@
     position: 'bottom-right', // 'bottom-right' | 'bottom-left'
     buttonColor: '#2563eb',
     theme: 'light', // 'light' | 'dark'
-    zIndex: 9999
+    zIndex: 999999 // Z-index muy alto para aparecer sobre cualquier contenido
   };
 
   // Estado global del widget
@@ -471,10 +471,13 @@
     const container = document.createElement('div');
     container.id = 'chat-widget-container';
     container.style.cssText = `
-      position: fixed;
+      position: fixed !important;
       ${positionStyle}
-      z-index: ${widgetConfig.zIndex};
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      z-index: ${widgetConfig.zIndex} !important;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+      box-sizing: border-box !important;
+      margin: 0 !important;
+      padding: 0 !important;
     `;
 
     // Botón flotante moderno con gradiente
@@ -534,13 +537,16 @@
     const overlay = document.createElement('div');
     overlay.id = 'chat-widget-overlay';
     overlay.style.cssText = `
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.2);
-      z-index: ${widgetConfig.zIndex - 1};
+      position: fixed !important;
+      inset: 0 !important;
+      background: rgba(0, 0, 0, 0.2) !important;
+      z-index: ${widgetConfig.zIndex - 1} !important;
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.3s;
+      box-sizing: border-box !important;
+      margin: 0 !important;
+      padding: 0 !important;
     `;
     overlay.addEventListener('click', () => {
       if (isOpen) toggleWidget();
@@ -550,28 +556,31 @@
     const chatWindow = document.createElement('div');
     chatWindow.id = 'chat-widget-window';
     chatWindow.style.cssText = `
-      position: fixed;
+      position: fixed !important;
       ${positionStyle}
-      width: 100%;
-      max-width: 420px;
-      height: 85vh;
-      max-height: 600px;
-      background: #202020;
-      border: 1px solid #303030;
-      box-shadow: 0 30px 120px -40px rgba(8, 12, 24, 0.85);
-      border-radius: 24px;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
+      width: 100% !important;
+      max-width: 420px !important;
+      height: 85vh !important;
+      max-height: 600px !important;
+      background: #202020 !important;
+      border: 1px solid #303030 !important;
+      box-shadow: 0 30px 120px -40px rgba(8, 12, 24, 0.85) !important;
+      border-radius: 24px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
       opacity: 0;
       pointer-events: none;
       transform: translateY(20px);
       transition: all 0.3s;
-      z-index: ${widgetConfig.zIndex};
+      z-index: ${widgetConfig.zIndex} !important;
       will-change: transform, opacity;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       visibility: hidden;
+      box-sizing: border-box !important;
+      margin: 0 !important;
+      padding: 0 !important;
     `;
 
     // Header
@@ -676,27 +685,60 @@
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+        /* Estilos para evitar conflictos con CSS externo */
+        #chat-widget-container,
+        #chat-widget-button,
+        #chat-widget-window,
+        #chat-widget-overlay {
+          box-sizing: border-box !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        }
         #chat-widget-window * {
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
           text-rendering: optimizeLegibility;
+          box-sizing: border-box;
         }
         #chat-widget-window input,
         #chat-widget-window textarea,
         #chat-widget-window button {
-          -webkit-appearance: none;
-          -moz-appearance: none;
-          appearance: none;
+          -webkit-appearance: none !important;
+          -moz-appearance: none !important;
+          appearance: none !important;
+          box-sizing: border-box !important;
         }
-        #chat-widget-window textarea {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        /* Asegurar que el widget esté siempre visible */
+        #chat-widget-container {
+          position: fixed !important;
+          z-index: ${widgetConfig.zIndex} !important;
         }
         #chat-widget-window {
-          transform: translateZ(0);
-          -webkit-transform: translateZ(0);
+          position: fixed !important;
+          z-index: ${widgetConfig.zIndex} !important;
         }
-        #chat-widget-window * {
+        #chat-widget-overlay {
+          position: fixed !important;
+          z-index: ${widgetConfig.zIndex - 1} !important;
+        }
+        #chat-widget-window textarea {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        }
+        #chat-widget-window {
+          transform: translateZ(0) !important;
+          -webkit-transform: translateZ(0) !important;
+        }
+        /* Prevenir que estilos externos afecten al widget */
+        #chat-widget-container *,
+        #chat-widget-window *,
+        #chat-widget-button * {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        }
+        /* Asegurar que el botón sea visible */
+        #chat-widget-button {
+          position: relative !important;
+          z-index: ${widgetConfig.zIndex} !important;
         }
         #chat-widget-messages {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
