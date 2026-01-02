@@ -242,7 +242,7 @@
     }
     
     // Convertir negrita markdown primero
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight: 600; color: #0f172a;">$1</strong>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight: 600; color: white;">$1</strong>');
     
     // Convertir enlaces markdown
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
@@ -349,7 +349,7 @@
     if (messages.length === 0) {
       messagesContainer.innerHTML = `
         <div style="margin-bottom: 12px;">
-          <div style="max-width: 85%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
+          <div style="max-width: 85%; border-radius: 12px; padding: 12px 16px; background: linear-gradient(to bottom right, #2a2a2a, #252525); border: 1px solid rgba(6, 182, 212, 0.2); color: white;">
             <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
               👋 ¡Bienvenido a 100%Chef!\n\nSi mezclas curiosidad con técnica, estás en el lugar correcto. Cuéntame tu receta… yo pongo la tecnología. ¿En qué puedo ayudarte hoy?
             </div>
@@ -374,7 +374,7 @@
         // Solo mostrar texto introductorio si hay contenido significativo (más de 10 caracteres)
         if (introText && introText.trim().length >= 10) {
           html += `<div style="display: flex; justify-content: flex-start; margin-bottom: 16px;">
-            <div style="max-width: 90%; border-radius: 16px; padding: 12px 16px; background: #f1f5f9; color: #334155;">
+            <div style="max-width: 90%; border-radius: 12px; padding: 12px 16px; background: linear-gradient(to bottom right, #2a2a2a, #252525); border: 1px solid rgba(6, 182, 212, 0.2); color: white;">
               <div style="font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">${introText}</div>
             </div>
           </div>`;
@@ -399,10 +399,10 @@
           : '';
         messageDiv.innerHTML = `
           <div style="display: flex; ${isUser ? 'justify-content: flex-end;' : 'justify-content: flex-start;'}">
-            <div style="max-width: 85%; border-radius: 16px; padding: 12px 16px; ${
+            <div style="max-width: 85%; border-radius: 12px; padding: 12px 16px; ${
               isUser 
-                ? 'background: ' + widgetConfig.buttonColor + '; color: white;' 
-                : 'background: #f1f5f9; color: #334155;'
+                ? 'background: linear-gradient(to right, #06b6d4, #2563eb); color: white;' 
+                : 'background: linear-gradient(to bottom right, #2a2a2a, #252525); border: 1px solid rgba(6, 182, 212, 0.2); color: white;'
             }">
               <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">${isUser ? escapeHtml(message.content) : parseMarkdown(message.content, false)}</div>
               ${timingHtml ? `<div style="margin-top: 12px;">${timingHtml}</div>` : ''}
@@ -471,37 +471,58 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     `;
 
-    // Botón flotante
+    // Botón flotante moderno con gradiente
     const button = document.createElement('button');
     button.id = 'chat-widget-button';
     button.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" style="width: 32px; height: 32px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-      </svg>
+      <div style="position: relative; display: flex; align-items: center; gap: 8px; padding: 0 4px;">
+        <!-- Halo Glow -->
+        <div style="position: absolute; inset: -8px; border-radius: 9999px; background: linear-gradient(to right, rgba(34, 211, 238, 0.75), rgba(59, 130, 246, 0.75), rgba(147, 51, 234, 0.75)); filter: blur(16px); opacity: 0.75; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
+        <!-- Contenedor Principal -->
+        <div style="position: relative; display: flex; align-items: center; gap: 8px; background: linear-gradient(to right, #06b6d4, #2563eb, #9333ea); padding: 12px 20px; border-radius: 9999px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); overflow: hidden;">
+          <!-- Efecto Shine -->
+          <div style="position: absolute; inset: 0; background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.3), transparent); animation: shine 2s infinite;"></div>
+          <!-- Icono -->
+          <svg xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; color: white; position: relative; z-index: 10;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+          </svg>
+          <!-- Texto -->
+          <span style="color: white; font-weight: 500; font-size: 14px; letter-spacing: 0.025em; position: relative; z-index: 10;">Asistente</span>
+        </div>
+      </div>
     `;
     button.style.cssText = `
-      width: 64px;
-      height: 64px;
-      background: ${widgetConfig.buttonColor};
-      color: white;
+      background: transparent;
       border: none;
-      border-radius: 50%;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
       cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.3s;
+      padding: 0;
+      transition: transform 0.2s;
+      position: relative;
     `;
     button.addEventListener('mouseenter', () => {
-      button.style.transform = 'scale(1.1)';
-      button.style.background = adjustBrightness(widgetConfig.buttonColor, -10);
+      button.style.transform = 'scale(1.05)';
     });
     button.addEventListener('mouseleave', () => {
       button.style.transform = 'scale(1)';
-      button.style.background = widgetConfig.buttonColor;
     });
     button.addEventListener('click', toggleWidget);
+    
+    // Añadir animaciones CSS
+    if (!document.getElementById('chat-widget-button-animations')) {
+      const style = document.createElement('style');
+      style.id = 'chat-widget-button-animations';
+      style.textContent = `
+        @keyframes pulse {
+          0%, 100% { opacity: 0.75; }
+          50% { opacity: 1; }
+        }
+        @keyframes shine {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(200%); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
 
     // Overlay
     const overlay = document.createElement('div');
@@ -526,12 +547,13 @@
       position: fixed;
       ${positionStyle}
       width: 100%;
-      max-width: 448px;
+      max-width: 420px;
       height: 85vh;
-      max-height: 700px;
-      background: white;
-      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
-      border-radius: 32px 32px 24px 24px;
+      max-height: 600px;
+      background: #202020;
+      border: 1px solid #303030;
+      box-shadow: 0 30px 120px -40px rgba(8, 12, 24, 0.85);
+      border-radius: 24px;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -550,24 +572,26 @@
     const header = document.createElement('div');
     header.style.cssText = `
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-      padding: 16px 24px;
-      border-bottom: 1px solid #f1f5f9;
+      padding: 20px 24px;
+      border-bottom: 1px solid #2a2a2a;
+      background: #202020;
     `;
     header.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <button id="chat-widget-close" style="padding: 6px; background: transparent; border: none; cursor: pointer; border-radius: 8px; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
-          <svg xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; color: #475569;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+      <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0;">
+        <h2 style="font-size: 20px; font-weight: 600; color: white; margin: 0; letter-spacing: -0.025em;">ChefCopilot</h2>
+        <p style="font-size: 13px; color: rgba(255, 255, 255, 0.7); margin: 0; max-width: 280px;">Tu asesor experto en cocina profesional</p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+        <button id="chat-widget-clear" style="padding: 8px; background: transparent; border: none; cursor: pointer; border-radius: 8px; transition: all 0.2s; color: rgba(255, 255, 255, 0.6);" onmouseover="this.style.background='#26262c'; this.style.color='white';" onmouseout="this.style.background='transparent'; this.style.color='rgba(255, 255, 255, 0.6)';" title="Limpiar conversación">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width: 18px; height: 18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>
         </button>
-        <h2 style="font-size: 18px; font-weight: 600; color: #0f172a; margin: 0;">Hola, ¿qué tal? 👋</h2>
-      </div>
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <button id="chat-widget-clear" style="padding: 6px; background: transparent; border: none; cursor: pointer; border-radius: 8px; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" title="Limpiar conversación">
-          <svg xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; color: #475569;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        <button id="chat-widget-close" style="padding: 8px; background: transparent; border: none; cursor: pointer; border-radius: 8px; transition: all 0.2s; color: rgba(255, 255, 255, 0.6);" onmouseover="this.style.background='#26262c'; this.style.color='white';" onmouseout="this.style.background='transparent'; this.style.color='rgba(255, 255, 255, 0.6)';" title="Cerrar">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width: 18px; height: 18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
@@ -583,38 +607,40 @@
       padding: 16px;
       margin-bottom: 16px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(to bottom, #1a1a1a, #202020);
     `;
 
     // Input container
     const inputContainer = document.createElement('div');
     inputContainer.style.cssText = `
-      border-top: 1px solid #f1f5f9;
+      border-top: 1px solid rgba(6, 182, 212, 0.2);
+      background: linear-gradient(to top, #1a1a1a, transparent);
       padding-top: 12px;
       padding-left: 16px;
       padding-right: 16px;
-      padding-bottom: 8px;
+      padding-bottom: 16px;
     `;
     inputContainer.innerHTML = `
-      <div style="display: flex; gap: 8px;">
+      <div style="display: flex; gap: 8px; align-items: center;">
         <textarea id="chat-widget-input" placeholder="Escribe tu pregunta..." style="
           flex: 1;
-          padding: 10px 16px;
-          border: 1px solid #cbd5e1;
+          padding: 12px 16px;
+          border: 1px solid rgba(6, 182, 212, 0.3);
           border-radius: 12px;
           resize: none;
           font-size: 14px;
           font-family: inherit;
           outline: none;
-          transition: border-color 0.2s;
-          background: white;
-          color: #334155;
+          transition: all 0.2s;
+          background: linear-gradient(to right, #2a2a2a, #252525);
+          color: white;
           -webkit-appearance: none;
           -moz-appearance: none;
           appearance: none;
-        " rows="2"></textarea>
+        " rows="1"></textarea>
         <button id="chat-widget-send" type="button" style="
-          padding: 10px 16px;
-          background: ${widgetConfig.buttonColor};
+          padding: 12px;
+          background: linear-gradient(to right, #06b6d4, #2563eb);
           color: white;
           border: none;
           border-radius: 12px;
@@ -690,7 +716,14 @@
         clearMessages();
       }
     });
-    document.getElementById('chat-widget-send').addEventListener('click', handleSend);
+    const sendButton = document.getElementById('chat-widget-send');
+    sendButton.addEventListener('click', handleSend);
+    sendButton.addEventListener('mouseenter', () => {
+      sendButton.style.background = 'linear-gradient(to right, #22d3ee, #3b82f6)';
+    });
+    sendButton.addEventListener('mouseleave', () => {
+      sendButton.style.background = 'linear-gradient(to right, #06b6d4, #2563eb)';
+    });
     
     const inputElement = document.getElementById('chat-widget-input');
     if (inputElement) {
