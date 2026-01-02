@@ -10,7 +10,7 @@ export function WidgetIntegration() {
   // Generar código de integración - se recalcula automáticamente cuando cambian los valores
   const integrationCode = useMemo(() => {
     return `<!-- Chat Widget – Añade esto antes del cierre de </body> -->
-<script src="${window.location.origin}/chat-widget.js"></script>
+<script src="${window.location.origin}/chat-widget.js?v=2.0.0"></script>
 <script>
   ChatWidget.init({
     apiUrl: '${apiUrl}',

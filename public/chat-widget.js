@@ -1,8 +1,10 @@
 /**
  * Chat Widget Standalone - Embeddable Script
+ * Versión: 2.0.0 - Diseño moderno con ChefCopilot
+ * Última actualización: 2024
  * 
  * Uso:
- * <script src="https://tu-dominio.vercel.app/chat-widget.js"></script>
+ * <script src="https://tu-dominio.vercel.app/chat-widget.js?v=2.0.0"></script>
  * <script>
  *   ChatWidget.init({
  *     apiUrl: 'https://tu-dominio.vercel.app/api',
@@ -15,6 +17,10 @@
 
 (function() {
   'use strict';
+  
+  // Versión del widget para debugging
+  const WIDGET_VERSION = '2.0.0';
+  console.log('[ChatWidget] Versión', WIDGET_VERSION, 'cargada');
 
   // Configuración por defecto
   const DEFAULT_CONFIG = {
