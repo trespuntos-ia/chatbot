@@ -108,7 +108,7 @@ export function WidgetIntegration() {
             </h3>
             <button
               onClick={copyToClipboard}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium text-sm flex items-center gap-2 shadow-sm"
+              className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg hover:from-cyan-400 hover:to-blue-400 transition-all font-medium text-sm flex items-center gap-2 shadow-lg shadow-cyan-500/30 active:scale-95"
             >
               {copied ? (
                 <>
